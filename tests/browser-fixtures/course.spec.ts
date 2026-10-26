@@ -30,6 +30,7 @@ async function fixture(
   examSeconds = 120,
   options: { newUser?: boolean; cancel?: boolean; invalidCode?: boolean } = {},
 ) {
+  page.on('dialog', (dialog) => void dialog.accept());
   const definitions: Record<string, Definition> = {
     [A]: {
       ...theory('Assignment A'),
@@ -163,7 +164,11 @@ async function fixture(
     } else if (path === '/rest/v1/assessment_drafts') {
       const id = url.searchParams.get('assessment_id')?.slice(3);
       response = id ? { document: definitions[id] } : [];
-    } else if (path === '/rest/v1/attempts' || path.endsWith('/rpc/instructor_submissions'))
+    } else if (
+      path === '/rest/v1/attempts' ||
+      path.endsWith('/rpc/instructor_submissions') ||
+      path.endsWith('/rpc/instructor_attempts')
+    )
       response = Object.values(attempts).map((a) => ({
         ...a,
         profiles: {
@@ -188,6 +193,40 @@ async function fixture(
                 feedback: '',
               },
       }));
+    else if (path.endsWith('/rpc/instructor_overview'))
+      response = {
+        students: 1,
+        started_students: Object.values(attempts).length ? 1 : 0,
+        submitted_assignments: 0,
+        submitted_exams: 0,
+        in_progress: Object.values(attempts).length,
+        pending_reviews: 0,
+        graded: 0,
+        published_assignments: 2,
+        published_exams: 1,
+      };
+    else if (path.endsWith('/rpc/instructor_students'))
+      response = {
+        total: 1,
+        rows: [
+          {
+            id: USER,
+            full_name: fullName,
+            email: authUser.email,
+            phone,
+            faculty: profileFaculty,
+            student_id: 'TEST-001',
+            created_at: new Date().toISOString(),
+            started: Object.values(attempts).length,
+            submissions: 0,
+          },
+        ],
+      };
+    else if (path.endsWith('/rpc/instructor_review_context'))
+      response = {
+        keys: { q1: { explanation: 'Explain the saved history and staging area.' } },
+        draft: null,
+      };
     else if (path === '/rest/v1/released_results')
       response = url.searchParams.has('attempt_id') ? null : [];
     else if (path.endsWith('/rpc/start_assessment')) {
@@ -258,6 +297,19 @@ async function fixture(
       path.endsWith('/rpc/grade_assessment')
     )
       response = null;
+    if (path.endsWith('/rpc/instructor_attempts')) {
+      const list = (response as any[]).map((r) => ({
+        ...r,
+        attempt_number: 1,
+        practical_score: r.grading_summaries?.practical_score ?? 0,
+        theory_score: r.grading_summaries?.theory_score ?? null,
+        released: false,
+      }));
+      response = {
+        total: list.length,
+        rows: list.slice(body.p_offset || 0, (body.p_offset || 0) + (body.p_limit || 25)),
+      };
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -324,7 +376,7 @@ test('instructor faculty filter has only canonical faculties and an all option',
 }) => {
   const api = await fixture(page, true);
   await api.login();
-  await page.goto('/ieee-git-lab/#/instructor');
+  await page.goto('/ieee-git-lab/#/instructor/submissions');
   const filter = page.getByRole('combobox', { name: 'Faculty filter', exact: true });
   await expect(filter.getByRole('option')).toHaveText([
     'All faculties',
@@ -572,7 +624,7 @@ test('instructor sees authenticated contact details and can search by email', as
   const api = await fixture(page, true);
   await api.login();
   await api.start(E);
-  await page.goto('/ieee-git-lab/#/instructor');
+  await page.goto('/ieee-git-lab/#/instructor/submissions');
   await expect(page.getByRole('cell', { name: 'fixture@example.test', exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: '+201012345678', exact: true })).toBeVisible();
   await page.getByLabel('Search student name, email or ID').fill('fixture@example.test');
@@ -591,10 +643,10 @@ test('authorized instructor access remains available without a student profile',
   page,
 }) => {
   await fixture(page, true, 120, { newUser: true });
-  await page.goto('/ieee-git-lab/#/instructor');
+  await page.goto('/ieee-git-lab/#/instructor/submissions');
   await page.getByRole('link', { name: 'Sign in', exact: true }).click();
   await page.getByRole('button', { name: 'Continue with Google' }).click();
-  await expect(page.getByRole('heading', { name: 'A clearer view of learning.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Admin Dashboard', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Complete your profile' })).toHaveCount(0);
 });
 
@@ -611,10 +663,126 @@ test('instructor review preserves the attempt ID when the grading summary has it
   await expect(
     page.getByRole('heading', { name: 'Submission received', exact: true }),
   ).toBeVisible();
-  await page.goto('/ieee-git-lab/#/instructor');
+  await page.goto('/ieee-git-lab/#/instructor/submissions');
   await page.getByRole('button', { name: 'Inspect attempt →' }).click();
   await expect(
     page.getByRole('heading', { name: 'Explain how Git saves changes.', exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel('Points (0–10)', { exact: true })).toBeVisible();
+  await page.getByLabel('Points (0–10)', { exact: true }).fill('7.5');
+  await page.getByLabel('Instructor feedback').fill('Explain the next snapshot.');
+  const draft = page.waitForRequest((r) => r.url().endsWith('/rpc/instructor_save_grade_draft'));
+  await page.getByRole('button', { name: 'Save draft grade', exact: true }).click();
+  expect((await draft).postDataJSON().p_grades[0].points).toBe(7.5);
+  await expect(page.getByRole('status')).toContainText('Official marks are unchanged');
+  const finalized = page.waitForRequest((r) => r.url().endsWith('/rpc/grade_assessment'));
+  await page.getByRole('button', { name: 'Finalize grade privately', exact: true }).click();
+  expect((await finalized).postDataJSON().p_release).toBe(false);
+  const release = page.waitForRequest((r) => r.url().endsWith('/rpc/grade_assessment'));
+  await page.getByRole('button', { name: 'Publish grade', exact: true }).click();
+  expect((await release).postDataJSON().p_release).toBe(true);
+});
+
+test('admin navigation loads real-shaped overview, students and dedicated assessment sections', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await page.getByRole('link', { name: 'Admin Dashboard', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await expect(page.getByText('Registered students', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Students', exact: true }).click();
+  await expect(page.getByRole('cell', { name: 'fixture@example.test', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View student', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Student attempts', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Assignments', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'New assignment', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Exams', exact: true }).click();
+  await page.getByRole('link', { name: 'New exam', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Type', exact: true })).toHaveValue('exam');
+  await expect(page.getByLabel('Duration (minutes)', { exact: true })).toHaveValue('30');
+  await page.getByRole('link', { name: 'Question Bank', exact: true }).click();
+  await expect(page.getByLabel('Search questions')).toBeVisible();
+  await page.getByRole('link', { name: 'Results', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+});
+
+test('admin submissions paginate, send filters to the server and export every matching row', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  let last: any = {};
+  const rows = Array.from({ length: 31 }, (_, i) => ({
+    id: 'row-' + i,
+    student_id: USER,
+    assignment_id: A,
+    assignment_version: 1,
+    attempt_number: i + 1,
+    status: 'graded',
+    created_at: '2026-10-01T00:00:00Z',
+    submitted_at: '2026-10-02T00:00:00Z',
+    practical_score: 4,
+    theory_score: 6,
+    released: false,
+    feedback: 'Useful feedback',
+    profiles: {
+      full_name: i === 0 ? '=SUM(A1)' : 'Student ' + i,
+      email: 'student' + i + '@example.test',
+      phone: '+201012345678',
+      faculty: 'engineering',
+    },
+    assignments: { title: 'Assignment A', type: 'assignment' },
+  }));
+  await page.route('**/rpc/instructor_attempts', (route) => {
+    last = route.request().postDataJSON();
+    return route.fulfill({
+      json: { total: 31, rows: rows.slice(last.p_offset, last.p_offset + last.p_limit) },
+    });
+  });
+  await api.login();
+  await page.goto('/ieee-git-lab/#/instructor/submissions');
+  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(25);
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(6);
+  await expect(
+    page.getByRole('cell', { name: 'student30@example.test', exact: true }),
+  ).toBeVisible();
+  await page.getByLabel('Faculty filter').selectOption('engineering');
+  await expect.poll(() => last.p_offset).toBe(0);
+  await page.getByLabel('Assessment type filter').selectOption('assignment');
+  await page.getByLabel('From date').fill('2026-10-01');
+  await expect.poll(() => last.p_from).toBe('2026-10-01T00:00:00Z');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV', exact: true }).click();
+  const file = await download;
+  const fs = await import('node:fs/promises');
+  const csv = await fs.readFile((await file.path())!, 'utf8');
+  expect(csv).toContain('student30@example.test');
+  expect(csv).toContain('"\'=SUM(A1)"');
+  expect(csv).toContain('"4","6","10"');
+  await page.screenshot({ path: 'test-results/admin-submissions-preview.png', fullPage: true });
+});
+
+test('draft editing survives bank search and student preview runs real Git without starting an attempt', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await page.goto('/ieee-git-lab/#/instructor/assessments/' + A);
+  await page.getByLabel('Title', { exact: true }).fill('Unsaved title');
+  await page.getByLabel('Search bank to reuse').fill('staging');
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved title');
+  await page.getByRole('button', { name: 'Preview as student', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Student preview · Unsaved title', exact: true }),
+  ).toBeVisible();
+  await page.getByLabel('Terminal command').fill('git status');
+  await page.getByLabel('Terminal command').press('Enter');
+  await expect(page.getByRole('log')).toContainText('working tree clean');
+  await page.getByRole('button', { name: 'Question preview', exact: true }).click();
+  await expect(page.getByLabel('Your response')).toBeVisible();
+  expect(Object.keys(api.attempts)).toHaveLength(0);
+  expect(api.uploads()).toBe(0);
+  await page.getByRole('button', { name: 'Back to editor', exact: true }).click();
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved title');
 });

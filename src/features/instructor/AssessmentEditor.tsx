@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, ArrowUp, ArrowDown, Copy, Save, Trash2 } from 'lucide-react';
 import { requireBackend } from '../../services/supabase';
 import {
@@ -11,6 +11,8 @@ import {
   type Rule,
   type AssessmentQuestion,
 } from '../assessments/model';
+import { Pagination } from './AdminPages';
+import { StudentPreview } from './StudentPreview';
 import { inspectVerifiedSnapshot } from '../submissions/verify';
 const id = () => crypto.randomUUID();
 const newQuestion = (): AssessmentQuestion => ({
@@ -31,22 +33,40 @@ function move<T>(items: T[], i: number, delta: number) {
   [next[i], next[j]] = [next[j], next[i]];
   return next;
 }
-export function AssessmentManager() {
+export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
+  const [page, setPage] = useState(0),
+    [total, setTotal] = useState(0),
+    [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState('');
-  const load = () =>
-    requireBackend()
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    let query = requireBackend()
       .from('assignments')
-      .select('*,assessment_drafts(document)')
+      .select('*,assessment_drafts(document)', { count: 'exact' })
       .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRows(data || []);
-      });
+      .order('id', { ascending: false })
+      .range(page * 25, page * 25 + 24);
+    if (type) query = query.eq('type', type);
+    const { data, error, count } = await query;
+    if (error) setError(error.message);
+    else {
+      setRows(data || []);
+      setTotal(count || 0);
+    }
+    setLoading(false);
+  };
   useEffect(() => {
     void load();
-  }, []);
+  }, [type, page]);
   const action = async (fn: () => PromiseLike<any>) => {
+    if (
+      !window.confirm(
+        'Apply this assessment change? Active attempts retain their published version.',
+      )
+    )
+      return;
     try {
       const r = await fn();
       if (r.error) throw r.error;
@@ -59,12 +79,25 @@ export function AssessmentManager() {
     <section>
       <div className="page-heading">
         <div>
-          <h2>Assignments & exams</h2>
+          <h2>
+            {type === 'exam'
+              ? 'Exams'
+              : type === 'assignment'
+                ? 'Assignments'
+                : 'Assignments & exams'}
+          </h2>
           <p>Create a draft, configure tasks and questions, then publish an immutable version.</p>
         </div>
-        <Link className="primary" to="/instructor/assessments/new">
+        <Link
+          className="primary"
+          to={'/instructor/assessments/new' + (type ? '?type=' + type : '')}
+        >
           <Plus size={16} />
-          New assessment
+          {type === 'exam'
+            ? 'New exam'
+            : type === 'assignment'
+              ? 'New assignment'
+              : 'New assessment'}
         </Link>
       </div>
       {error && (
@@ -72,6 +105,7 @@ export function AssessmentManager() {
           {error}
         </p>
       )}
+      {loading && <p role="status">Loading assessments…</p>}
       <div className="course-grid">
         {rows.map((r) => (
           <article className="form-card assessment-card" key={r.id}>
@@ -130,21 +164,29 @@ export function AssessmentManager() {
           </article>
         ))}
       </div>
-      {!rows.length && !error && <p>No assessments yet. Create your first draft.</p>}
+      {!loading && !rows.length && !error && <p>No assessments yet. Create your first draft.</p>}
+      <Pagination page={page} total={total} onPage={setPage} />
     </section>
   );
 }
 export function AssessmentEditor() {
   const { id: assessmentId } = useParams();
   const creating = assessmentId === 'new';
-  const [definition, setDefinition] = useState<Definition>(blankDefinition());
+  const [searchParams] = useSearchParams();
+  const [preview, setPreview] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [definition, setDefinition] = useState<Definition>(
+    blankDefinition(searchParams.get('type') === 'exam' ? 'exam' : 'assignment'),
+  );
   const [loading, setLoading] = useState(!creating);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [bank, setBank] = useState<Array<{ id: string; document: AssessmentQuestion }>>([]);
+  const [bankSearch, setBankSearch] = useState('');
   const navigate = useNavigate();
   useEffect(() => {
+    let live = true;
     if (!creating)
       void requireBackend()
         .from('assessment_drafts')
@@ -152,16 +194,35 @@ export function AssessmentEditor() {
         .eq('assessment_id', assessmentId)
         .single()
         .then(({ data, error }) => {
+          if (!live) return;
           if (error) setError(error.message);
           else setDefinition(data.document);
           setLoading(false);
         });
+    return () => {
+      live = false;
+    };
+  }, [assessmentId]);
+  useEffect(() => {
+    let live = true;
     void requireBackend()
       .from('question_bank')
       .select('id,document')
       .eq('archived', false)
-      .then(({ data }) => setBank(data || []));
-  }, [assessmentId]);
+      .ilike('document->>prompt', '%' + bankSearch + '%')
+      .order('updated_at', { ascending: false })
+      .order('id')
+      .limit(100)
+      .then(({ data, error }) => {
+        if (live) {
+          if (error) setError(error.message);
+          else setBank(data || []);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [bankSearch]);
   const update = (patch: Partial<Definition>) => setDefinition({ ...definition, ...patch });
   const sections = definition.sections;
   const setTask = (sectionIndex: number, index: number, task: Task) =>
@@ -171,6 +232,11 @@ export function AssessmentEditor() {
       ),
     });
   const save = async (publish: boolean) => {
+    if (
+      publish &&
+      !window.confirm('Publish a new immutable version and make it available to students?')
+    )
+      return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -198,6 +264,7 @@ export function AssessmentEditor() {
   };
   const points = totals(definition);
   if (loading) return <p>Loading draft…</p>;
+  if (preview) return <StudentPreview definition={definition} close={() => setPreview(false)} />;
   return (
     <div className="assessment-editor">
       <Link className="text-button" to="/instructor/assessments">
@@ -207,10 +274,25 @@ export function AssessmentEditor() {
         <div>
           <h2>{creating ? 'Create assessment' : 'Edit assessment draft'}</h2>
           <p>
-            {points.practical + points.theory} points · {points.bonus} bonus
+            Total marks: {points.practical + points.theory} · {points.bonus} bonus. Set marks on
+            each task and question below.
           </p>
         </div>
         <div className="editor-actions">
+          <button
+            className="outline-button"
+            onClick={() => {
+              try {
+                assertDefinition(definition);
+                setPreviewError('');
+                setPreview(true);
+              } catch (e) {
+                setPreviewError(String(e));
+              }
+            }}
+          >
+            Preview as student
+          </button>
           <button className="outline-button" disabled={busy} onClick={() => void save(false)}>
             <Save size={15} />
             Save draft
@@ -220,6 +302,11 @@ export function AssessmentEditor() {
           </button>
         </div>
       </div>
+      {previewError && (
+        <p role="alert" className="error">
+          {previewError}
+        </p>
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -665,6 +752,17 @@ export function AssessmentEditor() {
               Add question
             </button>
           </div>
+          <label>
+            Search the question bank
+            <input
+              aria-label="Search bank to reuse"
+              value={bankSearch}
+              onChange={(e) => setBankSearch(e.target.value)}
+            />
+            <small>
+              Shows up to 100 matching questions. Refine the search to find another question.
+            </small>
+          </label>
           {bank.length > 0 && (
             <label>
               Reuse a question from the bank
@@ -793,6 +891,26 @@ function RuleEditor({
           ))}
         </select>
       </label>
+      <p className="muted">
+        {
+          {
+            repository:
+              'Checks that Git is initialized, with the selected current branch and optional clean working files.',
+            file: 'Checks the named file in working files or the committed history of the selected branch.',
+            branch: 'Checks that the named branch has committed history.',
+            commits: 'Counts commits reachable from the selected branch.',
+            message: 'Finds the required message in the selected branch history.',
+            merged:
+              'Checks source history is included in the receiving branch, with an optional merge commit.',
+            isolation: 'Checks that the file was introduced by a new commit on the source branch.',
+            legacy: 'Preserves the original Assignment 01 scoring rule.',
+          }[r.type]
+        }
+      </p>
+      <small>
+        Rules in one task must all pass to earn its points. Add a separate scored task for each
+        requirement that should earn partial credit.
+      </small>
       {(r.type === 'repository' || r.type === 'branch') && (
         <label>
           Required branch
@@ -1038,25 +1156,50 @@ export function QuestionEditor({
     </div>
   );
 }
+
 export function QuestionBank() {
   const [rows, setRows] = useState<
-    Array<{ id: string; document: AssessmentQuestion; archived: boolean }>
-  >([]);
-  const [editing, setEditing] = useState<AssessmentQuestion | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const load = () =>
-    requireBackend()
-      .from('question_bank')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRows(data || []);
-      });
+      Array<{ id: string; document: AssessmentQuestion; archived: boolean }>
+    >([]),
+    [editing, setEditing] = useState<AssessmentQuestion | null>(null),
+    [selected, setSelected] = useState<string | null>(null),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState(''),
+    [search, setSearch] = useState(''),
+    [kind, setKind] = useState(''),
+    [page, setPage] = useState(0),
+    [total, setTotal] = useState(0),
+    [loading, setLoading] = useState(true),
+    [refresh, setRefresh] = useState(0),
+    [busy, setBusy] = useState(false);
   useEffect(() => {
-    void load();
-  }, []);
+    let live = true;
+    setLoading(true);
+    setError('');
+    const timer = setTimeout(() => {
+      let query = requireBackend()
+        .from('question_bank')
+        .select('*', { count: 'exact' })
+        .order('updated_at', { ascending: false })
+        .order('id')
+        .range(page * 25, page * 25 + 24);
+      if (search) query = query.ilike('document->>prompt', '%' + search + '%');
+      if (kind) query = query.eq('document->>kind', kind);
+      void query.then(({ data, error, count }) => {
+        if (!live) return;
+        if (error) setError(error.message);
+        else {
+          setRows(data || []);
+          setTotal(count || 0);
+        }
+        setLoading(false);
+      });
+    }, 150);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [search, kind, page, refresh]);
   return (
     <section className="form-card editor-fields">
       <div className="page-heading">
@@ -1066,34 +1209,73 @@ export function QuestionBank() {
           onClick={() => {
             setEditing(newQuestion());
             setSelected(null);
+            setError('');
           }}
         >
           Create question
         </button>
       </div>
       <p>
-        Removing a bank question never changes a published assessment. Archived questions can be
-        restored.
+        Private answer keys and rubrics remain available only to instructors. Archiving never
+        changes published assessments.
       </p>
+      <div className="table-toolbar">
+        <input
+          aria-label="Search questions"
+          placeholder="Search question text"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+        />
+        <select
+          aria-label="Question type filter"
+          value={kind}
+          onChange={(e) => {
+            setKind(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="">All question types</option>
+          {['single', 'multiple', 'boolean', 'short', 'long', 'scenario', 'interpretation'].map(
+            (t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ),
+          )}
+        </select>
+      </div>
       {error && (
         <p role="alert" className="error">
           {error}
         </p>
       )}
+      {notice && <p role="status">{notice}</p>}
       {editing && (
         <div className="builder-question">
           <QuestionEditor value={editing} onChange={setEditing} />
           <button
             className="primary"
+            disabled={busy}
             onClick={async () => {
-              const { error } = await requireBackend().rpc('save_bank_question', {
-                p_id: selected,
-                p_document: editing,
-              });
-              if (error) setError(error.message);
-              else {
+              setBusy(true);
+              setError('');
+              try {
+                assertDefinition({ ...blankDefinition(), format: 'theory', questions: [editing] });
+                const { error } = await requireBackend().rpc('save_bank_question', {
+                  p_id: selected,
+                  p_document: editing,
+                });
+                if (error) throw error;
                 setEditing(null);
-                void load();
+                setNotice('Question saved.');
+                setRefresh((n) => n + 1);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              } finally {
+                setBusy(false);
               }
             }}
           >
@@ -1104,38 +1286,58 @@ export function QuestionBank() {
           </button>
         </div>
       )}
-      {rows.map((q) => (
-        <article className="bank-row" key={q.id}>
-          <div>
-            <strong>{q.document.prompt}</strong>
-            <small>
-              {q.document.kind} · {q.document.points} points {q.archived ? '· Archived' : ''}
-            </small>
-          </div>
-          <button
-            className="text-button"
-            onClick={() => {
-              setSelected(q.id);
-              setEditing(q.document);
-            }}
-          >
-            Edit
-          </button>
-          <button
-            className="text-button"
-            onClick={async () => {
-              const { error } = await requireBackend().rpc('archive_bank_question', {
-                p_id: q.id,
-                p_archived: !q.archived,
-              });
-              if (error) setError(error.message);
-              else void load();
-            }}
-          >
-            {q.archived ? 'Restore' : 'Delete from bank'}
-          </button>
-        </article>
-      ))}
+      {loading ? (
+        <p role="status">Loading questions…</p>
+      ) : (
+        <>
+          {rows.map((q) => (
+            <article className="bank-row" key={q.id}>
+              <div>
+                <strong>{q.document.prompt}</strong>
+                <small>
+                  {q.document.kind} · {q.document.points} points {q.archived ? '· Archived' : ''}
+                </small>
+              </div>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setSelected(q.id);
+                  setEditing(structuredClone(q.document));
+                  setError('');
+                }}
+              >
+                Edit
+              </button>
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      q.archived
+                        ? 'Restore this bank question?'
+                        : 'Archive this bank question? Published versions remain unchanged.',
+                    )
+                  )
+                    return;
+                  setBusy(true);
+                  const { error } = await requireBackend().rpc('archive_bank_question', {
+                    p_id: q.id,
+                    p_archived: !q.archived,
+                  });
+                  if (error) setError(error.message);
+                  else setRefresh((n) => n + 1);
+                  setBusy(false);
+                }}
+              >
+                {q.archived ? 'Restore' : 'Archive question'}
+              </button>
+            </article>
+          ))}
+          {!rows.length && !error && <p>No questions match your filters.</p>}
+          <Pagination page={page} total={total} onPage={setPage} />
+        </>
+      )}
     </section>
   );
 }

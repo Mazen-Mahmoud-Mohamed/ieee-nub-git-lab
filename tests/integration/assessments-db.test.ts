@@ -84,6 +84,13 @@ beforeAll(async () => {
   await db.exec(
     "update public.profiles set phone='+201012345678' where student_id in ('A001','B001')",
   );
+  await db.exec('alter table auth.users add column created_at timestamptz not null default now()');
+  await db.exec(
+    readFileSync('supabase/migrations/20261027000000_instructor_dashboard.sql', 'utf8'),
+  );
+  await db.exec(
+    readFileSync('supabase/migrations/20261027001000_review_checkpoint_context.sql', 'utf8'),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -389,5 +396,167 @@ describe.sequential('authenticated profile completion and submission identity', 
         )
       ).rows[0].result.status,
     ).toBe('expired');
+  });
+});
+
+describe.sequential('instructor dashboard authorization and pagination', () => {
+  it('denies every dashboard RPC and private data to students', async () => {
+    for (const call of [
+      'instructor_overview()',
+      'instructor_students()',
+      'instructor_attempts()',
+      "instructor_review_context('" + LEGACY + "')",
+      "instructor_save_grade_draft('" + LEGACY + "','[]','')",
+    ])
+      await expect(user(A, 'select public.' + call)).rejects.toThrow('Instructor authorization');
+    await expect(user(A, 'select * from private.grading_drafts')).rejects.toThrow();
+  });
+  it('retrieves all submissions across bounded, stable pages without dropping older submissions', async () => {
+    await db.exec('reset role');
+    await db.exec(
+      "insert into auth.users(id,email,email_confirmed_at) values('88888888-8888-4888-8888-888888888888','no-profile@example.test',now());insert into public.profiles(id,full_name,phone,faculty,university,department) values('88888888-8888-4888-8888-888888888888','Pagination Student','+201012345678','engineering','Nahda University','Engineering');insert into public.attempts(student_id,assignment_id,assignment_version,attempt_number,status) select '88888888-8888-4888-8888-888888888888','" +
+        assignment +
+        "',1,n,'submitted' from generate_series(1,31) n",
+    );
+    const ids: string[] = [];
+    let total = Infinity;
+    for (let offset = 0; offset < total; offset += 7) {
+      const result = (
+        await user(
+          I,
+          'select public.instructor_attempts(p_offset=>' + offset + ',p_limit=>7) as result',
+        )
+      ).rows[0].result;
+      total = result.total;
+      ids.push(...result.rows.map((r: any) => r.id));
+    }
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBe(
+      Number(
+        (await root("select count(*) as n from public.attempts where status<>'in_progress'"))
+          .rows[0].n,
+      ),
+    );
+    const orphan = (
+      await user(
+        I,
+        "select public.instructor_attempts(p_search=>'no-profile@example.test') as result",
+      )
+    ).rows[0].result;
+    expect(orphan.total).toBe(31);
+    expect(orphan.rows[0].profiles.email).toBe('no-profile@example.test');
+    await expect(user(I, 'select public.instructor_attempts(p_limit=>101)')).rejects.toThrow(
+      'Invalid page',
+    );
+    await expect(user(I, 'select public.instructor_students(p_limit=>null)')).rejects.toThrow(
+      'Invalid page',
+    );
+  });
+  it('returns real overview counts and only allowed student contact fields', async () => {
+    const overview = (await user(I, 'select public.instructor_overview() as result')).rows[0]
+      .result;
+    expect(overview.in_progress).toBe(
+      Number(
+        (await root("select count(*) as n from public.attempts where status='in_progress'")).rows[0]
+          .n,
+      ),
+    );
+    const students = (
+      await user(
+        I,
+        "select public.instructor_students(p_search=>'no-profile@example.test') as result",
+      )
+    ).rows[0].result;
+    expect(students.total).toBe(1);
+    expect(students.rows[0].started).toBe(31);
+    expect(students.rows[0].submissions).toBe(31);
+    expect(Object.keys(students.rows[0]).sort()).toEqual(
+      [
+        'id',
+        'full_name',
+        'email',
+        'phone',
+        'faculty',
+        'student_id',
+        'created_at',
+        'started',
+        'submissions',
+      ].sort(),
+    );
+    const filtered = (
+      await user(
+        I,
+        "select public.instructor_attempts(p_type=>'exam',p_status=>'expired') as result",
+      )
+    ).rows[0].result;
+    expect(
+      filtered.rows.every((r: any) => r.assignments.type === 'exam' && r.status === 'expired'),
+    ).toBe(true);
+  });
+  it('keeps partial grading drafts separate, exposes pinned keys only to instructors and releases explicitly', async () => {
+    const id = '99999999-9999-4999-8999-999999999999';
+    await db.exec('reset role');
+    await db.exec(
+      "insert into public.attempts(id,student_id,assignment_id,assignment_version,attempt_number,status) values('" +
+        id +
+        "','" +
+        A +
+        "','" +
+        assignment +
+        "',1,90,'submitted');insert into public.grading_summaries(attempt_id,practical_score) values('" +
+        id +
+        "',0)",
+    );
+    const context = (
+      await user(I, "select public.instructor_review_context('" + id + "') as result")
+    ).rows[0].result;
+    expect(context.keys['q-objective'].correctAnswers).toEqual(['True']);
+    await user(
+      I,
+      "select public.instructor_save_grade_draft('" +
+        id +
+        '\',\'[{"question_id":"q-written","points":4}]\',\'Helpful feedback\')',
+    );
+    expect(
+      (await root("select status from public.attempts where id='" + id + "'")).rows[0].status,
+    ).toBe('submitted');
+    expect(
+      (await user(A, "select * from public.grading_summaries where attempt_id='" + id + "'")).rows,
+    ).toHaveLength(0);
+    await expect(
+      user(
+        I,
+        "select public.instructor_save_grade_draft('" +
+          id +
+          '\',\'[{"question_id":"q-written","points":6}]\',\'\')',
+      ),
+    ).rejects.toThrow('Invalid draft mark');
+    await user(
+      I,
+      "select public.grade_assessment('" +
+        id +
+        '\',\'[{"question_id":"q-written","points":4}]\',\'Helpful feedback\',false)',
+    );
+    expect(
+      (await root("select count(*) as n from private.grading_drafts where attempt_id='" + id + "'"))
+        .rows[0].n,
+    ).toBe(0);
+    expect(
+      (await user(A, "select * from public.grading_summaries where attempt_id='" + id + "'")).rows,
+    ).toHaveLength(0);
+    await user(
+      I,
+      "select public.grade_assessment('" +
+        id +
+        '\',\'[{"question_id":"q-written","points":4}]\',\'Helpful feedback\',true)',
+    );
+    expect(
+      (
+        await user(
+          A,
+          "select theory_score from public.grading_summaries where attempt_id='" + id + "'",
+        )
+      ).rows[0].theory_score,
+    ).toBe('4');
   });
 });

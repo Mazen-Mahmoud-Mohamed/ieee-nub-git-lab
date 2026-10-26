@@ -213,7 +213,7 @@ export function App() {
             <TerminalSquare size={15} />
             {course.active ? 'Assessment' : 'Practice lab'}
           </NavLink>
-          {isInstructor && <NavLink to="/instructor">Instructor</NavLink>}
+          {isInstructor && <NavLink to="/instructor">Admin Dashboard</NavLink>}
         </nav>
         <div className="header-actions">
           <button
