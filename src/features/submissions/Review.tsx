@@ -38,14 +38,7 @@ export function Review({
   const [agreed, setAgreed] = useState(false);
   const questions = definition.questions.filter((q) => q.points > 0);
   const reflectionQuestions = definition.questions.filter((q) => q.points === 0);
-  const working = Object.fromEntries(
-    Object.entries(lab.engine.fs.entries)
-      .filter(([p, e]) => p.endsWith('.txt') && !p.includes('/.git/') && e.kind === 'file')
-      .map(([p, e]) => [
-        p.slice(lab.engine.dir.length + 1),
-        new TextDecoder().decode(new Uint8Array(e.data)),
-      ]),
-  );
+  const working = lab.working;
   const outcomes = outcomesFor(definition, lab.view, identity, working);
   const points = totals(definition);
   const complete =
@@ -125,7 +118,14 @@ export function Review({
         <div className="review-actions">
           <button
             className="outline-button"
-            onClick={() => downloadJSON('ieee-git-lab-backup.json', lab.snapshot())}
+            disabled={!lab.ready || busy}
+            onClick={async () => {
+              try {
+                downloadJSON('ieee-git-lab-backup.json', await lab.capture());
+              } catch (e) {
+                setError(String(e));
+              }
+            }}
           >
             <Download size={16} />
             Export backup
@@ -134,6 +134,8 @@ export function Review({
             className="primary"
             disabled={
               busy ||
+              lab.busy ||
+              !lab.ready ||
               !agreed ||
               !complete ||
               !answered ||
@@ -153,13 +155,14 @@ export function Review({
                 }
                 const client = requireBackend();
                 const pending = await loadOutbox(lab.attemptId!);
+                const saved = await lab.capture();
                 const payload = pending || {
                   version: 1,
                   attemptId: lab.attemptId,
                   idempotencyKey: crypto.randomUUID(),
-                  snapshot: lab.engine.fs.snapshot(),
-                  answers: lab.answers,
-                  events: lab.engine.events,
+                  snapshot: saved.snapshot,
+                  answers: saved.answers,
+                  events: saved.events,
                 };
                 await saveOutbox(lab.attemptId!, payload);
                 await lab.persist();

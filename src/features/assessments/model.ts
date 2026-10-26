@@ -381,7 +381,12 @@ export function outcomesFor(
   identity: StudentIdentity,
   working: Record<string, string> = {},
 ): Array<Outcome & { feedback: string[] }> {
-  const legacy = () => validateRepository(view, identity);
+  const legacyResults = d.sections.some((s) =>
+    s.tasks.some((t) => t.rules.some((r) => r.type === 'legacy')),
+  )
+    ? validateRepository(view, identity)
+    : [];
+  const legacy = () => legacyResults;
   const commits = new Map(view.commits.map((c) => [c.oid, c]));
   const ancestors = (ref: string) => {
     const seen = new Set<string>();

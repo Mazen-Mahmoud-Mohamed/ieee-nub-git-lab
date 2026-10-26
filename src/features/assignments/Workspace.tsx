@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -15,14 +15,15 @@ import {
   BookOpen,
   FolderOpen,
   Info,
-  CheckCircle2,
 } from 'lucide-react';
 import { type StudentIdentity } from './assignment';
-import { firstAssessment, outcomesFor, totals, type Definition } from '../assessments/model';
+import { firstAssessment, type Definition } from '../assessments/model';
 import type { Lab } from '../../hooks/useLab';
 import { GitGraph } from '../../components/GitGraph';
 import { Terminal } from '../terminal/Terminal';
 import { PracticeIdentity } from './PracticeIdentity';
+import { requirementProgress } from '../assessments/requirements';
+import { TaskInstructions } from './TaskInstructions';
 export function Workspace({
   lab,
   identity,
@@ -40,54 +41,92 @@ export function Workspace({
   const [text, setText] = useState('');
   const [tab, setTab] = useState<'files' | 'history'>('files');
   const [section, setSection] = useState(definition.sections[0]?.id || '');
-  const assignment = {
-    ...definition,
-    sections: definition.sections.map((s, i) => ({
-      ...s,
-      tag: String(i + 1).padStart(2, '0'),
-      points: s.tasks.reduce((n, t) => n + t.points, 0),
-    })),
-  };
   const [expanded, setExpanded] = useState(false);
   const [newFile, setNewFile] = useState(false);
   const [filename, setFilename] = useState('');
   const [localError, setLocalError] = useState('');
-  const files = Object.keys(lab.engine.fs.entries).filter(
-    (p) => p.endsWith('.txt') && !p.includes('/.git/') && lab.engine.fs.entries[p].kind === 'file',
+  const files = Object.keys(lab.working).map((p) => lab.engine.dir + '/' + p);
+  const draft = useRef<{ path: string; version: number } | null>(null);
+  const editVersion = useRef(0);
+  const focusEditor = useRef(false);
+  const currentKey = useRef(lab.key);
+  currentKey.current = lab.key;
+  const [terminalHeight, setTerminalHeight] = useState(280),
+    [instructionsWidth, setInstructionsWidth] = useState(360);
+  const [feedback, setFeedback] = useState('');
+  const previous = useRef<{ key: string; done: Set<string> } | undefined>(undefined);
+  const progress = useMemo(
+    () =>
+      requirementProgress(
+        definition,
+        lab.view,
+        identity,
+        lab.working,
+        lab.busy,
+        lab.validationError,
+      ),
+    [
+      definition,
+      lab.view,
+      lab.working,
+      lab.busy,
+      lab.validationError,
+      identity.full_name,
+      identity.department,
+    ],
   );
   useEffect(() => {
-    let live = true;
-    if (selected && files.includes(selected))
-      lab.engine.read(selected).then((t) => {
-        if (live) setText(t);
-      });
-    else if (selected) {
+    if (!lab.ready || lab.busy) return;
+    const done = new Set(
+      progress
+        .flatMap((p) => p.requirements)
+        .filter((c) => c.passed === true)
+        .map((c) => c.id),
+    );
+    if (!previous.current || previous.current.key !== lab.key) {
+      previous.current = { key: lab.key, done };
+      setFeedback('');
+      return;
+    }
+    const changed = progress
+      .flatMap((p) => p.requirements)
+      .filter((c) => c.passed === true && !previous.current!.done.has(c.id));
+    setFeedback(
+      changed.length
+        ? 'Requirement completed: ' +
+            changed
+              .slice(0, 2)
+              .map((c) => c.label)
+              .join('; ') +
+            (changed.length > 2 ? ' · ' + (changed.length - 2) + ' more' : '')
+        : '',
+    );
+    previous.current = { key: lab.key, done };
+  }, [lab.key, lab.ready, lab.busy, lab.revision, progress]);
+  useEffect(() => {
+    if (!selected) return;
+    if (!files.includes(selected)) {
       setSelected('');
       setText('');
+      draft.current = null;
+      return;
     }
-    return () => {
-      live = false;
-    };
-  }, [selected, lab.revision]);
-  const working = Object.fromEntries(
-    files.map((p) => [
-      p.slice(lab.engine.dir.length + 1),
-      new TextDecoder().decode(new Uint8Array(lab.engine.fs.entries[p].data)),
-    ]),
-  );
-  const outcomes = outcomesFor(definition, lab.view, identity, working);
-  const points = totals(definition);
-  const required = outcomes.filter((o) => !o.bonus);
-  const complete = required.filter((o) => o.passed).length;
-  const current = assignment.sections.find((s) => s.id === section) ||
-    assignment.sections[0] || {
-      id: 'empty',
-      title: 'No practical tasks',
-      description: 'Continue to the theory questions.',
-      steps: [],
-      tag: '',
-      tasks: [],
-    };
+    if (draft.current?.path === selected) return;
+    setText(lab.working[selected.slice(lab.engine.dir.length + 1)] || '');
+  }, [selected, lab.revision, lab.key]);
+  const previousFiles = useRef<{ key: string; files: Set<string> } | undefined>(undefined);
+  useEffect(() => {
+    const before = previousFiles.current;
+    const now = new Set(files);
+    if (before?.key === lab.key && !selected) {
+      const created = files.find((p) => !before.files.has(p));
+      if (created) {
+        setText(lab.working[created.slice(lab.engine.dir.length + 1)] || '');
+        setSelected(created);
+      }
+    }
+    previousFiles.current = { key: lab.key, files: now };
+  }, [lab.key, lab.revision]);
   if (!lab.ready) return <div className="page">Restoring your workspace…</div>;
   return (
     <div className={'workspace ' + (expanded ? 'terminal-focused' : '')}>
@@ -116,7 +155,15 @@ export function Workspace({
         <Info size={16} />A desktop keyboard gives you the best terminal experience. Instructions
         and questions work on mobile.
       </div>
-      <div className="workspace-grid">
+      <div
+        className="workspace-grid"
+        style={
+          {
+            '--terminal-height': terminalHeight + 'px',
+            '--instructions-width': instructionsWidth + 'px',
+          } as CSSProperties
+        }
+      >
         <aside className="explorer">
           <div className="panel-heading">
             <span>Files</span>
@@ -154,14 +201,12 @@ export function Workspace({
                     e.preventDefault();
                     if (lab.readOnly) return;
                     try {
-                      if (!lab.engine.fs.entries[lab.engine.dir])
-                        throw new Error(
-                          'Create the assessment project directory with mkdir first.',
-                        );
+                      const expectedKey = lab.key;
                       const path = lab.engine.dir + '/' + filename;
-                      if (lab.engine.fs.entries[path]) throw new Error('File already exists');
-                      await lab.engine.write(path, '');
-                      await lab.refresh();
+                      await lab.createTextFile(filename);
+                      if (currentKey.current !== expectedKey) return;
+                      setText('');
+                      focusEditor.current = true;
                       setSelected(path);
                       setNewFile(false);
                       setFilename('');
@@ -190,7 +235,12 @@ export function Workspace({
                     <button
                       className={'file-row ' + (selected === p ? 'selected' : '')}
                       key={p}
-                      onClick={() => setSelected(p)}
+                      onClick={() => {
+                        draft.current = null;
+                        setText(lab.working[p.slice(lab.engine.dir.length + 1)] || '');
+                        focusEditor.current = selected !== p;
+                        setSelected(p);
+                      }}
                     >
                       <FileText size={15} />
                       <span>{p.replace(lab.engine.dir + '/', '')}</span>
@@ -239,9 +289,14 @@ export function Workspace({
             </div>
             {selected ? (
               <CodeMirror
-                onCreateEditor={(view) =>
-                  view.contentDOM.setAttribute('aria-label', 'Text file editor')
-                }
+                key={selected}
+                onCreateEditor={(view) => {
+                  view.contentDOM.setAttribute('aria-label', 'Text file editor');
+                  if (focusEditor.current) {
+                    view.focus();
+                    focusEditor.current = false;
+                  }
+                }}
                 aria-label="Text file editor"
                 value={text}
                 height="100%"
@@ -250,7 +305,14 @@ export function Workspace({
                 basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
                 onChange={(value) => {
                   setText(value);
-                  void lab.write(selected, value);
+                  const version = ++editVersion.current;
+                  draft.current = { path: selected, version };
+                  void lab
+                    .write(selected, value)
+                    .catch(() => {})
+                    .finally(() => {
+                      if (draft.current?.version === version) draft.current = null;
+                    });
                 }}
               />
             ) : (
@@ -258,30 +320,12 @@ export function Workspace({
                 <div className="welcome-mark">
                   <GitBranch size={34} />
                 </div>
-                <span className="eyebrow">A LITTLE PRACTICE. A LASTING SKILL.</span>
-                <h2>
-                  Your next chapter
-                  <br />
-                  starts with a commit.
-                </h2>
+                <h2>Select a file from the left panel to start editing.</h2>
                 <p>
-                  This is your space to learn Git by doing.
-                  <br />
-                  Create your project in the terminal below, then
-                  <br />
-                  select a text file to start editing.
+                  The built-in Text Editor replaces Notepad, nano and Vim. Create a text file in
+                  your project, then select it from Files. Your changes save automatically on this
+                  device.
                 </p>
-                <div className="welcome-steps">
-                  <span>
-                    <b>01</b>Read your mission
-                  </span>
-                  <span>
-                    <b>02</b>Build in the terminal
-                  </span>
-                  <span>
-                    <b>03</b>Watch your history grow
-                  </span>
-                </div>
                 <button className="outline-button" onClick={() => void lab.command('help')}>
                   <BookOpen size={15} />
                   Explore terminal commands
@@ -294,162 +338,50 @@ export function Workspace({
               <span>{selected ? text.split('\n').length + ' lines' : 'Ready when you are'}</span>
             </div>
           </div>
-          <Terminal lab={lab} expanded={expanded} onExpand={() => setExpanded(!expanded)} />
-        </div>
-        <aside className="instructions">
-          <div className="panel-heading">
-            <span>
-              <BookOpen size={15} /> Task Instructions
-            </span>
-            <span className="dim">Progress</span>
-          </div>
-          <div className="instruction-scroll">
-            <div className="assignment-label">
-              {definition.type.toUpperCase()} <span>GIT COURSE</span>
-            </div>
-            <h1>{definition.title}</h1>
-            <details className="workspace-guide">
-              <summary>How to use this workspace</summary>
-              <p>1. Read the current task below.</p>
-              <p>
-                2. Use Files to create or open a text file. Edit its contents in the Text Editor.
-                Changes save automatically on this device.
-              </p>
-              <p>
-                3. Type Git commands in the Git Terminal and press Enter. Use ↑ and ↓ for command
-                history.
-              </p>
-              <p>4. Watch Progress for completed tasks, then continue to theory or review.</p>
-            </details>
-            <div className="progress-heading">
-              <span>Your progress</span>
-              <strong>
-                {complete} / {required.length} outcomes
-              </strong>
-            </div>
-            <div className="progress-track">
-              <div
-                style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
+          <details className="workspace-layout-controls">
+            <summary>Resize panels</summary>
+            <label>
+              Terminal height
+              <input
+                aria-label="Terminal height"
+                type="range"
+                min="180"
+                max="520"
+                step="20"
+                value={terminalHeight}
+                onChange={(e) => setTerminalHeight(Number(e.target.value))}
               />
-            </div>
-            <span className="progress-caption">
-              {points.practical} practical pts · {points.theory} theory pts · +{points.bonus} bonus
-            </span>
-            <details className="task-picker">
-              <summary>Choose a section · {current.title}</summary>
-              <div className="mission-list">
-                {assignment.sections.map((s) => {
-                  const related = outcomes.filter((o) => s.tasks.some((t) => t.id === o.id));
-                  const passed = related.every((o) => o.passed);
-                  return (
-                    <button
-                      key={s.id}
-                      className={'mission ' + (s.id === section ? 'active' : '')}
-                      onClick={(e) => {
-                        setSection(s.id);
-                        e.currentTarget.closest('details')?.removeAttribute('open');
-                      }}
-                    >
-                      <span className={'mission-number ' + (passed ? 'passed' : '')}>
-                        {passed ? <Check size={15} /> : s.tag}
-                      </span>
-                      <span>
-                        <strong>{s.title}</strong>
-                        <small>
-                          {s.points} points {s.tasks.every((t) => t.bonus) ? '· Optional' : ''}
-                        </small>
-                      </span>
-                      <ChevronRight size={14} />
-                    </button>
-                  );
-                })}
-              </div>
-            </details>
-            <div className="section-detail">
-              <span className="eyebrow">PART {current.tag}</span>
-              <h3>{current.title}</h3>
-              <p>{current.description}</p>
-              {current.tasks.some((t) => t.instructions === current.steps.join('\n')) && (
-                <ol>
-                  {current.steps.map((step, i) => (
-                    <li key={i}>{step}</li>
-                  ))}
-                </ol>
-              )}
-              {current.tasks.map((task) => {
-                const result = outcomes.find((o) => o.id === task.id);
-                return (
-                  <article className="task-feedback" key={task.id}>
-                    <h4>{task.title}</h4>
-                    {task.instructions !== current.steps.join('\n') && (
-                      <p className="written-answer">{task.instructions}</p>
-                    )}
-                    <p className={result?.passed ? 'passed' : 'muted'} role="status">
-                      {result?.passed ? '✓ Completed' : '○ Not completed yet'}
-                      {task.bonus ? ' · Optional bonus' : ''}
-                    </p>
-                    {result?.feedback.map((hint, i) => (
-                      <small className="task-hint" key={i}>
-                        {hint}
-                      </small>
-                    ))}
-                  </article>
-                );
-              })}
-              {current.tasks.some((t) => t.rules.some((r) => r.type === 'legacy')) &&
-                section === 'init' && (
-                  <div className="file-requirements">
-                    <details open>
-                      <summary>Required file contents</summary>
-                      <h4>about.txt</h4>
-                      <pre>{`Name: ${identity.full_name || 'Your full name'}\nUniversity: Nahda University\nDepartment: ${identity.department || 'Your department'}`}</pre>
-                      <h4>goals.txt</h4>
-                      <pre>
-                        {
-                          'My Goals:\n\n1. Learn Git\n2. Understand version control\n3. Work on team projects'
-                        }
-                      </pre>
-                      <h4>notes.txt</h4>
-                      <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
-                    </details>
-                  </div>
-                )}
-            </div>
-            <details className="checks">
-              <summary>Repository outcome checks</summary>
-              {outcomes.map((o) => (
-                <p key={o.id} className={o.passed ? 'passed' : ''}>
-                  <CheckCircle2 size={14} />
-                  {o.label}
-                </p>
-              ))}
-            </details>
-            <div className="hint">
-              <Info size={17} />
-              <p>
-                It’s okay to experiment.
-                <br />
-                <span>Progress checks your repository, not the commands you memorize.</span>
-              </p>
-            </div>
-            <Link
-              className={
-                'primary theory-button ' +
-                (complete < required.length && definition.gateTheory ? 'disabled-link' : '')
-              }
-              to={
-                basePath +
-                (complete === required.length || !definition.gateTheory ? '/theory' : '/workspace')
-              }
-            >
-              Continue to theory
-              <ArrowUpRight size={16} />
-            </Link>
-            {complete < required.length && definition.gateTheory && (
-              <small className="dim">Complete the practical outcomes to unlock theory.</small>
-            )}
-          </div>
-        </aside>
+            </label>
+            <label>
+              Instructions width
+              <input
+                aria-label="Instructions width"
+                type="range"
+                min="300"
+                max="480"
+                step="20"
+                value={instructionsWidth}
+                onChange={(e) => setInstructionsWidth(Number(e.target.value))}
+              />
+            </label>
+          </details>
+          <Terminal
+            lab={lab}
+            feedback={previous.current?.key === lab.key ? feedback : ''}
+            expanded={expanded}
+            onExpand={() => setExpanded(!expanded)}
+          />
+        </div>
+        <TaskInstructions
+          definition={definition}
+          progress={progress}
+          section={section}
+          onSection={setSection}
+          identity={identity}
+          checking={lab.busy}
+          error={lab.validationError}
+          basePath={basePath}
+        />
       </div>
       {(lab.error || localError) && (
         <div className="floating-error" role="alert">

@@ -13,20 +13,28 @@ export function SessionBar({
   const warning = timed && seconds <= 300 && !session.finalized;
   return (
     <section
-      className={'session-bar ' + (warning ? 'time-warning' : '')}
+      className={'session-bar ' + (timed ? 'timed ' : 'untimed ') + (warning ? 'time-warning' : '')}
       aria-label="Assessment session"
     >
       <div>
         <strong>
           {state.definition.type === 'exam' ? 'Exam' : 'Assignment'} · {state.definition.title}
         </strong>
-        <span role="timer" aria-label="Time remaining">
-          {session.finalized
-            ? 'Finalized'
-            : timed
-              ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} remaining`
-              : 'No time limit'}
-        </span>
+        {timed ? (
+          <span role="timer" aria-label="Time remaining">
+            {session.finalized
+              ? 'Finalized'
+              : !Number.isFinite(seconds)
+                ? 'Syncing timer…'
+                : timed
+                  ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} remaining`
+                  : ''}
+          </span>
+        ) : (
+          <span className="untimed-label">
+            {session.finalized ? 'Finalized' : 'Untimed assignment'}
+          </span>
+        )}
         <small role="status">{session.sync}</small>
       </div>
       {session.consent &&

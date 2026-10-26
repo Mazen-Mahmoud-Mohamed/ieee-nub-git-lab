@@ -119,7 +119,18 @@ export type Outcome = {
 const norm = (s: string = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
 const includes = (text: string | undefined, parts: string[]) =>
   parts.every((p) => norm(text).includes(norm(p)));
-export function validateRepository(view: RepoView, identity: StudentIdentity): Outcome[] {
+export type RequirementCheck = {
+  id: string;
+  label: string;
+  passed: boolean | null;
+  hint: string;
+  preparation?: boolean;
+};
+function legacyEvaluation(
+  view: RepoView,
+  identity: StudentIdentity,
+  working: Record<string, string> = {},
+): { outcomes: Outcome[]; requirements: Record<string, RequirementCheck[]> } {
   const commits = view.commits;
   const byId = new Map(commits.map((c) => [c.oid, c]));
   const ancestors = (oid: string): CommitView[] => {
@@ -195,7 +206,7 @@ export function validateRepository(view: RepoView, identity: StudentIdentity): O
       c.files['hobbies.txt'] &&
       includes(c.files['notes.txt'], ['Assignment 1 completed.']),
   );
-  return [
+  const outcomes: Outcome[] = [
     {
       id: 'repo',
       label: 'Local repository on main with configured identity',
@@ -298,6 +309,272 @@ export function validateRepository(view: RepoView, identity: StudentIdentity): O
         ancestors(bonusMerge.oid).some((c) => c.oid === view.branches['feature/hobbies']),
     },
   ];
+  const check = (
+    id: string,
+    label: string,
+    passed: boolean | null,
+    hint: string,
+    preparation = false,
+  ): RequirementCheck => ({ id, label, passed, hint, preparation });
+  const has = (file: string) => working[file] !== undefined || main?.files[file] !== undefined;
+  const requiredIdentity = !!identity.full_name.trim() && !!identity.department.trim();
+  const fileChecks: RequirementCheck[] = [];
+  for (const [file, valid] of [
+    ['about.txt', aboutOK],
+    ['goals.txt', goalsOK],
+    ['notes.txt', notesOK],
+  ] as const) {
+    fileChecks.push(
+      check(
+        file + '-exists',
+        file + ' created in this project',
+        has(file),
+        'Create this text file in the assessment project folder.',
+        true,
+      ),
+    );
+    fileChecks.push(
+      check(
+        file + '-draft',
+        file + ' required content written',
+        file === 'about.txt' && !requiredIdentity
+          ? null
+          : valid(working[file]) || valid(main?.files[file]),
+        file === 'about.txt' && !requiredIdentity
+          ? 'Complete your practice identity or profile to check personal file content.'
+          : 'Open the file in the editor and compare its contents with the requirements below.',
+        true,
+      ),
+    );
+    fileChecks.push(
+      check(
+        file + '-committed',
+        file + ' required content committed on main',
+        file === 'about.txt' && !requiredIdentity ? null : !!main && valid(main.files[file]),
+        'Save this file with the required content in the committed main history.',
+      ),
+    );
+  }
+  const expandedGoals = lineage.some(
+    (c) =>
+      c.oid !== goals?.oid &&
+      ancestors(c.oid).some((a) => a.oid === notes?.oid) &&
+      c.files['goals.txt'] !== byId.get(c.parents[0])?.files['goals.txt'] &&
+      goalsOK(c.files['goals.txt']) &&
+      (c.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s)).length >=
+        5 &&
+      meaningful(c),
+  );
+  const requirements: Record<string, RequirementCheck[]> = {
+    repo: [
+      check(
+        'initialized',
+        'Git repository initialized',
+        view.initialized,
+        'Create a Git repository in this assessment project.',
+      ),
+      check(
+        'name',
+        'Git username configured',
+        !!view.config['user.name']?.trim(),
+        'Set a Git name for your commits.',
+      ),
+      check(
+        'email',
+        'Valid Git email configured',
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(view.config['user.email'] || ''),
+        'Set a valid Git email address.',
+      ),
+      check(
+        'main-commit',
+        'Main branch has its first commit',
+        !!view.branches.main,
+        'The published scored check needs the first commit on main. An empty repository has no commit yet.',
+      ),
+    ],
+    files: fileChecks,
+    separate: [
+      ...[
+        [about, 'about.txt', aboutOK],
+        [goals, 'goals.txt', goalsOK],
+        [notes, 'notes.txt', notesOK],
+      ].flatMap(([commit, file, valid]) => [
+        check(
+          String(file) + '-focused',
+          String(file) + ' introduced in its own focused commit',
+          separate(commit as CommitView | undefined, String(file)),
+          'Introduce each starting file in a separate commit.',
+        ),
+        check(
+          String(file) + '-original-content',
+          String(file) + ' introductory commit has the required content',
+          (valid as (t: string | undefined) => boolean)(
+            (commit as CommitView | undefined)?.files[String(file)],
+          ),
+          'Check the content in the commit that first introduced this file.',
+        ),
+      ]),
+      check(
+        'personal-message',
+        'Personal information commit has the required message',
+        about?.message === 'Add personal information',
+        'Use the personal-information message specified by the task.',
+      ),
+      check(
+        'intro-order',
+        'Personal information, goals and notes introduced in order',
+        !!about &&
+          !!goals &&
+          !!notes &&
+          ancestors(goals.oid).some((c) => c.oid === about.oid) &&
+          ancestors(notes.oid).some((c) => c.oid === goals.oid),
+        'Check the order of the three introductory commits.',
+      ),
+    ],
+    goals: [
+      check(
+        'original-goals',
+        'Original goals commit contains exactly three numbered goals',
+        !!goals &&
+          (goals.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s))
+            .length === 3,
+        'Keep the original three goals in their introductory commit.',
+      ),
+      check(
+        'meaningful-intros',
+        'Starting commits have meaningful messages',
+        [about, goals, notes].every((c) => !!c && meaningful(c)),
+        'Use descriptive messages of at least two words.',
+      ),
+      check(
+        'later-goals',
+        'Two extra goals saved in a later meaningful commit',
+        expandedGoals,
+        'Keep the original goals and add two new numbered goals in a later commit.',
+      ),
+      check(
+        'four-commits',
+        'Main history contains at least four commits',
+        lineage.length >= 4,
+        'The additional goals need their own later commit.',
+      ),
+    ],
+    feature: [
+      check(
+        'feature-branch',
+        'Feature branch has committed history',
+        !!feature,
+        'Create the skills branch and save work in its history.',
+      ),
+      check(
+        'skills-content',
+        'All three required skills committed on feature/skills',
+        !!feature && skillsOK(feature.files['skills.txt']),
+        'Check the skills file on the feature branch.',
+      ),
+      check(
+        'skills-introduction',
+        'Skills introduced by a new feature commit',
+        !!featureIntroduction,
+        'The skills file must be introduced after an existing parent commit.',
+      ),
+    ],
+    isolation: [
+      check(
+        'intro-parent',
+        'Skills introduction has a parent commit',
+        !!featureIntroduction?.parents[0],
+        'Begin the feature from the existing project history.',
+      ),
+      check(
+        'no-earlier-skills',
+        'Parent commit does not contain skills.txt',
+        !!featureIntroduction?.parents[0] &&
+          !byId.get(featureIntroduction.parents[0])?.files['skills.txt'],
+        'The new skills file belongs in the feature history, after the branch point.',
+      ),
+      check(
+        'skills-message',
+        'Skills commit has a meaningful message',
+        !!featureIntroduction && meaningful(featureIntroduction),
+        'Describe the skills change in at least two words.',
+      ),
+    ],
+    merged: [
+      check(
+        'main-history',
+        'Main branch has committed history',
+        !!main,
+        'Main needs committed project history.',
+      ),
+      check(
+        'feature-history',
+        'Feature branch has committed history',
+        !!feature,
+        'Save the feature work in a commit.',
+      ),
+      check(
+        'main-skills',
+        'Required skills are present in committed main',
+        !!main && skillsOK(main.files['skills.txt']),
+        'Bring the committed skills content into main.',
+      ),
+      check(
+        'ancestry',
+        'Main history includes the feature branch tip',
+        !!feature && lineage.some((c) => c.oid === feature.oid),
+        'Merge the feature history into main.',
+      ),
+    ],
+    clean: [
+      check(
+        'on-main',
+        'Current branch is main',
+        view.initialized && view.branch === 'main',
+        'Return to main for the final state.',
+      ),
+      check('main-saved', 'Main contains a commit', !!main, 'Save your work in main history.'),
+      check(
+        'clean-tree',
+        'No staged or unstaged changes remain',
+        view.initialized && view.status.every(([, h, w, s]) => h === w && h === s),
+        'Check for files that still need to be committed.',
+      ),
+    ],
+    bonus: [
+      check(
+        'hobbies-branch',
+        'Hobbies branch has committed history',
+        !!view.branches['feature/hobbies'],
+        'Create a separate hobbies history.',
+      ),
+      check(
+        'divergent-merge',
+        'A merge commit joins the required hobbies and completion histories',
+        !!bonusMerge,
+        'The two parent histories must include the required hobbies and completion note.',
+      ),
+      check(
+        'bonus-ancestry',
+        'The merge includes feature/hobbies ancestry',
+        !!bonusMerge &&
+          !!view.branches['feature/hobbies'] &&
+          ancestors(bonusMerge.oid).some((c) => c.oid === view.branches['feature/hobbies']),
+        'Join the hobbies branch through the required merge commit.',
+      ),
+    ],
+  };
+  return { outcomes, requirements };
+}
+export function validateRepository(view: RepoView, identity: StudentIdentity): Outcome[] {
+  return legacyEvaluation(view, identity).outcomes;
+}
+export function legacyRequirementChecks(
+  view: RepoView,
+  identity: StudentIdentity,
+  working: Record<string, string>,
+) {
+  return legacyEvaluation(view, identity, working).requirements;
 }
 export function practicalScore(outcomes: Outcome[]) {
   return outcomes.filter((o) => o.passed).reduce((sum, o) => sum + o.points, 0);

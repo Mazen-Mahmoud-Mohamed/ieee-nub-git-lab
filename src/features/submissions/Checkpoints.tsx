@@ -33,7 +33,7 @@ export function Checkpoints({ lab, authenticated }: { lab: Lab; authenticated: b
             void perform(async () => {
               const { error } = await requireBackend().rpc('save_checkpoint', {
                 p_attempt: lab.attemptId,
-                p_payload: lab.snapshot(),
+                p_payload: await lab.capture(),
               });
               if (error) throw error;
               setNotice('Cloud checkpoint saved.');

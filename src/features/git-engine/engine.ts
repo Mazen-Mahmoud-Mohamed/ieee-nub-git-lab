@@ -88,7 +88,7 @@ export class GitEngine {
       branches: {},
       commits: [],
       status: [],
-      config: {},
+      config: { ...this.globalConfig },
     };
     if (!view.initialized) return view;
     for (const key of ['user.name', 'user.email'])
@@ -209,6 +209,13 @@ export class GitEngine {
           if (!this.fs.entries[path]) await this.write(p, '');
         }
         return '';
+      case 'nano':
+      case 'vim':
+      case 'vi':
+      case 'notepad':
+        throw new Error(
+          `${cmd} is not available in this browser terminal. To edit ${args[0] || 'a text file'}, select it from the Files panel on the left. The built-in Text Editor saves changes automatically.`,
+        );
       case 'rm':
         if (args.length !== 1 || args[0].startsWith('-')) return usage('rm file.txt');
         await this.fs.promises.unlink(this.textPath(args[0]));

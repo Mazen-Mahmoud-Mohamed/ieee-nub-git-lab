@@ -3048,3 +3048,266 @@ td small {
 .instructions h1 {
   font-size: 22px;
 }
+/* Requirement guidance keeps the existing palette and gives work the available space. */
+.instructions .instruction-scroll {
+  padding: 14px 18px 24px;
+}
+.instructions .workspace-guide {
+  margin: 0 0 12px;
+  padding: 10px;
+}
+.workspace-guide ol {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.requirement-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.requirement-summary strong {
+  font-size: 15px;
+}
+.instructions progress {
+  width: 100%;
+  height: 8px;
+  margin: 10px 0 0;
+  accent-color: var(--accent);
+}
+.instructions .progress-explanation {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 8px 0 14px;
+}
+.section-navigation {
+  display: flex;
+  overflow-x: auto;
+  gap: 3px;
+  margin: 12px 0 16px;
+}
+.section-navigation button {
+  display: flex;
+  flex: 0 0 220px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 7px;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+}
+.section-navigation button[aria-current='step'] {
+  background: var(--hover);
+  border-left-color: var(--blue);
+}
+.section-navigation strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.section-navigation small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.section-index {
+  font-size: 12px;
+  color: var(--muted);
+}
+.section-navigation [data-progress='completed'] .section-index {
+  color: var(--green);
+}
+.section-navigation [data-progress='partial'] .section-index {
+  color: var(--blue);
+}
+.current-task > h2 {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  background: var(--panel);
+  margin: 0;
+  padding: 12px 0;
+  font-size: 20px;
+}
+.current-task > p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.current-task h3 {
+  font-size: 15px;
+  margin: 14px 0 8px;
+}
+.current-task h4 {
+  font-size: 13px;
+  margin: 12px 0 7px;
+}
+.task-steps {
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.task-steps li {
+  margin: 8px 0;
+}
+.task-feedback {
+  padding: 14px 0;
+}
+.task-feedback > span {
+  font-size: 12px;
+}
+.task-feedback .written-answer {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.requirement-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.requirement-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--line);
+}
+.requirement-list li > span:first-child {
+  width: 16px;
+  flex-shrink: 0;
+}
+.requirement-list [data-state='completed'] > span:first-child {
+  color: var(--green);
+}
+.requirement-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.requirement-list [data-state='completed'] .requirement-state {
+  color: var(--green);
+}
+.requirement-list [data-state='checking'] .requirement-state {
+  color: var(--blue);
+}
+.next-requirement {
+  margin: 12px 0;
+  border-left: 2px solid var(--blue);
+  padding-left: 10px;
+}
+.next-requirement p,
+.task-explanation p {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.task-explanation {
+  font-size: 12px;
+  color: var(--muted);
+}
+.file-requirements pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.workspace-layout-controls {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  background: var(--panel);
+  padding: 5px 12px;
+}
+.workspace-layout-controls summary {
+  cursor: pointer;
+}
+.workspace-layout-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 12px 4px 0;
+}
+.workspace-layout-controls input {
+  width: 110px;
+}
+.terminal {
+  height: var(--terminal-height, 280px);
+  flex: 0 0 var(--terminal-height, 280px);
+  min-height: 180px;
+  max-height: 65vh;
+}
+.editor-panel {
+  min-height: 170px;
+}
+.command-result {
+  color: var(--muted);
+  margin-right: 10px;
+  font:
+    11px 'Segoe UI',
+    sans-serif;
+}
+.terminal-task-feedback {
+  padding: 8px 10px;
+  border-left: 2px solid var(--green);
+  color: var(--green);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 10px 0;
+}
+.session-bar.untimed {
+  padding: 7px 18px;
+}
+.untimed-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.session-bar .autosave-consent p {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+@media (min-width: 1101px) {
+  .workspace-grid {
+    grid-template-columns: 200px minmax(280px, 1fr) var(--instructions-width, 360px);
+  }
+}
+@media (min-width: 901px) {
+  #main:has(> .session-bar + .workspace) {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 73px);
+    min-height: 600px;
+  }
+  #main:has(> .session-bar + .workspace) > .workspace {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+}
+@media (max-width: 900px) {
+  .terminal {
+    min-height: 240px;
+    max-height: none;
+  }
+  .section-navigation {
+    scroll-snap-type: x proximity;
+  }
+}
+@media (max-width: 600px) {
+  .section-navigation {
+    max-width: 100%;
+  }
+  .session-bar > div:first-child {
+    gap: 8px;
+  }
+  .session-bar [role='timer'] {
+    font-size: 25px;
+  }
+}

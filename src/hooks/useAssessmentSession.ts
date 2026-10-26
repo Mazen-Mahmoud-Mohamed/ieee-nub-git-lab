@@ -22,6 +22,8 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
   };
   const latest = useRef(lab);
   latest.current = lab;
+  const activeAttempt = useRef(state?.id);
+  activeAttempt.current = state?.id;
   const revision = useRef(0);
   const clock = useRef<ServerClock | null>(null);
   const saving = useRef<Promise<string | undefined> | null>(null);
@@ -31,6 +33,9 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     let live = true;
     setInitialized(false);
     setConflict(false);
+    setError('');
+    setRemaining(Infinity);
+    last.current = '';
     stopping.current = false;
     setConsent(!!state && sessionStorage.getItem(autosaveConsentKey(state.id)) === 'enabled');
     if (!state || !lab.ready) return;
@@ -38,6 +43,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
       const current = latest.current;
       revision.current = state.checkpoint_revision;
       clock.current = new ServerClock(state.server_now, state.deadline_at, performance.now());
+      if (!live || activeAttempt.current !== state.id) return;
       if (
         state.payload &&
         (state.status !== 'in_progress' || current.serverRevision !== state.checkpoint_revision)
@@ -54,7 +60,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
           },
           state.status !== 'in_progress',
         );
-      if (!live) return;
+      if (!live || activeAttempt.current !== state.id) return;
       current.setAttemptId(state.id);
       current.setServerRevision(state.checkpoint_revision);
       current.setReceipt(state.receipt || undefined);
@@ -63,7 +69,9 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
         state.status === 'in_progress' ? 'Waiting for autosave consent' : 'Finalized on server',
       );
       setInitialized(true);
-    })().catch((e) => setError(String(e)));
+    })().catch((e) => {
+      if (live && activeAttempt.current === state.id) setError(String(e));
+    });
     return () => {
       live = false;
     };
@@ -71,6 +79,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
   const refresh = async () => {
     if (!state) return;
     const { data, error } = await requireBackend().rpc('assessment_state', { p_attempt: state.id });
+    if (activeAttempt.current !== state.id) return;
     if (error) throw error;
     clock.current = new ServerClock(data.server_now, data.deadline_at, performance.now());
     if (data.receipt) {
@@ -86,6 +95,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
           },
           true,
         );
+      if (activeAttempt.current !== state.id) return;
       latest.current.setReceipt(data.receipt);
       latest.current.setLocked(true);
       setSync(data.auto_submitted ? 'Auto-submitted at deadline' : 'Finalized on server');
@@ -129,12 +139,20 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     if (!finalize && !consent)
       throw new Error('Enable the disclosed autosave control before uploading work');
     while (saving.current) await saving.current;
+    if (activeAttempt.current !== state.id) throw new Error('Assessment changed during save.');
     if (latest.current.receipt) return latest.current.receipt;
     const run = async () => {
       if (finalize) stopping.current = true;
       const current = latest.current;
-      const saved = current.snapshot();
-      const signature = JSON.stringify([saved.snapshot, saved.answers, saved.events]);
+      const saved = await current.capture();
+      if (activeAttempt.current !== state.id) throw new Error('Assessment changed during save.');
+      const signature = JSON.stringify([
+        saved.snapshot,
+        saved.answers,
+        saved.events,
+        saved.config,
+        saved.cwd,
+      ]);
       if (!finalize && signature === last.current) return;
       const pending = finalize ? await loadOutbox(state.id) : undefined;
       const payload = pending || {
@@ -150,6 +168,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
         config: saved.config,
       };
       if (finalize) await saveOutbox(state.id, payload);
+      if (activeAttempt.current !== state.id) throw new Error('Assessment changed during save.');
       setSync(finalize ? 'Submitting…' : 'Verifying autosave…');
       const data = await withRetry(async () => {
         const { data, error } = await requireBackend().functions.invoke('assessment-attempt', {
@@ -166,6 +185,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
         if (data?.error) throw new Error(data.error);
         return data;
       }, 2);
+      if (activeAttempt.current !== state.id) return;
       revision.current = data.revision;
       current.setServerRevision(data.revision);
       last.current = signature;
@@ -174,6 +194,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
         // A late checkpoint can return an expiry receipt. Display the frozen server evidence,
         // never the newer local payload that was rejected at the deadline.
         const final = await requireBackend().rpc('assessment_state', { p_attempt: state.id });
+        if (activeAttempt.current !== state.id) return;
         if (final.error)
           throw new Error(
             'Finalized on the server. Reconnect to recover the receipt and accepted work.',
@@ -190,6 +211,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
             },
             true,
           );
+        if (activeAttempt.current !== state.id) return;
         current.setReceipt(data.receipt);
         current.setLocked(true);
         await clearOutbox(state.id);
@@ -201,6 +223,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     };
     const promise = run()
       .catch((e) => {
+        if (activeAttempt.current !== state.id) throw e;
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
         setSync('Not synced · work remains on this device');

@@ -146,14 +146,7 @@ export function App() {
     full_name: localStorage.getItem('practice-name') || '',
     department: localStorage.getItem('practice-department') || '',
   };
-  const working = Object.fromEntries(
-    Object.entries(lab.engine.fs.entries)
-      .filter(([p, e]) => p.endsWith('.txt') && !p.includes('/.git/') && e.kind === 'file')
-      .map(([p, e]) => [
-        p.slice(lab.engine.dir.length + 1),
-        new TextDecoder().decode(new Uint8Array(e.data)),
-      ]),
-  );
+  const working = lab.working;
   const outcomes = outcomesFor(course.definition, lab.view, identity, working);
   const unlocked = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   async function start() {

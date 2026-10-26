@@ -1,6 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
+import { tokenize } from './parser';
+function commandKind(input: string) {
+  try {
+    const [cmd, sub, ...args] = tokenize(input);
+    if (
+      ['ls', 'pwd', 'cat', 'help', 'clear'].includes(cmd) ||
+      (cmd === 'git' &&
+        (['status', 'log', 'show', 'diff', '--version'].includes(sub) ||
+          (sub === 'branch' && !args.length) ||
+          (sub === 'config' && args.filter((x) => x !== '--global').length === 1)))
+    )
+      return 'Read-only';
+    return 'State-changing';
+  } catch {
+    return 'Command';
+  }
+}
 const readableError = (value: string) =>
   value
     .replace(
@@ -36,10 +53,12 @@ export function Terminal({
   lab,
   expanded,
   onExpand,
+  feedback = '',
 }: {
   lab: Lab;
   expanded: boolean;
   onExpand: () => void;
+  feedback?: string;
 }) {
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
@@ -69,7 +88,10 @@ export function Terminal({
           <button
             title={expanded ? 'Restore panels' : 'Expand terminal'}
             aria-label="Toggle terminal focus"
-            onClick={onExpand}
+            onClick={() => {
+              onExpand();
+              field.current?.focus();
+            }}
           >
             {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
@@ -93,6 +115,9 @@ export function Terminal({
           {events.map((event, i) => (
             <div className="terminal-event" key={i}>
               <div>
+                <small className="command-result">
+                  {event.success ? commandKind(event.command) + ' · Success' : 'Failed'}
+                </small>
                 <span className="prompt-user">student@ieee-nub</span>{' '}
                 <span className="prompt-path">{event.branch}</span>{' '}
                 <span className="prompt-symbol">$</span> {event.command}
@@ -105,6 +130,11 @@ export function Terminal({
             </div>
           ))}
         </div>
+        {feedback && (
+          <div className="terminal-task-feedback" role="status">
+            {feedback}
+          </div>
+        )}
         <form
           onSubmit={async (e) => {
             e.preventDefault();
