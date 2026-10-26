@@ -6,12 +6,13 @@ export default defineConfig({
   outputDir: 'test-results/fixtures',
   fullyParallel: false,
   timeout: 45000,
-  use: { baseURL: 'http://127.0.0.1:5174', trace: 'retain-on-failure' },
+  use: { baseURL: 'http://127.0.0.1:5174/ieee-git-lab/', trace: 'retain-on-failure' },
   webServer: {
     command: 'npm run dev -- --port 5174',
-    url: 'http://127.0.0.1:5174',
+    url: 'http://127.0.0.1:5174/ieee-git-lab/',
     reuseExistingServer: false,
     env: {
+      VITE_BASE_PATH: '/ieee-git-lab/',
       VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'test-fixture-public-key',
     },

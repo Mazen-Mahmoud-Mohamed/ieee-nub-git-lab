@@ -1,5 +1,7 @@
 # Scope refinement report — 26 October 2026
 
+This report records the earlier assessment extension. The subsequent Google/profile and UI update, current configuration, migration sequence and hosted limitations are documented in [GOOGLE_AUTH_AND_PROFILES.md](GOOGLE_AUTH_AND_PROFILES.md); current test counts are in [TESTING.md](TESTING.md).
+
 ## Preserved and reused
 
 The existing application was inspected before editing, and its 34-test baseline and lint were run. The real Git engine, virtual filesystem/index/object database, editor, terminal, themes, authentication/profile flow, object hashing, original Assignment 01 validator, IndexedDB recovery, supporting timeline, instructor review, CSV export and Pages deployment were retained. The Git engine changed mainly to accept a configured virtual project directory. No original migration or evidence table was removed; the existing submission Edge endpoint remains present.

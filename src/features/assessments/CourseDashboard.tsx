@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Clock, GitBranch } from 'lucide-react';
 import { supabase, type Profile } from '../../services/supabase';
 import { firstAssessment, totals, type Definition, type AssessmentRecord } from './model';
+import { facultyLabel } from '../auth/faculty';
 import { ASSIGNMENT_ID } from '../assignments/assignment';
 type Card = AssessmentRecord & { definition: Definition };
 type Attempt = {
@@ -89,7 +90,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
           </h1>
           <p>
             {profile
-              ? `${profile.department} · Year ${profile.academic_year}`
+              ? `${facultyLabel(profile.faculty)} · Choose an assignment or exam below.`
               : 'Explore Assignment 01 locally. Sign in to access your published assignments and exams.'}
           </p>
         </div>
@@ -140,7 +141,13 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                       <div className="assessment-meta">
                         <span>
                           <GitBranch size={13} />
-                          {d.format}
+                          {
+                            {
+                              practical: 'Git practice',
+                              theory: 'Questions',
+                              mixed: 'Git practice + questions',
+                            }[d.format]
+                          }
                         </span>
                         <span>
                           {points.practical + points.theory} points
@@ -161,6 +168,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                           {new Date(d.endsAt || d.deadline!).toLocaleString()}
                         </small>
                       )}
+                      {!d.endsAt && !d.deadline && <small>No deadline</small>}
                       {attempt?.released && (
                         <p className="result-summary">
                           Score:{' '}
@@ -179,14 +187,20 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                         </Link>
                         {attempt ? (
                           <Link
-                            className="outline-button"
+                            className="primary"
                             to={`/assessments/${a.id}/attempts/${attempt.id}/${attempt.status === 'in_progress' ? (d.format === 'theory' ? 'theory' : 'workspace') : 'result'}`}
                           >
-                            {attempt.status === 'in_progress' ? 'Continue' : 'View submission'}
+                            {attempt.status === 'in_progress'
+                              ? type === 'exam'
+                                ? 'Continue Exam'
+                                : 'Continue assignment'
+                              : type === 'exam'
+                                ? 'View Result'
+                                : 'View submission'}
                           </Link>
                         ) : (
                           <Link className="primary" to={`/assessments/${a.id}`}>
-                            {closed
+                            {closed || future
                               ? 'View details'
                               : type === 'exam'
                                 ? 'Start Exam'
@@ -270,7 +284,9 @@ export function AssessmentDetails({
                     <h4>
                       {t.title} · {t.points} points {t.bonus ? '(optional bonus)' : ''}
                     </h4>
-                    <p className="written-answer">{t.instructions}</p>
+                    {t.instructions !== s.steps.join('\n') && (
+                      <p className="written-answer">{t.instructions}</p>
+                    )}
                   </div>
                 ))}
               </div>

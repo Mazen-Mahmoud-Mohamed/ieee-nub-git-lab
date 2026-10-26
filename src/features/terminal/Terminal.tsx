@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
+const readableError = (value: string) =>
+  value
+    .replace(
+      /^ENOENT: (.*)$/,
+      'Could not find $1. Check the path and create the file or folder first.',
+    )
+    .replace(
+      /^EEXIST: (.*)$/,
+      '$1 already exists. Choose a different name or open the existing item.',
+    )
+    .replace(/^ENOTDIR: (.*)$/, '$1 is not a folder. Check the path.');
 const commands = [
   'git status',
   'git add ',
@@ -44,7 +55,7 @@ export function Terminal({
     <section className="terminal">
       <div className="panel-heading terminal-tabs">
         <span>
-          <ChevronRight size={15} /> TERMINAL <i className="live-dot" />
+          <ChevronRight size={15} /> Git Terminal <i className="live-dot" />
         </span>
         <div>
           <span className="terminal-mode">BROWSER SHELL</span>
@@ -64,7 +75,13 @@ export function Terminal({
           </button>
         </div>
       </div>
-      <div className="terminal-body" ref={scroll} onClick={() => field.current?.focus()}>
+      <div
+        className="terminal-body"
+        ref={scroll}
+        onClick={() => {
+          if (!window.getSelection()?.toString()) field.current?.focus();
+        }}
+      >
         <div className="terminal-welcome">
           <strong>IEEE NUB Git Lab</strong> <span>— your local Git sandbox</span>
           <p>
@@ -81,7 +98,9 @@ export function Terminal({
                 <span className="prompt-symbol">$</span> {event.command}
               </div>
               {event.output !== '\x1bCLEAR' && (
-                <pre className={event.success ? '' : 'terminal-error'}>{event.output}</pre>
+                <pre className={event.success ? '' : 'terminal-error'}>
+                  {event.success ? event.output : readableError(event.output)}
+                </pre>
               )}
             </div>
           ))}

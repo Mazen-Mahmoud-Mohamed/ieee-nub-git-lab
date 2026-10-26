@@ -1,4 +1,19 @@
 project_id = "ieee-nub-git-lab"
+[auth]
+enabled = true
+site_url = "https://mazen-mahmoud-mohamed.github.io/ieee-nub-git-lab/"
+additional_redirect_urls = ["https://mazen-mahmoud-mohamed.github.io/ieee-nub-git-lab/?auth_return=1", "http://127.0.0.1:5173/?auth_return=1", "http://localhost:5173/?auth_return=1"]
+minimum_password_length = 12
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+[storage.vector]
+enabled = false
 [functions.submit-attempt]
 verify_jwt = true
 import_map = "./functions/submit-attempt/import_map.json"

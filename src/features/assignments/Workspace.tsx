@@ -119,7 +119,7 @@ export function Workspace({
       <div className="workspace-grid">
         <aside className="explorer">
           <div className="panel-heading">
-            <span>EXPLORER</span>
+            <span>Files</span>
             <PanelLeftClose size={15} />
           </div>
           <div className="explorer-tabs">
@@ -235,7 +235,7 @@ export function Workspace({
                 {selected ? selected.split('/').pop() : 'Welcome to your workspace'}
                 {selected && <i className="live-dot" />}
               </span>
-              <span className="dim">{selected ? 'Plain text' : 'GETTING STARTED'}</span>
+              <span className="dim">Text Editor</span>
             </div>
             {selected ? (
               <CodeMirror
@@ -299,16 +299,28 @@ export function Workspace({
         <aside className="instructions">
           <div className="panel-heading">
             <span>
-              <BookOpen size={15} /> YOUR MISSION
+              <BookOpen size={15} /> Task Instructions
             </span>
-            <span className="dim">01 / 01</span>
+            <span className="dim">Progress</span>
           </div>
           <div className="instruction-scroll">
             <div className="assignment-label">
               {definition.type.toUpperCase()} <span>GIT COURSE</span>
             </div>
             <h1>{definition.title}</h1>
-            <p className="muted">{definition.description}</p>
+            <details className="workspace-guide">
+              <summary>How to use this workspace</summary>
+              <p>1. Read the current task below.</p>
+              <p>
+                2. Use Files to create or open a text file. Edit its contents in the Text Editor.
+                Changes save automatically on this device.
+              </p>
+              <p>
+                3. Type Git commands in the Git Terminal and press Enter. Use ↑ and ↓ for command
+                history.
+              </p>
+              <p>4. Watch Progress for completed tasks, then continue to theory or review.</p>
+            </details>
             <div className="progress-heading">
               <span>Your progress</span>
               <strong>
@@ -323,39 +335,67 @@ export function Workspace({
             <span className="progress-caption">
               {points.practical} practical pts · {points.theory} theory pts · +{points.bonus} bonus
             </span>
-            <div className="mission-list">
-              {assignment.sections.map((s) => {
-                const related = outcomes.filter((o) => s.tasks.some((t) => t.id === o.id));
-                const passed = related.every((o) => o.passed);
-                return (
-                  <button
-                    key={s.id}
-                    className={'mission ' + (s.id === section ? 'active' : '')}
-                    onClick={() => setSection(s.id)}
-                  >
-                    <span className={'mission-number ' + (passed ? 'passed' : '')}>
-                      {passed ? <Check size={15} /> : s.tag}
-                    </span>
-                    <span>
-                      <strong>{s.title}</strong>
-                      <small>
-                        {s.points} points {s.tasks.every((t) => t.bonus) ? '· Optional' : ''}
-                      </small>
-                    </span>
-                    <ChevronRight size={14} />
-                  </button>
-                );
-              })}
-            </div>
+            <details className="task-picker">
+              <summary>Choose a section · {current.title}</summary>
+              <div className="mission-list">
+                {assignment.sections.map((s) => {
+                  const related = outcomes.filter((o) => s.tasks.some((t) => t.id === o.id));
+                  const passed = related.every((o) => o.passed);
+                  return (
+                    <button
+                      key={s.id}
+                      className={'mission ' + (s.id === section ? 'active' : '')}
+                      onClick={(e) => {
+                        setSection(s.id);
+                        e.currentTarget.closest('details')?.removeAttribute('open');
+                      }}
+                    >
+                      <span className={'mission-number ' + (passed ? 'passed' : '')}>
+                        {passed ? <Check size={15} /> : s.tag}
+                      </span>
+                      <span>
+                        <strong>{s.title}</strong>
+                        <small>
+                          {s.points} points {s.tasks.every((t) => t.bonus) ? '· Optional' : ''}
+                        </small>
+                      </span>
+                      <ChevronRight size={14} />
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
             <div className="section-detail">
               <span className="eyebrow">PART {current.tag}</span>
               <h3>{current.title}</h3>
               <p>{current.description}</p>
-              <ol>
-                {current.steps.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ol>
+              {current.tasks.some((t) => t.instructions === current.steps.join('\n')) && (
+                <ol>
+                  {current.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              )}
+              {current.tasks.map((task) => {
+                const result = outcomes.find((o) => o.id === task.id);
+                return (
+                  <article className="task-feedback" key={task.id}>
+                    <h4>{task.title}</h4>
+                    {task.instructions !== current.steps.join('\n') && (
+                      <p className="written-answer">{task.instructions}</p>
+                    )}
+                    <p className={result?.passed ? 'passed' : 'muted'} role="status">
+                      {result?.passed ? '✓ Completed' : '○ Not completed yet'}
+                      {task.bonus ? ' · Optional bonus' : ''}
+                    </p>
+                    {result?.feedback.map((hint, i) => (
+                      <small className="task-hint" key={i}>
+                        {hint}
+                      </small>
+                    ))}
+                  </article>
+                );
+              })}
               {current.tasks.some((t) => t.rules.some((r) => r.type === 'legacy')) &&
                 section === 'init' && (
                   <div className="file-requirements">
@@ -405,7 +445,7 @@ export function Workspace({
               Continue to theory
               <ArrowUpRight size={16} />
             </Link>
-            {complete < required.length && (
+            {complete < required.length && definition.gateTheory && (
               <small className="dim">Complete the practical outcomes to unlock theory.</small>
             )}
           </div>

@@ -82,7 +82,7 @@ export function Assessment({
             {all.map((q, i) => (
               <button
                 key={q.id}
-                aria-label={`Question ${i + 1}${lab.answers[q.id] ? ' answered' : ''}${lab.flagged.includes(q.id) ? ' flagged' : ''}`}
+                aria-label={`Question ${i + 1}${lab.answers[q.id] ? ' answered' : ' unanswered'}${lab.flagged.includes(q.id) ? ' flagged' : ''}`}
                 className={
                   (index === i ? 'active ' : '') +
                   (lab.answers[q.id] ? 'answered ' : '') +
@@ -94,6 +94,10 @@ export function Assessment({
               </button>
             ))}
           </div>
+          <p>✓ Answered · Number = unanswered · Flag = review later</p>
+          <Link className="outline-button" to={basePath + '/review'}>
+            Review and submit
+          </Link>
           <p>
             {configured.filter((q) => lab.answers[q.id]?.trim()).length} of {configured.length}{' '}
             required answers

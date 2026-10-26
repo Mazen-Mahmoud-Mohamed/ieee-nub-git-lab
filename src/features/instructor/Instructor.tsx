@@ -27,10 +27,14 @@ type Attempt = {
   theory_score: number | null;
   receipt: string | null;
   created_at: string;
+  submitted_at: string | null;
+  identity_snapshot: Record<string, unknown> | null;
   released: boolean;
   feedback: string | null;
   profiles: {
     full_name: string;
+    email: string | null;
+    phone: string | null;
     student_id: string;
     department: string;
     faculty: Faculty | null;
@@ -82,17 +86,14 @@ function Attempts() {
     setLoading(true);
     try {
       const client = requireBackend();
-      const { data, error } = await client
-        .from('attempts')
-        .select(
-          '*,assignments(title,type),profiles(full_name,student_id,department,faculty,academic_year),grading_summaries(practical_score,theory_score,released,feedback)',
-        )
-        .order('created_at', { ascending: false });
+      const { data, error } = await client.rpc('instructor_submissions');
       if (error) throw error;
       setRows(
-        (data || []).map((r) => ({
+        (data || []).map((r: Attempt & { grading_summaries: unknown }) => ({
           ...r,
-          ...(Array.isArray(r.grading_summaries) ? r.grading_summaries[0] : r.grading_summaries),
+          ...((Array.isArray(r.grading_summaries)
+            ? r.grading_summaries[0]
+            : r.grading_summaries) as object),
         })) as unknown as Attempt[],
       );
     } catch (e) {
@@ -107,7 +108,7 @@ function Attempts() {
   const filtered = rows.filter(
     (r) =>
       (!search ||
-        `${r.profiles?.full_name} ${r.profiles?.student_id}`
+        `${r.profiles?.full_name} ${r.profiles?.email} ${r.profiles?.student_id}`
           .toLowerCase()
           .includes(search.toLowerCase())) &&
       (!department || r.profiles?.department === department) &&
@@ -179,32 +180,35 @@ function Attempts() {
         <label className="search">
           <Search size={16} />
           <input
-            aria-label="Search student name or ID"
-            placeholder="Search name or student ID…"
+            aria-label="Search student name, email or ID"
+            placeholder="Search name, email or student ID…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <select
-          aria-label="Department filter"
-          value={department}
-          onChange={(e) => setDepartment(e.target.value)}
-        >
-          <option value="">All departments</option>
-          {[...new Set(rows.map((r) => r.profiles?.department).filter(Boolean))].map((d) => (
-            <option key={d}>{d}</option>
-          ))}
-        </select>
-        <select
-          aria-label="Academic year filter"
-          value={year}
-          onChange={(e) => setYear(e.target.value)}
-        >
-          <option value="">All years</option>
-          {[...new Set(rows.map((r) => r.profiles?.academic_year).filter(Boolean))].map((y) => (
-            <option key={y}>{y}</option>
-          ))}
-        </select>
+        <details className="extra-filters">
+          <summary>More filters</summary>
+          <select
+            aria-label="Department filter"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+          >
+            <option value="">All departments</option>
+            {[...new Set(rows.map((r) => r.profiles?.department).filter(Boolean))].map((d) => (
+              <option key={d}>{d}</option>
+            ))}
+          </select>
+          <select
+            aria-label="Academic year filter"
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+          >
+            <option value="">All years</option>
+            {[...new Set(rows.map((r) => r.profiles?.academic_year).filter(Boolean))].map((y) => (
+              <option key={y}>{y}</option>
+            ))}
+          </select>
+        </details>
         <button
           className="outline-button"
           onClick={() => {
@@ -217,6 +221,9 @@ function Attempts() {
             const csv = [
               [
                 'Name',
+                'Email',
+                'Phone',
+                'Submitted at',
                 'Student ID',
                 'Department',
                 'Faculty',
@@ -232,6 +239,9 @@ function Attempts() {
               ],
               ...filtered.map((r) => [
                 r.profiles?.full_name,
+                r.profiles?.email,
+                r.profiles?.phone,
+                r.submitted_at,
                 r.profiles?.student_id,
                 r.profiles?.department,
                 facultyLabel(r.profiles?.faculty),
@@ -275,7 +285,9 @@ function Attempts() {
             <thead>
               <tr>
                 <th>Student</th>
-                <th>Department</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Submitted</th>
                 <th>Faculty</th>
                 <th>Assessment</th>
                 <th>Status</th>
@@ -291,7 +303,9 @@ function Attempts() {
                     <strong>{r.profiles?.full_name || 'Profile unavailable'}</strong>
                     <small>{r.profiles?.student_id}</small>
                   </td>
-                  <td>{r.profiles?.department}</td>
+                  <td>{r.profiles?.email || '—'}</td>
+                  <td>{r.profiles?.phone || '—'}</td>
+                  <td>{r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—'}</td>
                   <td>{facultyLabel(r.profiles?.faculty)}</td>
                   <td>
                     {r.assignments?.title}
@@ -415,6 +429,19 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
         Back to attempts
       </button>
       <h2>{attempt.profiles?.full_name}</h2>
+      <p>
+        {attempt.profiles?.email} · {attempt.profiles?.phone || 'Phone not provided'} ·{' '}
+        {facultyLabel(attempt.profiles?.faculty)}
+      </p>
+      <p>
+        {attempt.submitted_at
+          ? 'Submitted ' + new Date(attempt.submitted_at).toLocaleString()
+          : 'Not yet submitted'}
+        .{' '}
+        {attempt.identity_snapshot
+          ? 'Contact details captured at submission.'
+          : 'Current account contact details; this older attempt has no submission identity snapshot.'}
+      </p>
       <p>
         {attempt.profiles?.student_id} · {attempt.status} · {attempt.receipt || 'Not submitted'}
       </p>

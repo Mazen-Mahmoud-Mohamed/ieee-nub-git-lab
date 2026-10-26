@@ -1,5 +1,5 @@
 import { Component, useEffect, useState, type ReactNode } from 'react';
-import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
   ArrowRight,
@@ -20,6 +20,9 @@ import type { User } from '@supabase/supabase-js';
 import { supabase, type Profile, requireBackend } from '../services/supabase';
 import { useLab } from '../hooks/useLab';
 import { AuthPage, ProfilePage } from '../features/auth/Auth';
+import { finishAuthCallback } from '../features/auth/callback';
+import { destination, rememberDestination } from '../features/auth/navigation';
+import { profileComplete } from '../features/auth/profile';
 import { Workspace } from '../features/assignments/Workspace';
 import { ASSIGNMENT_ID } from '../features/assignments/assignment';
 import { outcomesFor } from '../features/assessments/model';
@@ -75,12 +78,12 @@ export function App() {
   );
   const session = useAssessmentSession(lab, course.state);
   const navigate = useNavigate();
+  const location = useLocation();
   const loadProfile = async () => {
     if (!supabase) return;
     const {
       data: { user: current },
     } = await supabase.auth.getUser();
-    setUser(current);
     if (current) {
       const { data, error } = await supabase
         .from('profiles')
@@ -95,15 +98,37 @@ export function App() {
       setProfile(null);
       setIsInstructor(false);
     }
+    setUser(current);
   };
   useEffect(() => {
     if (!supabase) return;
-    void loadProfile().finally(() => setAuthReady(true));
+    void finishAuthCallback()
+      .then(async (result) => {
+        await loadProfile();
+        if (result.error) {
+          setError(result.error);
+          navigate('/auth', { replace: true });
+        } else if (result.handled) navigate(destination(), { replace: true });
+      })
+      .catch(() => setError('Your session could not be restored. Please sign in again.'))
+      .finally(() => setAuthReady(true));
     const { data } = supabase.auth.onAuthStateChange(() => {
       setTimeout(() => void loadProfile(), 0);
     });
     return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (
+      !authReady ||
+      location.pathname === '/auth' ||
+      location.pathname === '/profile' ||
+      location.pathname === '/'
+    )
+      return;
+    if (!user || (!isInstructor && !profileComplete(profile, user)))
+      rememberDestination(location.pathname + location.search);
+    else destination(true);
+  }, [authReady, user, profile, isInstructor, location.pathname, location.search]);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     localStorage.setItem('ieee-theme', dark ? 'dark' : 'light');
@@ -133,10 +158,14 @@ export function App() {
   const unlocked = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   async function start() {
     if (!user) {
-      navigate('/workspace');
+      if (location.pathname.startsWith('/assessments/')) {
+        rememberDestination(location.pathname);
+        navigate('/auth');
+      } else navigate('/workspace');
       return;
     }
-    if (!profile) {
+    if (!profileComplete(profile, user)) {
+      rememberDestination(location.pathname);
       navigate('/profile');
       return;
     }
@@ -163,7 +192,6 @@ export function App() {
       </a>
       <header className="app-header">
         <Link to="/" className="brand">
-          <span className="brand-symbol">◇</span>
           <span className="brand-ieee">
             IEEE<span>NAHDA UNIVERSITY</span>
           </span>
@@ -177,13 +205,20 @@ export function App() {
             <LayoutDashboard size={15} />
             My learning
           </NavLink>
-          <NavLink to="/overview">
+          <NavLink to={course.active ? course.detailsPath : '/overview'}>
             <BookOpen size={15} />
-            Assignment
+            {course.active ? 'Instructions' : 'Practice guide'}
           </NavLink>
-          <NavLink to="/workspace">
+          <NavLink
+            to={
+              course.active
+                ? course.basePath +
+                  (course.definition.format === 'theory' ? '/theory' : '/workspace')
+                : '/workspace'
+            }
+          >
             <TerminalSquare size={15} />
-            Workspace
+            {course.active ? 'Assessment' : 'Practice lab'}
           </NavLink>
           {isInstructor && <NavLink to="/instructor">Instructor</NavLink>}
         </nav>
@@ -239,13 +274,30 @@ export function App() {
       <main id="main">
         {!authReady ? (
           <div className="page">Checking your session…</div>
+        ) : user &&
+          !isInstructor &&
+          !profileComplete(profile, user) &&
+          location.pathname !== '/profile' ? (
+          <Navigate to="/profile" replace />
         ) : (
           <Routes>
-            <Route path="/" element={<Landing onStart={start} />} />
-            <Route path="/auth" element={<AuthPage />} />
+            <Route
+              path="/"
+              element={<Landing onStart={() => navigate(user ? '/dashboard' : '/workspace')} />}
+            />
+            <Route
+              path="/auth"
+              element={user ? <Navigate to={destination()} replace /> : <AuthPage />}
+            />
             <Route
               path="/profile"
-              element={user ? <ProfilePage profile={profile} onSave={loadProfile} /> : <AuthPage />}
+              element={
+                user ? (
+                  <ProfilePage user={user} profile={profile} onSave={loadProfile} />
+                ) : (
+                  <AuthPage />
+                )
+              }
             />
             <Route path="/dashboard" element={<CourseDashboard profile={profile} />} />
             <Route
@@ -318,6 +370,14 @@ export function App() {
               element={
                 !user ? (
                   <AuthPage />
+                ) : course.error ? (
+                  <div className="page narrow">
+                    <h1>Could not open this attempt</h1>
+                    <p className="error" role="alert">
+                      {course.error}
+                    </p>
+                    <Link to="/dashboard">Return to your dashboard</Link>
+                  </div>
                 ) : course.loading || !course.state || !lab.ready || !session.ready ? (
                   <div className="page">Restoring assessment session…{course.error}</div>
                 ) : (
@@ -421,13 +481,13 @@ function Landing({ onStart }: { onStart: () => void }) {
             IEEE NUB · GIT & GITHUB TRAINING
           </div>
           <h1>
-            Great things start
+            Learn Git,
             <br />
-            with a <em>first commit.</em>
+            <em>one step at a time.</em>
           </h1>
           <p>
-            Turn Git from something you’ve heard about into something you understand. A real
-            workspace. Hands-on assignments. Your own learning journey.
+            Practice Git in your browser, complete course assignments, and take exams. No
+            installation needed.
           </p>
           <div className="landing-actions">
             <button className="primary" onClick={onStart}>

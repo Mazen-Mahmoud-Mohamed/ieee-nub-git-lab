@@ -1,6 +1,8 @@
 # Testing and release acceptance
 
-The current refinement adds reusable assessments and server-timed exams. Run `npm run test:e2e:fixtures` in addition to the original browser suite. The new local-only UI fixtures cover the authoring interface, per-assessment workspace isolation, opt-in accepted autosaves, refresh/clock manipulation, deadline locking, server-frozen answers, network failures and stale tabs. The embedded PostgreSQL suite runs both migrations and additionally checks existing-data preservation, immutable versions, publication, private keys, attempt limits, exact deadline rejection, abandoned expiry and grading/release. See [ASSESSMENTS_AND_EXAMS.md](ASSESSMENTS_AND_EXAMS.md) for the policy.
+The current refinement also adds Google PKCE authentication, shared profile completion, instructor contact review and clearer beginner guidance. The baseline before this update was 55 passing tests and passing lint. Current local results: 83 unit/integration tests in 9 files, 6 original browser tests, and 15 connected UI fixtures. TypeScript, lint and the production build pass. The fixture suite serves the actual app under `/ieee-git-lab/` and intercepts OAuth redirects/token exchange and Auth/Data/Edge calls; no real Google authentication is claimed. See [provider configuration and hosted checks](GOOGLE_AUTH_AND_PROFILES.md).
+
+The previous refinement added reusable assessments and server-timed exams. Run `npm run test:e2e:fixtures` in addition to the original browser suite. The new local-only UI fixtures cover the authoring interface, per-assessment workspace isolation, opt-in accepted autosaves, refresh/clock manipulation, deadline locking, server-frozen answers, network failures and stale tabs. The embedded PostgreSQL suite runs all four migrations and additionally checks existing-data preservation, immutable versions, publication, private keys, attempt limits, exact deadline rejection, abandoned expiry and grading/release. See [ASSESSMENTS_AND_EXAMS.md](ASSESSMENTS_AND_EXAMS.md) for the policy.
 
 For a hosted release, apply the additive migration to the dedicated staging project, deploy `assessment-attempt`, and install/check `supabase/exam-expiry-schedule.sql`. Verify an exam abandoned before its deadline is finalized by the actual scheduled job, without reopening a browser. Attempt a late save and confirm the earlier accepted answers/score remain unchanged. Complete an instructor-created assignment and exam through actual Auth, Edge, Data API and released-result screens. These live infrastructure checks remain unperformed locally.
 
@@ -13,6 +15,7 @@ npm test
 npm run build
 npm audit
 npm run test:e2e
+npm run test:e2e:fixtures
 ```
 
 Use Node.js 24. On Windows the Playwright configuration uses the installed Microsoft Edge channel; on Linux/macOS run `npx playwright install chromium` first. Vitest in restrictive Windows sandboxes can fail before loading tests because temporary files cannot be renamed: rerun with the required local filesystem permission rather than misreporting this as a Git behavior failure.

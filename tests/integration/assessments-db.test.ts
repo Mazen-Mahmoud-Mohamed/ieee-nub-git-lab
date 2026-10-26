@@ -72,6 +72,18 @@ beforeAll(async () => {
   await db.exec(
     readFileSync('supabase/migrations/20261026171250_normalize_profile_faculty.sql', 'utf8'),
   );
+  await db.exec(
+    "alter table auth.users add column email text;update auth.users set email=id::text||'@example.test'",
+  );
+  await db.exec(
+    "insert into auth.users(id,email,email_confirmed_at) values('66666666-6666-4666-8666-666666666666','legacy@example.test',now());insert into public.profiles(id,full_name,student_id,university,department,academic_year,faculty) values('66666666-6666-4666-8666-666666666666','Legacy Student','OLD','Nahda University','Engineering','2','engineering')",
+  );
+  await db.exec(
+    readFileSync('supabase/migrations/20261026173800_google_auth_student_profiles.sql', 'utf8'),
+  );
+  await db.exec(
+    "update public.profiles set phone='+201012345678' where student_id in ('A001','B001')",
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -244,5 +256,138 @@ describe.sequential('versioned assessment and timed exam lifecycle', () => {
     await expect(
       user(A, `select public.assessment_verification_context('${examAttempt}','${A}')`),
     ).rejects.toThrow();
+  });
+});
+
+describe.sequential('authenticated profile completion and submission identity', () => {
+  const C = '55555555-5555-4555-8555-555555555555';
+  it('retains academic data and submitted identity while requiring missing contact details', async () => {
+    await root(
+      `insert into auth.users(id,email_confirmed_at,email) values('${C}',now(),'new@example.test')`,
+    );
+    await expect(user(C, `select public.start_assessment('${assignment}')`)).rejects.toThrow(
+      'Complete',
+    );
+    const original = (
+      await root(`select student_id,department,academic_year from public.profiles where id='${A}'`)
+    ).rows[0];
+    await user(
+      A,
+      `select public.save_student_profile('Student A','01012345678','computer_science')`,
+    );
+    expect(
+      (
+        await root(
+          `select student_id,department,academic_year from public.profiles where id='${A}'`,
+        )
+      ).rows[0],
+    ).toEqual(original);
+    expect(
+      (await root(`select identity_snapshot from public.attempts where id='${LEGACY}'`)).rows[0]
+        .identity_snapshot,
+    ).toBeNull();
+  });
+  it('normalizes phones, upserts only the authenticated ID and prevents duplicate profiles', async () => {
+    await user(
+      C,
+      `select public.save_student_profile('Google Student','(+20) 10-1234-5678','computer_science')`,
+    );
+    await user(
+      C,
+      `select public.save_student_profile('Google Student','00201012345678','computer_science')`,
+    );
+    const result = await user(
+      C,
+      `select id,phone,student_id,academic_year from public.profiles where id='${C}'`,
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      id: C,
+      phone: '+201012345678',
+      student_id: null,
+      academic_year: null,
+    });
+    await expect(
+      user(C, `select public.save_student_profile('Google Student','010123','engineering')`),
+    ).rejects.toThrow('Egyptian');
+    await expect(
+      user(C, `select public.save_student_profile('Google Student','01012345678','other')`),
+    ).rejects.toThrow('faculty');
+    expect((await user(C, `select * from public.profiles where id='${A}'`)).rows).toHaveLength(0);
+    await user(C, `update public.profiles set full_name='Impersonated' where id='${A}'`);
+    expect(
+      (await root(`select full_name from public.profiles where id='${A}'`)).rows[0].full_name,
+    ).toBe('Student A');
+    await expect(user(C, 'select public.instructor_submissions()')).rejects.toThrow('Instructor');
+    await expect(user(C, 'select * from auth.users')).rejects.toThrow();
+    await expect(user(C, `select private.student_profile_complete('${A}')`)).rejects.toThrow();
+  });
+  it('uses Auth email and freezes minimal contact details on actual finalization', async () => {
+    const id = (await user(C, `select public.start_assessment('${assignment}') as result`)).rows[0]
+      .result.id;
+    const deadline = (await root(`select deadline_at from public.attempts where id='${id}'`))
+      .rows[0].deadline_at;
+    await user(
+      C,
+      `select public.save_student_profile('Final Student','01112345678','engineering')`,
+    );
+    expect(
+      (await root(`select deadline_at from public.attempts where id='${id}'`)).rows[0].deadline_at,
+    ).toEqual(deadline);
+    await root(`set role service_role`);
+    await db.query(
+      `select public.accept_assessment_checkpoint('${C}','${id}',0,'{"snapshot":{},"events":[],"answers":{"q-objective":"True","q-written":"Staged changes"}}','[]','[]',0,10,true,gen_random_uuid())`,
+    );
+    await user(
+      C,
+      `select public.save_student_profile('Later Student','01212345678','computer_science')`,
+    );
+    const rows = (await user(I, 'select public.instructor_submissions() as submission')).rows;
+    const frozen = rows.find((r) => r.submission.id === id).submission;
+    expect(frozen.profiles).toMatchObject({
+      full_name: 'Final Student',
+      email: 'new@example.test',
+      phone: '+201112345678',
+      faculty: 'engineering',
+    });
+    expect(frozen.student_id).toBe(C);
+    expect(frozen.submitted_at).toBeTruthy();
+    expect(rows.find((r) => r.submission.id === LEGACY).submission.profiles.email).toBe(
+      A + '@example.test',
+    );
+    await expect(
+      user(C, `update public.attempts set identity_snapshot='{}' where id='${id}'`),
+    ).rejects.toThrow();
+  });
+  it('blocks manual finalization for missing profiles but leaves legacy autosave/expiry available', async () => {
+    const incomplete = '66666666-6666-4666-8666-666666666666';
+    await db.exec('reset role');
+    await db.exec(
+      `insert into public.attempts(id,student_id,assignment_id,assignment_version) values('77777777-7777-4777-8777-777777777777','${incomplete}','${assignment}',1)`,
+    );
+    await root('set role service_role');
+    await expect(
+      user(incomplete, `select public.start_assessment('${assignment}')`),
+    ).rejects.toThrow('Complete');
+    await expect(user(incomplete, `select public.start_attempt('${assignment}')`)).rejects.toThrow(
+      'Complete',
+    );
+    await root('set role service_role');
+    const args = `'${incomplete}','77777777-7777-4777-8777-777777777777',0,'{"snapshot":{},"answers":{},"events":[]}','[]','[]',0,0`;
+    await expect(
+      db.query(`select public.accept_assessment_checkpoint(${args},true,gen_random_uuid())`),
+    ).rejects.toThrow('Complete');
+    await db.query(`select public.accept_assessment_checkpoint(${args},false,gen_random_uuid())`);
+    await root(
+      `update public.attempts set deadline_at=now()-interval '1 second' where id='77777777-7777-4777-8777-777777777777'`,
+    );
+    expect(
+      (
+        await user(
+          incomplete,
+          `select public.assessment_state('77777777-7777-4777-8777-777777777777') as result`,
+        )
+      ).rows[0].result.status,
+    ).toBe('expired');
   });
 });

@@ -380,7 +380,7 @@ export function outcomesFor(
   view: RepoView,
   identity: StudentIdentity,
   working: Record<string, string> = {},
-): Outcome[] {
+): Array<Outcome & { feedback: string[] }> {
   const legacy = () => validateRepository(view, identity);
   const commits = new Map(view.commits.map((c) => [c.oid, c]));
   const ancestors = (ref: string) => {
@@ -465,6 +465,50 @@ export function outcomesFor(
     points: t.points,
     bonus: t.bonus,
     passed: t.rules.every(passes),
+    feedback: t.rules
+      .filter((r) => !passes(r))
+      .map((r) => {
+        switch (r.type) {
+          case 'repository':
+            return !view.initialized
+              ? 'Create a Git repository in this project first.'
+              : `Check the active branch${r.branch ? ' (' + r.branch + ')' : ''}${r.clean ? ' and save all tracked changes in commits' : ''}.`;
+          case 'file':
+            return `Check ${r.path} in ${r.ref === 'working' ? 'your working files' : 'the committed files on ' + (r.ref || 'main')}. It must ${r.match === 'lines' ? 'have at least ' + (r.min || 1) + ' non-empty lines' : r.match === 'exact' ? 'match the required content' : r.match === 'contains' ? 'contain the required text' : 'exist'}.`;
+          case 'branch':
+            return `The branch ${r.branch} is missing.`;
+          case 'commits':
+            return `At least ${r.min || 1} commits must be reachable from ${r.ref || 'main'}.`;
+          case 'message':
+            return `Check for the required commit message in ${r.ref || 'main'} history.`;
+          case 'merged':
+            return `Check that ${r.source} history is included in ${r.target || 'main'}${r.mergeCommit ? ' through a merge commit' : ''}.`;
+          case 'isolation':
+            return `Check that ${r.path} was introduced in a new commit on ${r.source}.`;
+          case 'legacy':
+            return (
+              (
+                {
+                  repo: 'Check your Git name and email, and the main branch.',
+                  files:
+                    'Compare the committed about.txt, goals.txt and notes.txt with the required file contents.',
+                  separate:
+                    'Each starting file needs its own focused commit in the required order. Check commit messages and file history.',
+                  goals:
+                    'The original three goals must remain, followed by two new goals in a later meaningful commit.',
+                  feature:
+                    'Check the committed skills.txt on feature/skills for all three required skills.',
+                  isolation: 'Check that skills.txt first appears after the feature branch point.',
+                  merged: 'Check that main includes the feature branch history and skills.txt.',
+                  clean: 'Finish on main with no staged or unstaged changes.',
+                  bonus:
+                    'Check the separate hobbies and completion histories and their final merge commit.',
+                } as Record<string, string>
+              )[r.outcomeId || ''] ||
+              'Compare your repository history with this task’s requirements.'
+            );
+        }
+      }),
   }));
 }
 export function sanitizeAnswers(d: Definition, value: unknown) {

@@ -1,5 +1,9 @@
 # Security and privacy
 
+## Google and profile identity
+
+Google authentication uses Supabase PKCE with one code exchange and an origin/base-path return URL. Intended destinations are allowlisted local routes. Display names from user metadata are editable prefill only; Auth user IDs identify accounts, Auth supplies email, and private membership supplies instructor roles. The app never merges accounts by email. See [configuration and linking policy](GOOGLE_AUTH_AND_PROFILES.md). Phone is validated/normalized in the shared form and the database; start and manual-finalize RPCs require a complete profile. Existing ownership RLS remains in force. A guarded instructor RPC retrieves Auth email and minimal immutable submission-time contact snapshots; older records are labeled as current profile data.
+
 ## Authorization model
 
 Student roles are derived from authenticated account ownership. Instructor membership comes only from `private.instructors`. `user_metadata` is never used for roles. Every privileged RPC checks `auth.uid()` and `is_instructor()`. Security-definer functions deliberately perform narrow operations with an empty search path, explicit authorization, and revoked default PUBLIC/anon execution. The few service-only RPCs are granted only to `service_role`. No client can update final attempt state or grade tables.
@@ -38,7 +42,7 @@ Auth rate limits, SMTP settings, HTTPS, JWT expiration and project security advi
 
 ## Data collected
 
-Confirmed email is held by Supabase Auth. Academic profiles include name, self-reported Student ID, university, department and academic year for coursework identification. The repository contains assignment text files and Git authorship metadata. Final submissions also retain written answers, outcome results, command strings/output, branch/checkpoint identifiers, timestamps, grades and feedback. The app does not collect keystrokes, camera, microphone, device fingerprints or background surveillance. Do not enter passwords, tokens or private personal records into the educational terminal.
+Confirmed email is held by Supabase Auth. Student profiles contain name, normalized Egyptian mobile number and faculty; existing self-reported Student ID, university, department and academic year are retained. Finalization captures minimal submission-time identity/contact details for accurate instructor review after profile edits. The repository contains assignment text files and Git authorship metadata. Final submissions also retain written answers, outcome results, command strings/output, branch/checkpoint identifiers, timestamps, grades and feedback. The app does not collect keystrokes, camera, microphone, device fingerprints or background surveillance. Do not enter passwords, tokens or private personal records into the educational terminal.
 
 Local practice remains on the device unless a user explicitly exports a backup. In assessed attempts, server autosave is off until the student enables the disclosed control naming the configured project and coursework payload. Consent is scoped to that project and attempt in the current tab/session. After consent, verified snapshots, answers and supporting activity save every 15 seconds; final submission also requires an explicit action. No background coursework uploads run before consent. See [the exam policy](ASSESSMENTS_AND_EXAMS.md) for deadlines, CAS revisions, idempotency and rejected late arrivals.
 

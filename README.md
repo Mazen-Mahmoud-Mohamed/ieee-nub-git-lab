@@ -2,6 +2,8 @@
 
 A focused Git assignment and examination platform. This extends the original Git Lab incrementally: the real browser Git engine, virtual filesystem, CodeMirror editor, themes, authentication, submission verifier, instructor review and Git regression tests are retained. No general LMS features are included.
 
+Students can sign in with Google or email/password, then complete one short profile form (name, authenticated email, Egyptian mobile and faculty). Faculty choices are **Engineering** and **Computer Science**. Existing Git work, academic details, attempts and grades are preserved. Start with the [Google/Auth and profile upgrade guide](docs/GOOGLE_AUTH_AND_PROFILES.md) for provider setup, migration order, account-linking behavior and hosted acceptance checks.
+
 ## Run locally
 
 Requires Node.js 24 and npm.
@@ -51,8 +53,8 @@ Publishing creates an immutable version. Editing a draft or publishing the next 
 
 Do not apply this app to an unrelated database. No production infrastructure was changed during this refinement.
 
-1. Verify the dedicated development/staging project. For a new installation apply the original migration, then `supabase/seed.sql`, then `supabase/migrations/20261026160527_reusable_assessments_and_exams.sql`. For an existing original installation apply **only the new additive migration** after a database backup and staging validation. Do not rerun the baseline migration or erase student tables. The extension preserves existing data and backfills Assignment 01 versions.
-2. Enable email/password Auth with confirmation, a suitable password policy, SMTP, auth rate limits and exact redirect URLs. Complete each student's academic profile. A self-reported Student ID is not proof of identity.
+1. Verify and back up the dedicated development/staging project. Follow the [ordered upgrade guide](docs/GOOGLE_AUTH_AND_PROFILES.md#upgrade-the-dedicated-project): new installs apply baseline → seed → assessment migration → faculty migration → Google/profile migration. Existing installs apply only migrations not already recorded as applied. Never rerun the baseline/seed or erase student tables.
+2. Enable email/password Auth with confirmation, a suitable password policy, SMTP, auth rate limits and exact redirect URLs. Complete each student's name, phone and faculty using the shared profile form. A self-reported Student ID is not proof of identity.
 3. Copy `.env.example` to `.env`; set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and the appropriate `VITE_BASE_PATH`. Use only the public publishable key in the frontend. Never set a service-role or secret key in a `VITE_` variable.
 4. Deploy the existing `submit-attempt` function and the new `assessment-attempt` function from this complete checkout with their configured import map. The old endpoint is preserved for compatibility; new assessments use the new endpoint. Keep gateway JWT verification enabled. Both independently verify the confirmed account. Set the Edge secret `ALLOWED_ORIGIN` to the exact frontend origin. Supabase supplies its server URL and service-role key inside the function runtime only.
 5. In the verified project's privileged SQL editor, add the confirmed instructor's actual `auth.users.id` to `private.instructors`. Do not use editable metadata or a Student ID for roles.

@@ -2892,3 +2892,159 @@ td small {
     font-size: 11px;
   }
 }
+/* Clear primary controls and beginner guidance, within the existing palette. */
+.google-signin {
+  width: 100%;
+  justify-content: center;
+  font-weight: 650;
+}
+.auth-divider {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 8px 0;
+}
+.workspace-guide {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.workspace-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.workspace-guide p {
+  line-height: 1.6;
+}
+.task-feedback {
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+.task-feedback h4 {
+  margin: 8px 0;
+}
+.terminal-prompt input:focus {
+  outline: 1px solid #64b5ef;
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.session-bar [role='timer'] {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.table-toolbar {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .app-header {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 70px;
+    padding-bottom: 8px;
+  }
+  .app-header nav {
+    display: flex;
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    justify-content: center;
+    gap: 14px;
+    padding: 8px 0;
+  }
+  .app-header nav a {
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .session-bar [role='timer'] {
+    font-size: 28px;
+  }
+}
+
+.task-hint {
+  display: block;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.extra-filters summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 10px;
+}
+.extra-filters select {
+  display: block;
+  margin: 8px;
+}
+/* Readable working text and controls at ordinary laptop sizes. */
+.workspace .panel-heading {
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+.file-row,
+.folder-heading,
+.explorer-tabs button {
+  font-size: 13px;
+}
+.file-row {
+  min-height: 40px;
+}
+.explorer-empty,
+.explorer-note {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.editor-tabs,
+.editor-panel .cm-editor {
+  font-size: 14px;
+}
+.terminal-body,
+.terminal-event pre,
+.terminal-prompt,
+.terminal-prompt input {
+  font-size: 13px;
+}
+.terminal-prompt input {
+  height: 28px;
+}
+.terminal-welcome,
+.terminal-welcome p {
+  font-size: 12px;
+}
+.progress-heading,
+.progress-caption {
+  font-size: 12px;
+}
+.workspace-guide,
+.task-picker {
+  font-size: 14px;
+}
+.task-picker {
+  margin: 18px 0;
+}
+.task-picker summary {
+  cursor: pointer;
+  color: var(--blue);
+  line-height: 1.6;
+}
+.mission strong {
+  font-size: 13px;
+}
+.mission small {
+  font-size: 11px;
+}
+.section-detail h3 {
+  font-size: 17px;
+}
+.section-detail > p,
+.section-detail ol,
+.task-feedback .written-answer {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.task-feedback h4 {
+  font-size: 15px;
+}
+.instructions h1 {
+  font-size: 22px;
+}

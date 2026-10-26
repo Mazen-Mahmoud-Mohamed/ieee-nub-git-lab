@@ -44,26 +44,26 @@ Integrity is consistency of submitted work and authenticated ownership, not a cl
 
 ## Database map
 
-| Entity                                             | Purpose / access                                                                             |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| profiles                                           | Academic identity; owner writes; instructor can read                                         |
-| assignments, assignment_sections, assignment_tasks | Versioned public instructions; visible assignment or instructor read                         |
-| questions                                          | Public question wording, kind, point allocation and options; no answer keys                  |
-| student_enrollments                                | Assignment membership and retake allowance; guarded RPC writes                               |
-| attempts                                           | Owner, assignment version, immutable final state, server timestamp, receipt, idempotency key |
-| workspace_drafts                                   | Explicitly saved untrusted recovery envelope; guarded owner RPC                              |
-| workspace_snapshots                                | Immutable final Git filesystem; owner review policy or instructor                            |
-| command_events                                     | Bounded supporting activity with sequence and commit checkpoint                              |
-| task_results                                       | Trusted practical outcome breakdown; instructor only                                         |
-| student_answers                                    | Written answers and reflections; review-setting controlled owner access                      |
-| grading_results                                    | Per-question instructor allocation; instructor only                                          |
-| grading_summaries                                  | Verified practical score, theory total, feedback and release state                           |
-| released_results                                   | Security-invoker view of released grade summaries, still subject to ownership RLS            |
-| audit_logs                                         | Server-written privileged action record; instructor read                                     |
-| app_settings                                       | Non-secret class accessibility and retention settings                                        |
-| private.instructors                                | Privileged role membership; inaccessible through Data API                                    |
-| private.question_rubrics                           | Instructor rubrics / optional future answer keys                                             |
-| private.rate_limits                                | Bounded submission windows                                                                   |
+| Entity                                             | Purpose / access                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| profiles                                           | Student name, normalized phone, canonical faculty and preserved academic details; owner writes; instructor can read |
+| assignments, assignment_sections, assignment_tasks | Versioned public instructions; visible assignment or instructor read                                                |
+| questions                                          | Public question wording, kind, point allocation and options; no answer keys                                         |
+| student_enrollments                                | Assignment membership and retake allowance; guarded RPC writes                                                      |
+| attempts                                           | Owner, assignment version, immutable final state, server timestamp, receipt, idempotency key                        |
+| workspace_drafts                                   | Explicitly saved untrusted recovery envelope; guarded owner RPC                                                     |
+| workspace_snapshots                                | Immutable final Git filesystem; owner review policy or instructor                                                   |
+| command_events                                     | Bounded supporting activity with sequence and commit checkpoint                                                     |
+| task_results                                       | Trusted practical outcome breakdown; instructor only                                                                |
+| student_answers                                    | Written answers and reflections; review-setting controlled owner access                                             |
+| grading_results                                    | Per-question instructor allocation; instructor only                                                                 |
+| grading_summaries                                  | Verified practical score, theory total, feedback and release state                                                  |
+| released_results                                   | Security-invoker view of released grade summaries, still subject to ownership RLS                                   |
+| audit_logs                                         | Server-written privileged action record; instructor read                                                            |
+| app_settings                                       | Non-secret class accessibility and retention settings                                                               |
+| private.instructors                                | Privileged role membership; inaccessible through Data API                                                           |
+| private.question_rubrics                           | Instructor rubrics / optional future answer keys                                                                    |
+| private.rate_limits                                | Bounded submission windows                                                                                          |
 
 All tables use UUID primary keys except stable public question IDs, the singleton settings row, and private lookup keys. Every application table enables RLS, including private tables. Appropriate foreign keys, unique attempt/enrollment indexes and cascade rules protect ownership and lifecycle. Read indexes cover assignments, attempts, students, grading and audit queries. Profiles are normalized separately from submissions; avoid editing academic identity after grading if institutional records require an immutable identity archive.
 
@@ -78,3 +78,7 @@ Confirmed email and password are straightforward for beginners, permit recovery 
 - [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security)
 
 No separate backend server is deployed. Supabase manages PostgreSQL, Auth and the verifier runtime; GitHub Pages hosts static assets. There is no Sites hosting dependency.
+
+## Google/profile refinement
+
+The shared auth client uses PKCE. The base URL query carries the callback code; HashRouter carries application routes. `finishAuthCallback` exchanges once and removes callback parameters. An allowlisted session-storage route restores the intended destination. One shared profile screen is used by both providers; Auth email is read-only, and `save_student_profile` derives the owner from `auth.uid()` and preserves legacy academic fields. The start/manual-finalization wrappers reuse the existing assessment policy while adding database completion checks. Submission status transitions capture minimal identity snapshots. `instructor_submissions` checks private instructor membership and joins authoritative Auth email; no frontend Auth user enumeration is used. See [migration/configuration details](GOOGLE_AUTH_AND_PROFILES.md).

@@ -37,6 +37,14 @@ export function SessionBar({
             Save now
           </button>
         )}
+      {session.finalized && (
+        <p role="status">
+          This attempt is read only.{' '}
+          {state.auto_submitted || state.status === 'expired'
+            ? 'Time is up; only your last accepted server save is included.'
+            : 'Your submission is finalized.'}
+        </p>
+      )}
       {warning && (
         <p role="status">
           {seconds <= 0

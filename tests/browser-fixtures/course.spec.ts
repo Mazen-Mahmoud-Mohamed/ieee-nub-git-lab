@@ -24,7 +24,12 @@ const theory = (title: string, type: 'assignment' | 'exam' = 'assignment'): Defi
     },
   ],
 });
-async function fixture(page: Page, instructor = false, examSeconds = 120) {
+async function fixture(
+  page: Page,
+  instructor = false,
+  examSeconds = 120,
+  options: { newUser?: boolean; cancel?: boolean; invalidCode?: boolean } = {},
+) {
   const definitions: Record<string, Definition> = {
     [A]: {
       ...theory('Assignment A'),
@@ -44,7 +49,11 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
   const saved: Record<string, any>[] = [];
   const requests: string[] = [];
   let uploads = 0;
+  let profileExists = !options.newUser;
+  const authCalls: Array<{ path: string; body: any; query: string }> = [];
   let profileFaculty = 'engineering';
+  let phone: string | null = '+201012345678';
+  let fullName = instructor ? 'Fixture Instructor' : 'Fixture Student';
   let network = true;
   const authUser = {
     id: USER,
@@ -53,7 +62,7 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     aud: 'authenticated',
     email_confirmed_at: new Date().toISOString(),
     app_metadata: { provider: 'email' },
-    user_metadata: {},
+    user_metadata: { full_name: 'Google Student' },
   };
   const token = [
     Buffer.from('{}').toString('base64url'),
@@ -73,6 +82,30 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     requests.push(path);
     const body = request.postDataJSON() || {};
     let response: any = [];
+    if (path.startsWith('/auth/')) authCalls.push({ path, body, query: url.search });
+    if (path === '/auth/v1/authorize') {
+      const callback = new URL(url.searchParams.get('redirect_to')!);
+      if (options.cancel) callback.searchParams.set('error', 'access_denied');
+      else callback.searchParams.set('code', 'fixture-code');
+      await route.fulfill({ status: 302, headers: { location: callback.href } });
+      return;
+    }
+    if (path === '/auth/v1/signup') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser, session: null }),
+      });
+      return;
+    }
+    if (path === '/auth/v1/token' && options.invalidCode) {
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid fixture code' }),
+      });
+      return;
+    }
     if (path === '/auth/v1/token')
       response = {
         access_token: token,
@@ -84,15 +117,24 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     else if (path === '/auth/v1/user') response = authUser;
     else if (path === '/rest/v1/profiles') {
       if (request.method() === 'POST') profileFaculty = body.faculty;
-      response = {
-        id: USER,
-        full_name: instructor ? 'Fixture Instructor' : 'Fixture Student',
-        student_id: 'TEST-001',
-        department: 'Engineering',
-        faculty: profileFaculty,
-        academic_year: '2',
-        university: 'Nahda University',
-      };
+      response = profileExists
+        ? {
+            id: USER,
+            full_name: fullName,
+            phone,
+            student_id: 'TEST-001',
+            department: 'Engineering',
+            faculty: profileFaculty,
+            academic_year: '2',
+            university: 'Nahda University',
+          }
+        : null;
+    } else if (path.endsWith('/rpc/save_student_profile')) {
+      profileExists = true;
+      profileFaculty = body.p_faculty;
+      phone = body.p_phone;
+      fullName = body.p_full_name;
+      response = { id: USER, full_name: fullName, phone, faculty: profileFaculty };
     } else if (path.endsWith('/rpc/is_instructor')) response = instructor;
     else if (path === '/rest/v1/assignments') {
       const records = Object.entries(definitions).map(([id, d]) => ({
@@ -121,11 +163,13 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     } else if (path === '/rest/v1/assessment_drafts') {
       const id = url.searchParams.get('assessment_id')?.slice(3);
       response = id ? { document: definitions[id] } : [];
-    } else if (path === '/rest/v1/attempts')
+    } else if (path === '/rest/v1/attempts' || path.endsWith('/rpc/instructor_submissions'))
       response = Object.values(attempts).map((a) => ({
         ...a,
         profiles: {
-          full_name: 'Fixture Student',
+          full_name: fullName,
+          email: authUser.email,
+          phone,
           student_id: 'TEST-001',
           department: 'Engineering',
           faculty: profileFaculty,
@@ -212,14 +256,14 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     });
   });
   async function login() {
-    await page.goto('/#/auth');
+    await page.goto('/ieee-git-lab/#/auth');
     await page.getByLabel('Email address').fill('fixture@example.test');
     await page.getByLabel('Password', { exact: true }).fill('SyntheticFixturePassword');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
   }
   async function start(id: string) {
-    await page.goto('/#/assessments/' + id);
+    await page.goto('/ieee-git-lab/#/assessments/' + id);
     await page.getByRole('checkbox').check();
     await page
       .getByRole('button', {
@@ -236,6 +280,11 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     saved,
     requests,
     faculty: () => profileFaculty,
+    incomplete: () => {
+      phone = null;
+    },
+    user: authUser,
+    authCalls,
     uploads: () => uploads,
     definitions,
     network: (enabled: boolean) => {
@@ -246,7 +295,7 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
 test('profile faculty choices and saved values use the corrected names', async ({ page }) => {
   const api = await fixture(page);
   await api.login();
-  await page.goto('/#/profile');
+  await page.goto('/ieee-git-lab/#/profile');
   const faculty = page.getByRole('group', { name: 'Faculty', exact: true });
   await expect(faculty.getByRole('radio')).toHaveCount(2);
   await expect(faculty.getByRole('radio', { name: 'Engineering', exact: true })).toHaveAttribute(
@@ -257,7 +306,7 @@ test('profile faculty choices and saved values use the corrected names', async (
   await page.getByRole('button', { name: 'Save profile', exact: true }).click();
   await expect(page).toHaveURL(/dashboard/);
   expect(api.faculty()).toBe('computer_science');
-  await page.goto('/#/profile');
+  await page.goto('/ieee-git-lab/#/profile');
   await expect(page.getByRole('radio', { name: 'Computer Science', exact: true })).toBeChecked();
 });
 test('instructor faculty filter has only canonical faculties and an all option', async ({
@@ -265,7 +314,7 @@ test('instructor faculty filter has only canonical faculties and an all option',
 }) => {
   const api = await fixture(page, true);
   await api.login();
-  await page.goto('/#/instructor');
+  await page.goto('/ieee-git-lab/#/instructor');
   const filter = page.getByRole('combobox', { name: 'Faculty filter', exact: true });
   await expect(filter.getByRole('option')).toHaveText([
     'All faculties',
@@ -295,7 +344,7 @@ test('instructor can create and publish a timed exam with an objective private k
 }) => {
   const api = await fixture(page, true);
   await api.login();
-  await page.goto('/#/instructor/assessments/new');
+  await page.goto('/ieee-git-lab/#/instructor/assessments/new');
   await page.getByLabel('Title', { exact: true }).fill('New Git checkpoint exam');
   await page.getByRole('combobox', { name: 'Type', exact: true }).selectOption('exam');
   await page.getByRole('combobox', { name: 'Format', exact: true }).selectOption('theory');
@@ -411,4 +460,130 @@ test('manual exam submission returns a receipt and the exact accepted answers', 
     'My final explanation of staged snapshots and local commits.',
   );
   await expect(page.getByText('Results are pending instructor review or release.')).toBeVisible();
+});
+
+test('first Google login completes only missing profile fields and restores the assessment destination', async ({
+  page,
+}) => {
+  const api = await fixture(page, false, 120, { newUser: true });
+  await page.goto('/ieee-git-lab/#/assessments/' + E);
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with Google' }).click();
+  await expect(page.getByRole('heading', { name: 'Complete your profile' })).toBeVisible();
+  await expect(page.getByLabel('Full name', { exact: true })).toHaveValue('Google Student');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/fixtures/google-profile-mobile.png',
+    fullPage: true,
+  });
+  await expect(page.getByLabel('Email address')).toHaveValue('fixture@example.test');
+  await expect(page.getByLabel('Email address')).toHaveJSProperty('readOnly', true);
+  await expect(page.getByText('Verified account email.', { exact: false })).toBeVisible();
+  await page.getByLabel('Phone number').fill('010123');
+  await page.getByRole('radio', { name: 'Computer Science', exact: true }).check();
+  await page.getByRole('button', { name: 'Save and continue' }).click();
+  await expect(page.getByRole('alert')).toContainText('Egyptian mobile');
+  await page.getByLabel('Phone number').fill('01012345678');
+  await page.getByRole('button', { name: 'Save and continue' }).click();
+  await expect(page).toHaveURL(new RegExp('/assessments/' + E + '$'));
+  expect(api.authCalls.filter((r) => r.path === '/auth/v1/token')).toHaveLength(1);
+  expect(api.authCalls.find((r) => r.path === '/auth/v1/token')?.body.auth_code).toBe(
+    'fixture-code',
+  );
+  expect(api.faculty()).toBe('computer_science');
+  await page.goto('/ieee-git-lab/#/dashboard');
+  await expect(page.getByRole('heading', { name: /Welcome back, Google/ })).toBeVisible();
+});
+
+test('returning Google user resumes the same active exam after signing out and back in', async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  await api.login();
+  await api.start(E);
+  const attempt = Object.values(api.attempts)[0];
+  const url = page.url();
+  const deadline = attempt.deadline_at;
+  await page.getByLabel('Your response').fill('Local answer survives authentication');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+  await page.goto(url);
+  await page.getByRole('button', { name: 'Continue with Google' }).click();
+  await expect(page.getByRole('timer')).toBeVisible();
+  await expect(page).toHaveURL(url);
+  expect(Object.keys(api.attempts)).toHaveLength(1);
+  expect(attempt.deadline_at).toBe(deadline);
+  await expect(page.getByLabel('Your response')).toHaveValue(
+    'Local answer survives authentication',
+  );
+  await expect(page.getByRole('heading', { name: 'Complete your profile' })).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/fixtures/exam-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('timer')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('cancelled and incomplete OAuth returns explain recovery without retaining callback parameters', async ({
+  page,
+}) => {
+  await fixture(page, false, 120, { cancel: true });
+  await page.goto('/ieee-git-lab/#/auth');
+  await page.getByRole('button', { name: 'Continue with Google' }).click();
+  await expect(page.getByRole('alert')).toContainText('cancelled');
+  await expect(page).not.toHaveURL(/error=|auth_return/);
+  await page.goto('/ieee-git-lab/?auth_return=1#/auth');
+  await expect(page.getByRole('alert')).toContainText('incomplete');
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled();
+});
+
+test('email registration collects a name and requests verified email confirmation', async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  await page.goto('/ieee-git-lab/#/auth');
+  await page
+    .getByRole('button', { name: 'New to the lab? Create an account', exact: true })
+    .click();
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+  await page.getByLabel('Full name', { exact: true }).fill('Email Student');
+  await page.getByLabel('Email address').fill('student@example.test');
+  await page.getByLabel('Password', { exact: true }).fill('SyntheticFixturePassword');
+  await page.getByRole('button', { name: 'Create account', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Check your email');
+  expect(api.authCalls.find((r) => r.path === '/auth/v1/signup')?.body.data.full_name).toBe(
+    'Email Student',
+  );
+});
+
+test('instructor sees authenticated contact details and can search by email', async ({ page }) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await api.start(E);
+  await page.goto('/ieee-git-lab/#/instructor');
+  await expect(page.getByRole('cell', { name: 'fixture@example.test', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '+201012345678', exact: true })).toBeVisible();
+  await page.getByLabel('Search student name, email or ID').fill('fixture@example.test');
+  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(1);
+});
+
+test('expired or invalid OAuth code allows recovery without a session', async ({ page }) => {
+  await fixture(page, false, 120, { invalidCode: true });
+  await page.goto('/ieee-git-lab/?auth_return=1&code=expired#/auth');
+  await expect(page.getByRole('alert')).toContainText('expired or belongs to a different browser');
+  await expect(page).not.toHaveURL(/code=|auth_return/);
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled();
+});
+
+test('authorized instructor access remains available without a student profile', async ({
+  page,
+}) => {
+  await fixture(page, true, 120, { newUser: true });
+  await page.goto('/ieee-git-lab/#/instructor');
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with Google' }).click();
+  await expect(page.getByRole('heading', { name: 'A clearer view of learning.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Complete your profile' })).toHaveCount(0);
 });
