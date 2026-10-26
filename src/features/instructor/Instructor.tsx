@@ -89,12 +89,20 @@ function Attempts() {
       const { data, error } = await client.rpc('instructor_submissions');
       if (error) throw error;
       setRows(
-        (data || []).map((r: Attempt & { grading_summaries: unknown }) => ({
-          ...r,
-          ...((Array.isArray(r.grading_summaries)
-            ? r.grading_summaries[0]
-            : r.grading_summaries) as object),
-        })) as unknown as Attempt[],
+        (data || []).map((r: Attempt & { grading_summaries: unknown }) => {
+          const grade = (
+            Array.isArray(r.grading_summaries) ? r.grading_summaries[0] : r.grading_summaries
+          ) as Partial<
+            Pick<Attempt, 'practical_score' | 'theory_score' | 'released' | 'feedback'>
+          > | null;
+          return {
+            ...r,
+            practical_score: grade?.practical_score ?? null,
+            theory_score: grade?.theory_score ?? null,
+            released: grade?.released ?? false,
+            feedback: grade?.feedback ?? null,
+          };
+        }) as Attempt[],
       );
     } catch (e) {
       setError(message(e));

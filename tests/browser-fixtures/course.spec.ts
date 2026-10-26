@@ -176,7 +176,17 @@ async function fixture(
           academic_year: '2',
         },
         assignments: { title: a.definition.title, type: a.definition.type },
-        grading_summaries: [],
+        grading_summaries:
+          a.status === 'in_progress'
+            ? null
+            : {
+                id: '99999999-9999-4999-8999-999999999999',
+                attempt_id: a.id,
+                practical_score: 0,
+                theory_score: null,
+                released: false,
+                feedback: '',
+              },
       }));
     else if (path === '/rest/v1/released_results')
       response = url.searchParams.has('attempt_id') ? null : [];
@@ -586,4 +596,25 @@ test('authorized instructor access remains available without a student profile',
   await page.getByRole('button', { name: 'Continue with Google' }).click();
   await expect(page.getByRole('heading', { name: 'A clearer view of learning.' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Complete your profile' })).toHaveCount(0);
+});
+
+test('instructor review preserves the attempt ID when the grading summary has its own ID', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await api.start(E);
+  await page.getByLabel('Your response').fill('Staging selects the next committed snapshot.');
+  await page.goto(page.url().replace('/theory', '/review'));
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  await page.getByRole('button', { name: 'Submit Exam', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  await page.goto('/ieee-git-lab/#/instructor');
+  await page.getByRole('button', { name: 'Inspect attempt →' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Explain how Git saves changes.', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Points (0–10)', { exact: true })).toBeVisible();
 });
