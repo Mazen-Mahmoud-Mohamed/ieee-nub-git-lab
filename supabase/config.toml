@@ -1,0 +1,4 @@
+project_id = "ieee-nub-git-lab"
+[functions.submit-attempt]
+verify_jwt = true
+import_map = "./functions/submit-attempt/import_map.json"

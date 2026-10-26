@@ -1,0 +1,13 @@
+name: Check submission verifier
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check --import-map supabase/functions/submit-attempt/import_map.json supabase/functions/submit-attempt/index.ts
