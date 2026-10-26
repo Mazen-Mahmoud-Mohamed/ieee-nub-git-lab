@@ -31,11 +31,14 @@ export function Instructor() {
       <Routes>
         <Route index element={<Overview />} />
         <Route path="students" element={<Students />} />
-        <Route path="submissions" element={<Attempts />} />
-        <Route path="results" element={<Attempts results />} />
-        <Route path="assignments" element={<AssessmentManager type="assignment" />} />
-        <Route path="exams" element={<AssessmentManager type="exam" />} />
-        <Route path="assessments" element={<AssessmentManager />} />
+        <Route path="submissions" element={<Attempts key="submissions" />} />
+        <Route path="results" element={<Attempts key="results" results />} />
+        <Route
+          path="assignments"
+          element={<AssessmentManager key="assignments" type="assignment" />}
+        />
+        <Route path="exams" element={<AssessmentManager key="exams" type="exam" />} />
+        <Route path="assessments" element={<AssessmentManager key="all" />} />
         <Route path="assessments/:id" element={<AssessmentEditor />} />
         <Route path="questions" element={<QuestionBank />} />
         <Route path="settings" element={<Settings />} />

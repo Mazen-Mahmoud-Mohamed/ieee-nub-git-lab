@@ -681,6 +681,9 @@ test('instructor review preserves the attempt ID when the grading summary has it
   const release = page.waitForRequest((r) => r.url().endsWith('/rpc/grade_assessment'));
   await page.getByRole('button', { name: 'Publish grade', exact: true }).click();
   expect((await release).postDataJSON().p_release).toBe(true);
+  await page.getByRole('link', { name: 'Results', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Assessment filter')).toBeVisible();
 });
 
 test('admin navigation loads real-shaped overview, students and dedicated assessment sections', async ({

@@ -3399,3 +3399,11 @@ td small {
 .student-preview .workspace-actions > a {
   display: none;
 }
+@media (min-width: 701px) {
+  .admin-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.instructor-nav {
+  column-gap: 18px;
+}

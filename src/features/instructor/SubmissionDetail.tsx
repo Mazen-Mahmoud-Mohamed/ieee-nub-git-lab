@@ -11,6 +11,8 @@ import { adminError as message, type Attempt } from './adminData';
 export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const [status, setStatus] = useState(attempt.status);
   const [keys, setKeys] = useState<
     Record<string, { correctAnswers?: string[]; explanation?: string }>
   >({});
@@ -33,6 +35,8 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
   useEffect(() => {
     let live = true;
     setLoading(true);
+    setLoadError(false);
+    setError('');
     void (async () => {
       try {
         const client = requireBackend();
@@ -77,6 +81,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
         setKeys(contextData.data?.keys || {});
         setAccepted(contextData.data?.checkpoint_accepted_at || '');
         const pinned = stateData.data.definition as Definition;
+        setStatus(stateData.data.status);
         setDefinition(pinned);
         setTaskResults(
           taskData.data?.length
@@ -148,7 +153,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
     return () => {
       live = false;
     };
-  }, [attempt.id]);
+  }, [attempt.id, refresh]);
   const grade = async (release: boolean, draft = false) => {
     if (
       !draft &&
@@ -197,6 +202,21 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
     }
   };
   if (loading) return <p role="status">Loading submission evidence…</p>;
+  if (loadError)
+    return (
+      <section>
+        <button className="text-button" onClick={back}>
+          ← Back to attempts
+        </button>
+        <h2>Submission evidence unavailable</h2>
+        <p role="alert" className="error">
+          {error}
+        </p>
+        <button className="outline-button" onClick={() => setRefresh((n) => n + 1)}>
+          Retry evidence load
+        </button>
+      </section>
+    );
   const checks = view
     ? requirementProgress(
         definition,
@@ -215,6 +235,13 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
         Back to attempts
       </button>
       <h2>{attempt.profiles?.full_name}</h2>
+      <h3>
+        {definition.title} · {definition.type} · Attempt {attempt.attempt_number} · Version{' '}
+        {attempt.assignment_version}
+      </h3>
+      <button className="text-button" disabled={busy} onClick={() => setRefresh((n) => n + 1)}>
+        Refresh evidence
+      </button>
       <p>
         {attempt.profiles?.email} · {attempt.profiles?.phone || 'Phone not provided'} ·{' '}
         {facultyLabel(attempt.profiles?.faculty)}
@@ -229,7 +256,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           : 'Current account contact details; this older attempt has no submission identity snapshot.'}
       </p>
       <p>
-        {attempt.profiles?.student_id} · {attempt.status} · {attempt.receipt || 'Not submitted'}
+        {attempt.profiles?.student_id} · {status} · {attempt.receipt || 'Not submitted'}
       </p>
       {error && (
         <p className="error" role="alert">
@@ -245,7 +272,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
         <section className="form-card">
           <h3>Verified repository</h3>
           <p>
-            {attempt.status === 'in_progress'
+            {status === 'in_progress'
               ? 'Latest accepted server checkpoint; this attempt is still in progress.'
               : 'Finalized server-verified snapshot.'}
             {accepted ? ' Accepted ' + new Date(accepted).toLocaleString() : ''}
@@ -400,21 +427,21 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           <div className="review-actions">
             <button
               className="outline-button"
-              disabled={busy || loadError || attempt.status === 'in_progress'}
+              disabled={busy || loadError || status === 'in_progress'}
               onClick={() => void grade(false, true)}
             >
               Save draft grade
             </button>
             <button
               className="outline-button"
-              disabled={busy || loadError || attempt.status === 'in_progress'}
+              disabled={busy || loadError || status === 'in_progress'}
               onClick={() => void grade(false)}
             >
               Finalize grade privately
             </button>
             <button
               className="primary"
-              disabled={busy || loadError || attempt.status === 'in_progress'}
+              disabled={busy || loadError || status === 'in_progress'}
               onClick={() => void grade(true)}
             >
               Publish grade
