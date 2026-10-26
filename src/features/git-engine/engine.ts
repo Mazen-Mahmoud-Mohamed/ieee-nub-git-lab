@@ -27,10 +27,12 @@ export type RepoView = {
 };
 export class GitEngine {
   cwd = '/';
-  dir = '/IEEE-Git-Task';
   events: Activity[] = [];
   globalConfig: Record<string, string> = {};
-  constructor(public fs = new VirtualFS()) {}
+  constructor(
+    public fs = new VirtualFS(),
+    public dir = '/IEEE-Git-Task',
+  ) {}
   get options() {
     return { fs: this.fs, dir: this.dir };
   }
@@ -278,7 +280,7 @@ export class GitEngine {
       )
         return usage('git init [-b main]');
       if (this.cwd !== this.dir)
-        throw new Error('Initialize inside /IEEE-Git-Task for this assignment.');
+        throw new Error(`Initialize inside ${this.dir} for this assessment.`);
       if (await this.initialized()) return 'Reinitialized existing Git repository';
       await git.init({ ...this.options, defaultBranch: 'main' });
       for (const [path, value] of Object.entries(this.globalConfig))
@@ -289,7 +291,9 @@ export class GitEngine {
       !(await this.initialized()) ||
       !(this.cwd === this.dir || this.cwd.startsWith(this.dir + '/'))
     )
-      throw new Error('Not a Git repository. Create and enter IEEE-Git-Task, then initialize it.');
+      throw new Error(
+        `Not a Git repository. Create and enter ${this.dir.slice(1)}, then initialize it.`,
+      );
     if (sub === 'status') {
       if (a.length > 1 || a.some((x) => !['--short', '-s'].includes(x)))
         return usage('git status [--short]');

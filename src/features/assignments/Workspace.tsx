@@ -17,7 +17,8 @@ import {
   Info,
   CheckCircle2,
 } from 'lucide-react';
-import { assignment, validateRepository, type StudentIdentity } from './assignment';
+import { type StudentIdentity } from './assignment';
+import { firstAssessment, outcomesFor, totals, type Definition } from '../assessments/model';
 import type { Lab } from '../../hooks/useLab';
 import { GitGraph } from '../../components/GitGraph';
 import { Terminal } from '../terminal/Terminal';
@@ -26,15 +27,27 @@ export function Workspace({
   lab,
   identity,
   dark,
+  definition = firstAssessment,
+  basePath = '',
 }: {
   lab: Lab;
   identity: StudentIdentity;
   dark: boolean;
+  definition?: Definition;
+  basePath?: string;
 }) {
   const [selected, setSelected] = useState('');
   const [text, setText] = useState('');
   const [tab, setTab] = useState<'files' | 'history'>('files');
-  const [section, setSection] = useState('init');
+  const [section, setSection] = useState(definition.sections[0]?.id || '');
+  const assignment = {
+    ...definition,
+    sections: definition.sections.map((s, i) => ({
+      ...s,
+      tag: String(i + 1).padStart(2, '0'),
+      points: s.tasks.reduce((n, t) => n + t.points, 0),
+    })),
+  };
   const [expanded, setExpanded] = useState(false);
   const [newFile, setNewFile] = useState(false);
   const [filename, setFilename] = useState('');
@@ -56,10 +69,25 @@ export function Workspace({
       live = false;
     };
   }, [selected, lab.revision]);
-  const outcomes = validateRepository(lab.view, identity);
+  const working = Object.fromEntries(
+    files.map((p) => [
+      p.slice(lab.engine.dir.length + 1),
+      new TextDecoder().decode(new Uint8Array(lab.engine.fs.entries[p].data)),
+    ]),
+  );
+  const outcomes = outcomesFor(definition, lab.view, identity, working);
+  const points = totals(definition);
   const required = outcomes.filter((o) => !o.bonus);
   const complete = required.filter((o) => o.passed).length;
-  const current = assignment.sections.find((s) => s.id === section)!;
+  const current = assignment.sections.find((s) => s.id === section) ||
+    assignment.sections[0] || {
+      id: 'empty',
+      title: 'No practical tasks',
+      description: 'Continue to the theory questions.',
+      steps: [],
+      tag: '',
+      tasks: [],
+    };
   if (!lab.ready) return <div className="page">Restoring your workspace…</div>;
   return (
     <div className={'workspace ' + (expanded ? 'terminal-focused' : '')}>
@@ -70,7 +98,7 @@ export function Workspace({
         <div className="workspace-crumb">
           <Link to="/dashboard">My learning</Link>
           <ChevronRight size={14} />
-          <span>Assignment 01</span>
+          <span>{definition.title}</span>
           <span className="badge">IN PROGRESS</span>
         </div>
         <div className="workspace-actions">
@@ -78,7 +106,7 @@ export function Workspace({
             <i className="live-dot" />
             {lab.saving}
           </span>
-          <Link to="/review" className="small-button">
+          <Link to={basePath + '/review'} className="small-button">
             Review submission
             <ArrowUpRight size={14} />
           </Link>
@@ -109,11 +137,11 @@ export function Workspace({
               <div className="folder-heading">
                 <span>
                   <ChevronDown size={13} />
-                  <FolderOpen size={15} /> IEEE-Git-Task
+                  <FolderOpen size={15} /> {definition.projectName}
                 </span>
                 <button
                   aria-label="Create text file"
-                  disabled={!!lab.receipt}
+                  disabled={lab.readOnly}
                   onClick={() => setNewFile(!newFile)}
                 >
                   <Plus size={15} />
@@ -124,10 +152,13 @@ export function Workspace({
                   className="new-file"
                   onSubmit={async (e) => {
                     e.preventDefault();
+                    if (lab.readOnly) return;
                     try {
-                      if (!lab.engine.fs.entries['/IEEE-Git-Task'])
-                        throw new Error('Create IEEE-Git-Task with mkdir first.');
-                      const path = '/IEEE-Git-Task/' + filename;
+                      if (!lab.engine.fs.entries[lab.engine.dir])
+                        throw new Error(
+                          'Create the assessment project directory with mkdir first.',
+                        );
+                      const path = lab.engine.dir + '/' + filename;
                       if (lab.engine.fs.entries[path]) throw new Error('File already exists');
                       await lab.engine.write(path, '');
                       await lab.refresh();
@@ -162,7 +193,7 @@ export function Workspace({
                       onClick={() => setSelected(p)}
                     >
                       <FileText size={15} />
-                      <span>{p.replace('/IEEE-Git-Task/', '')}</span>
+                      <span>{p.replace(lab.engine.dir + '/', '')}</span>
                       <small className="file-status">
                         {!status ? '' : status[1] === 0 ? 'U' : status[1] !== status[2] ? 'M' : ''}
                       </small>
@@ -215,7 +246,7 @@ export function Workspace({
                 value={text}
                 height="100%"
                 theme={dark ? oneDark : 'light'}
-                readOnly={!!lab.receipt}
+                readOnly={lab.readOnly}
                 basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
                 onChange={(value) => {
                   setText(value);
@@ -274,16 +305,10 @@ export function Workspace({
           </div>
           <div className="instruction-scroll">
             <div className="assignment-label">
-              ASSIGNMENT 01 <span>BEGINNER</span>
+              {definition.type.toUpperCase()} <span>GIT COURSE</span>
             </div>
-            <h1>
-              Git fundamentals.
-              <br />
-              Real understanding.
-            </h1>
-            <p className="muted">
-              Commits, branching & merging. Put what you learned into practice.
-            </p>
+            <h1>{definition.title}</h1>
+            <p className="muted">{definition.description}</p>
             <div className="progress-heading">
               <span>Your progress</span>
               <strong>
@@ -291,22 +316,16 @@ export function Workspace({
               </strong>
             </div>
             <div className="progress-track">
-              <div style={{ width: `${(complete / required.length) * 100}%` }} />
+              <div
+                style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
+              />
             </div>
-            <span className="progress-caption">75 practical pts · 25 theory pts · +10 bonus</span>
+            <span className="progress-caption">
+              {points.practical} practical pts · {points.theory} theory pts · +{points.bonus} bonus
+            </span>
             <div className="mission-list">
               {assignment.sections.map((s) => {
-                const related = outcomes.filter((o) =>
-                  s.id === 'init'
-                    ? ['repo', 'files'].includes(o.id)
-                    : s.id === 'commits'
-                      ? ['separate', 'goals'].includes(o.id)
-                      : s.id === 'branches'
-                        ? ['feature', 'isolation'].includes(o.id)
-                        : s.id === 'merge'
-                          ? ['merged', 'clean'].includes(o.id)
-                          : o.bonus,
-                );
+                const related = outcomes.filter((o) => s.tasks.some((t) => t.id === o.id));
                 const passed = related.every((o) => o.passed);
                 return (
                   <button
@@ -320,7 +339,7 @@ export function Workspace({
                     <span>
                       <strong>{s.title}</strong>
                       <small>
-                        {s.points} points {s.id === 'bonus' ? '· Optional' : ''}
+                        {s.points} points {s.tasks.every((t) => t.bonus) ? '· Optional' : ''}
                       </small>
                     </span>
                     <ChevronRight size={14} />
@@ -337,23 +356,24 @@ export function Workspace({
                   <li key={s}>{s}</li>
                 ))}
               </ol>
-              {section === 'init' && (
-                <div className="file-requirements">
-                  <details open>
-                    <summary>Required file contents</summary>
-                    <h4>about.txt</h4>
-                    <pre>{`Name: ${identity.full_name || 'Your full name'}\nUniversity: Nahda University\nDepartment: ${identity.department || 'Your department'}`}</pre>
-                    <h4>goals.txt</h4>
-                    <pre>
-                      {
-                        'My Goals:\n\n1. Learn Git\n2. Understand version control\n3. Work on team projects'
-                      }
-                    </pre>
-                    <h4>notes.txt</h4>
-                    <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
-                  </details>
-                </div>
-              )}
+              {current.tasks.some((t) => t.rules.some((r) => r.type === 'legacy')) &&
+                section === 'init' && (
+                  <div className="file-requirements">
+                    <details open>
+                      <summary>Required file contents</summary>
+                      <h4>about.txt</h4>
+                      <pre>{`Name: ${identity.full_name || 'Your full name'}\nUniversity: Nahda University\nDepartment: ${identity.department || 'Your department'}`}</pre>
+                      <h4>goals.txt</h4>
+                      <pre>
+                        {
+                          'My Goals:\n\n1. Learn Git\n2. Understand version control\n3. Work on team projects'
+                        }
+                      </pre>
+                      <h4>notes.txt</h4>
+                      <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
+                    </details>
+                  </div>
+                )}
             </div>
             <details className="checks">
               <summary>Repository outcome checks</summary>
@@ -374,9 +394,13 @@ export function Workspace({
             </div>
             <Link
               className={
-                'primary theory-button ' + (complete < required.length ? 'disabled-link' : '')
+                'primary theory-button ' +
+                (complete < required.length && definition.gateTheory ? 'disabled-link' : '')
               }
-              to={complete === required.length ? '/theory' : '/workspace'}
+              to={
+                basePath +
+                (complete === required.length || !definition.gateTheory ? '/theory' : '/workspace')
+              }
             >
               Continue to theory
               <ArrowUpRight size={16} />

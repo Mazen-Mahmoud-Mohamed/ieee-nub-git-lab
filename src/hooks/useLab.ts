@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitEngine, type RepoView } from '../features/git-engine/engine';
 import { VirtualFS } from '../features/filesystem/VirtualFS';
 import { loadWorkspace, saveWorkspace, type LocalWorkspace } from '../services/persistence';
+import { firstAssessment, type Definition } from '../features/assessments/model';
+import { createStarter } from '../features/assessments/starter';
 const empty: RepoView = {
   initialized: false,
   branch: 'main',
@@ -10,7 +12,12 @@ const empty: RepoView = {
   status: [],
   config: {},
 };
-export function useLab(key: string) {
+export function useLab(
+  key: string,
+  definition: Definition = firstAssessment,
+  enabled = true,
+  migration?: { userId: string; attemptId: string },
+) {
   const engine = useRef(new GitEngine());
   const [ready, setReady] = useState(false);
   const [view, setView] = useState(empty);
@@ -19,18 +26,29 @@ export function useLab(key: string) {
   const [flagged, setFlagged] = useState<string[]>([]);
   const [attemptId, setAttemptId] = useState<string>();
   const [receipt, setReceipt] = useState<string>();
+  const [locked, setLocked] = useState(false);
+  const [serverRevision, setServerRevision] = useState(0);
   const [saving, setSaving] = useState('Loading local workspace…');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const loadedKey = useRef('');
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     setReady(false);
     loadedKey.current = '';
-    loadWorkspace(key)
-      .then((data) => {
+    (async () => {
+      const current = await loadWorkspace(key);
+      if (current || !migration) return current;
+      const legacy = await loadWorkspace(migration.userId);
+      return legacy?.attemptId === migration.attemptId ? legacy : undefined;
+    })()
+      .then(async (data) => {
         if (!live) return;
-        const next = new GitEngine(data ? VirtualFS.restore(data.snapshot) : undefined);
+        const next = data
+          ? new GitEngine(VirtualFS.restore(data.snapshot), '/' + definition.projectName)
+          : await createStarter(definition);
+        if (!live) return;
         if (data) {
           next.cwd = data.cwd;
           next.events = data.events;
@@ -41,6 +59,8 @@ export function useLab(key: string) {
         setFlagged(data?.flagged || []);
         setAttemptId(data?.attemptId);
         setReceipt(data?.receipt);
+        setServerRevision(data?.serverRevision || 0);
+        setLocked(false);
         loadedKey.current = key;
         return next.inspect().then(setView);
       })
@@ -54,7 +74,7 @@ export function useLab(key: string) {
     return () => {
       live = false;
     };
-  }, [key]);
+  }, [key, enabled]);
   const snapshot = useCallback(
     (): LocalWorkspace => ({
       version: 1,
@@ -66,9 +86,10 @@ export function useLab(key: string) {
       flagged,
       attemptId,
       receipt,
+      serverRevision,
       updatedAt: new Date().toISOString(),
     }),
-    [answers, flagged, attemptId, receipt],
+    [answers, flagged, attemptId, receipt, serverRevision],
   );
   useEffect(() => {
     if (!ready || loadedKey.current !== key) return;
@@ -94,7 +115,7 @@ export function useLab(key: string) {
   };
   const lock = useRef(false);
   const command = async (input: string) => {
-    if (lock.current || receipt) return;
+    if (lock.current || receipt || locked) return;
     lock.current = true;
     setBusy(true);
     try {
@@ -109,7 +130,7 @@ export function useLab(key: string) {
     }
   };
   const write = async (path: string, text: string) => {
-    if (receipt) return;
+    if (receipt || locked) return;
     try {
       await engine.current.write(path, text);
       setRevision((x) => x + 1);
@@ -118,15 +139,15 @@ export function useLab(key: string) {
     }
   };
   const newAttempt = async (id: string) => {
-    engine.current = new GitEngine();
+    engine.current = await createStarter(definition);
     setAnswers({});
     setFlagged([]);
     setReceipt(undefined);
     setAttemptId(id);
     await refresh();
   };
-  const restore = async (data: LocalWorkspace) => {
-    if (receipt) throw new Error('Finalized workspace is read only');
+  const restore = async (data: LocalWorkspace, serverFinal = false) => {
+    if (receipt && !serverFinal) throw new Error('Finalized workspace is read only');
     if (
       data.version !== 1 ||
       !data.answers ||
@@ -134,7 +155,7 @@ export function useLab(key: string) {
       data.events.length > 1000
     )
       throw new Error('Invalid backup');
-    const next = new GitEngine(VirtualFS.restore(data.snapshot));
+    const next = new GitEngine(VirtualFS.restore(data.snapshot), '/' + definition.projectName);
     next.cwd = data.cwd;
     next.globalConfig = data.config;
     next.events = data.events;
@@ -150,13 +171,20 @@ export function useLab(key: string) {
     view,
     revision,
     answers,
-    setAnswers,
+    setAnswers: (value: React.SetStateAction<Record<string, string>>) => {
+      if (!receipt && !locked) setAnswers(value);
+    },
     flagged,
     setFlagged,
     attemptId,
     setAttemptId,
     receipt,
     setReceipt,
+    locked,
+    setLocked,
+    readOnly: locked || !!receipt,
+    serverRevision,
+    setServerRevision,
     saving,
     error,
     setError,

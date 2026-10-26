@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+test('dashboard keeps assignments and exams separate',async({page})=>{await page.goto('/#/dashboard');await expect(page.getByRole('heading',{name:'Assignments',exact:true})).toBeVisible();await expect(page.getByRole('heading',{name:'Exams',exact:true})).toBeVisible();await expect(page.getByText('No published exams available.')).toBeVisible();await page.screenshot({path:'test-results/course-dashboard-preview.png',fullPage:true});});
 test('student can work with real Git, refresh, and recover the editor and history', async ({
   page,
 }) => {
@@ -48,7 +49,7 @@ test('mobile instructions remain usable and 404 helps students return', async ({
     page.getByText('A desktop keyboard gives you the best terminal experience.'),
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Git fundamentals. Real understanding.' }),
+    page.getByRole('heading', { name: 'Git Fundamentals, Commits, Branching & Merging' }),
   ).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.goto('/#/missing');
@@ -122,7 +123,9 @@ test('complete Assignment 01 locally, unlock theory, autosave answers, and keep 
   await command('git log --oneline');
   await expect(page.getByText('8 / 8 outcomes')).toBeVisible();
   await page.getByRole('button', { name: 'skills.txt', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText('Problem Solving');
+  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
+    'Problem Solving',
+  );
   await page.screenshot({ path: 'test-results/workspace-preview.png' });
   await page.getByRole('link', { name: 'Continue to theory' }).click();
   await expect(page.getByRole('heading', { name: 'Understand the why.' })).toBeVisible();

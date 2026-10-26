@@ -11,6 +11,7 @@ export type LocalWorkspace = {
   flagged: string[];
   attemptId?: string;
   receipt?: string;
+  serverRevision?: number;
   updatedAt: string;
 };
 const database = () =>

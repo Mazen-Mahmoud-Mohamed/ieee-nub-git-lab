@@ -40,7 +40,7 @@ Auth rate limits, SMTP settings, HTTPS, JWT expiration and project security advi
 
 Confirmed email is held by Supabase Auth. Academic profiles include name, self-reported Student ID, university, department and academic year for coursework identification. The repository contains assignment text files and Git authorship metadata. Final submissions also retain written answers, outcome results, command strings/output, branch/checkpoint identifiers, timestamps, grades and feedback. The app does not collect keystrokes, camera, microphone, device fingerprints or background surveillance. Do not enter passwords, tokens or private personal records into the educational terminal.
 
-Local practice remains on the device unless a user explicitly exports a backup; assessed final submission and manual cloud checkpoints transmit the disclosed coursework data to the configured dedicated project. The first automatic cloud-sync patch was rejected by approval review; the delivered design instead uses explicit save/restore buttons and no background repository uploads.
+Local practice remains on the device unless a user explicitly exports a backup. In assessed attempts, server autosave is off until the student enables the disclosed control naming the configured project and coursework payload. Consent is scoped to that project and attempt in the current tab/session. After consent, verified snapshots, answers and supporting activity save every 15 seconds; final submission also requires an explicit action. No background coursework uploads run before consent. See [the exam policy](ASSESSMENTS_AND_EXAMS.md) for deadlines, CAS revisions, idempotency and rejected late arrivals.
 
 ## Retention and deletion
 

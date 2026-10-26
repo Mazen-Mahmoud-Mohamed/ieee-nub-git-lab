@@ -113,7 +113,7 @@ export function Terminal({
               autoComplete="off"
               spellCheck={false}
               value={input}
-              disabled={lab.busy || !!lab.receipt}
+              disabled={lab.busy || lab.readOnly}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowUp') {

@@ -13,8 +13,6 @@ import {
   GraduationCap,
   CheckCircle2,
   LogOut,
-  ChevronRight,
-  Clock,
   ShieldCheck,
   WifiOff,
 } from 'lucide-react';
@@ -23,7 +21,14 @@ import { supabase, type Profile, requireBackend } from '../services/supabase';
 import { useLab } from '../hooks/useLab';
 import { AuthPage, ProfilePage } from '../features/auth/Auth';
 import { Workspace } from '../features/assignments/Workspace';
-import { assignment, ASSIGNMENT_ID, validateRepository } from '../features/assignments/assignment';
+import { ASSIGNMENT_ID } from '../features/assignments/assignment';
+import { outcomesFor } from '../features/assessments/model';
+import { useAssessmentRoute } from '../hooks/useAssessmentRoute';
+import { useAssessmentSession } from '../hooks/useAssessmentSession';
+import { workspaceKey } from '../features/assessments/clock';
+import { CourseDashboard, AssessmentDetails } from '../features/assessments/CourseDashboard';
+import { SessionBar } from '../features/assessments/SessionBar';
+import { AssessmentResult } from '../features/assessments/AssessmentResult';
 import { Assessment } from '../features/questions/Assessment';
 import { Review, Confirmation } from '../features/submissions/Review';
 import { Instructor } from '../features/instructor/Instructor';
@@ -54,7 +59,21 @@ export function App() {
   const [dark, setDark] = useState(() => localStorage.getItem('ieee-theme') !== 'light');
   const [online, setOnline] = useState(navigator.onLine);
   const [error, setError] = useState('');
-  const lab = useLab(user?.id || 'local-practice');
+  const course = useAssessmentRoute(user?.id);
+  const lab = useLab(
+    course.active
+      ? workspaceKey(
+          user?.id || 'pending',
+          course.assessmentId,
+          course.attemptId!,
+          course.state?.assignment_version || 1,
+        )
+      : user?.id || 'local-practice',
+    course.definition,
+    !course.loading && (!course.active || !!course.state),
+    course.active && user ? { userId: user.id, attemptId: course.attemptId! } : undefined,
+  );
+  const session = useAssessmentSession(lab, course.state);
   const navigate = useNavigate();
   const loadProfile = async () => {
     if (!supabase) return;
@@ -102,28 +121,40 @@ export function App() {
     full_name: localStorage.getItem('practice-name') || '',
     department: localStorage.getItem('practice-department') || '',
   };
-  const outcomes = validateRepository(lab.view, identity);
+  const working = Object.fromEntries(
+    Object.entries(lab.engine.fs.entries)
+      .filter(([p, e]) => p.endsWith('.txt') && !p.includes('/.git/') && e.kind === 'file')
+      .map(([p, e]) => [
+        p.slice(lab.engine.dir.length + 1),
+        new TextDecoder().decode(new Uint8Array(e.data)),
+      ]),
+  );
+  const outcomes = outcomesFor(course.definition, lab.view, identity, working);
   const unlocked = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   async function start() {
-    try {
-      if (!user) {
-        navigate('/workspace');
-        return;
-      }
-      if (!profile) {
-        navigate('/profile');
-        return;
-      }
-      const client = requireBackend();
-      const { data, error } = await client.rpc('start_attempt', { p_assignment: ASSIGNMENT_ID });
-      if (error) throw error;
-      if (lab.attemptId && lab.attemptId !== data.id) await lab.newAttempt(data.id);
-      else lab.setAttemptId(data.id);
-      if (data.receipt) lab.setReceipt(data.receipt);
+    if (!user) {
       navigate('/workspace');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      return;
     }
+    if (!profile) {
+      navigate('/profile');
+      return;
+    }
+    const { data, error } = await requireBackend().rpc('start_assessment', {
+      p_assessment: course.assessmentId || ASSIGNMENT_ID,
+    });
+    if (error) {
+      setError(error.message);
+      throw error;
+    }
+    navigate(
+      '/assessments/' +
+        course.assessmentId +
+        '/attempts/' +
+        data.id +
+        '/' +
+        (course.definition.format === 'theory' ? 'theory' : 'workspace'),
+    );
   }
   return (
     <ErrorBoundary>
@@ -216,21 +247,135 @@ export function App() {
               path="/profile"
               element={user ? <ProfilePage profile={profile} onSave={loadProfile} /> : <AuthPage />}
             />
+            <Route path="/dashboard" element={<CourseDashboard profile={profile} />} />
             <Route
-              path="/dashboard"
-              element={<Dashboard profile={profile} lab={lab} onStart={start} />}
+              path="/overview"
+              element={
+                <AssessmentDetails
+                  definition={course.definition}
+                  onStart={start}
+                  authenticated={!!user}
+                />
+              }
             />
-            <Route path="/overview" element={<Overview onStart={start} />} />
             <Route
               path="/workspace"
-              element={<Workspace lab={lab} identity={identity} dark={dark} />}
+              element={
+                <Workspace
+                  lab={lab}
+                  identity={identity}
+                  dark={dark}
+                  definition={course.definition}
+                  basePath={course.basePath}
+                />
+              }
             />
-            <Route path="/theory" element={<Assessment lab={lab} unlocked={unlocked} />} />
+            <Route
+              path="/theory"
+              element={
+                <Assessment
+                  lab={lab}
+                  unlocked={unlocked}
+                  definition={course.definition}
+                  basePath={course.basePath}
+                />
+              }
+            />
             <Route
               path="/review"
-              element={<Review lab={lab} identity={identity} authenticated={!!user && !!profile} />}
+              element={
+                <Review
+                  lab={lab}
+                  identity={identity}
+                  authenticated={!!user && !!profile && course.active}
+                  definition={course.definition}
+                  basePath={course.basePath}
+                  submit={course.active ? session.submit : undefined}
+                />
+              }
             />
             <Route path="/confirmation" element={<Confirmation lab={lab} />} />
+            <Route
+              path="/assessments/:assessmentId"
+              element={
+                course.loading ? (
+                  <div className="page">Loading assessment…</div>
+                ) : course.error ? (
+                  <div className="page error" role="alert">
+                    {course.error}
+                  </div>
+                ) : (
+                  <AssessmentDetails
+                    definition={course.definition}
+                    onStart={start}
+                    authenticated={!!user}
+                  />
+                )
+              }
+            />
+            <Route
+              path="/assessments/:assessmentId/attempts/:attemptId/*"
+              element={
+                !user ? (
+                  <AuthPage />
+                ) : course.loading || !course.state || !lab.ready || !session.ready ? (
+                  <div className="page">Restoring assessment session…{course.error}</div>
+                ) : (
+                  <>
+                    <SessionBar session={session} state={course.state} />
+                    <Routes>
+                      <Route
+                        path="workspace"
+                        element={
+                          <Workspace
+                            lab={lab}
+                            identity={identity}
+                            dark={dark}
+                            definition={course.definition}
+                            basePath={course.basePath}
+                          />
+                        }
+                      />
+                      <Route
+                        path="theory"
+                        element={
+                          <Assessment
+                            lab={lab}
+                            unlocked={unlocked}
+                            definition={course.definition}
+                            basePath={course.basePath}
+                          />
+                        }
+                      />
+                      <Route
+                        path="review"
+                        element={
+                          <Review
+                            lab={lab}
+                            identity={identity}
+                            authenticated={!!profile}
+                            definition={course.definition}
+                            basePath={course.basePath}
+                            submit={session.submit}
+                          />
+                        }
+                      />
+                      <Route
+                        path="result"
+                        element={
+                          <AssessmentResult
+                            lab={lab}
+                            definition={course.definition}
+                            state={course.state}
+                            basePath={course.basePath}
+                          />
+                        }
+                      />
+                    </Routes>
+                  </>
+                )
+              }
+            />
             <Route
               path="/instructor/*"
               element={
@@ -368,219 +513,6 @@ function Landing({ onStart }: { onStart: () => void }) {
         <span>IEEE Nahda University Student Branch</span>
         <span>Advancing technology. Empowering students.</span>
       </footer>
-    </div>
-  );
-}
-function Dashboard({
-  profile,
-  lab,
-  onStart,
-}: {
-  profile: Profile | null;
-  lab: ReturnType<typeof useLab>;
-  onStart: () => void;
-}) {
-  const [attempts, setAttempts] = useState<
-    Array<{
-      id: string;
-      status: string;
-      receipt: string | null;
-      practical_score: number | null;
-      theory_score: number | null;
-      feedback: string | null;
-      released: boolean;
-    }>
-  >([]);
-  useEffect(() => {
-    if (profile && supabase)
-      void supabase
-        .from('attempts')
-        .select('id,status,receipt')
-        .order('created_at', { ascending: false })
-        .then(async ({ data }) => {
-          if (!data) return;
-          const results = await supabase!.from('released_results').select('*');
-          setAttempts(
-            data.map((a) => ({ ...a, ...results.data?.find((r) => r.attempt_id === a.id) })),
-          );
-          const current = data.find((a) => a.status === 'in_progress');
-          if (current && !lab.attemptId) lab.setAttemptId(current.id);
-        });
-  }, [profile]);
-  return (
-    <div className="page dashboard">
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">YOUR LEARNING JOURNEY</span>
-          <h1>
-            {profile
-              ? `Welcome back, ${profile.full_name.split(' ')[0]}.`
-              : 'A little practice goes a long way.'}
-          </h1>
-          <p>
-            {profile
-              ? `${profile.department} · Year ${profile.academic_year}`
-              : 'Explore the lab locally, or sign in to save assessed submissions.'}
-          </p>
-        </div>
-        <span className="course-pill">
-          <i className="live-dot" />
-          SESSION 01 · LOCAL GIT
-        </span>
-      </div>
-      <div className="dashboard-feature">
-        <div>
-          <span className="eyebrow">YOUR NEXT CHALLENGE</span>
-          <h2>
-            Small commits.
-            <br />
-            Big understanding.
-          </h2>
-          <p>{assignment.description}</p>
-          <button className="primary" onClick={onStart}>
-            {lab.view.initialized ? 'Resume assignment' : 'Start Assignment 01'}
-            <ArrowUpRight size={17} />
-          </button>
-        </div>
-        <div className="feature-numbers">
-          <GitBranch size={76} strokeWidth={1} />
-          <span>01</span>
-        </div>
-      </div>
-      <div className="dashboard-grid">
-        <section className="form-card assignment-card">
-          <div className="assignment-label">
-            ASSIGNMENT 01 <span>BEGINNER</span>
-          </div>
-          <h2>{assignment.title}</h2>
-          <p>Practice the essentials of local version control in your own virtual workspace.</p>
-          <div className="assignment-stats">
-            <span>
-              <BookOpen size={16} />4 practical sections
-            </span>
-            <span>
-              <Clock size={16} />
-              Self paced
-            </span>
-            <span>100 pts + 10 bonus</span>
-          </div>
-          <Link to="/overview">
-            View assignment details
-            <ArrowRight size={15} />
-          </Link>
-        </section>
-        <section className="form-card">
-          <span className="eyebrow">YOUR SUBMISSIONS</span>
-          <h3>Your progress has a home.</h3>
-          {attempts.length ? (
-            attempts.map((a) => (
-              <div className="submission-row" key={a.id}>
-                <strong>Assignment 01</strong>
-                <span className="badge">{a.status.replace('_', ' ')}</span>
-                {a.receipt && <code>{a.receipt}</code>}
-                {a.released && (
-                  <p>
-                    Score: {(a.practical_score || 0) + (a.theory_score || 0)} / 100 + 10
-                    <br />
-                    {a.feedback}
-                  </p>
-                )}
-              </div>
-            ))
-          ) : (
-            <p className="muted">
-              {profile
-                ? 'No submissions yet. Your first one starts in the lab.'
-                : 'Sign in to create assessed attempts and receive instructor feedback.'}
-            </p>
-          )}
-          {!profile && (
-            <Link className="practice-link" to="/auth">
-              Sign in or create an account →
-            </Link>
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-function Overview({ onStart }: { onStart: () => void }) {
-  return (
-    <div className="page overview">
-      <Link className="breadcrumb" to="/dashboard">
-        My learning
-        <ChevronRight size={14} />
-        Assignment 01
-      </Link>
-      <span className="eyebrow">SESSION 01 · BEGINNER</span>
-      <h1>{assignment.title}</h1>
-      <p className="lead">{assignment.description}</p>
-      <div className="overview-meta">
-        <span>100 points + 10 bonus</span>
-        <span>Plain text files</span>
-        <span>Local Git only</span>
-        <span>Written assessment</span>
-      </div>
-      <div className="overview-grid">
-        <section>
-          <h2>What you’ll build</h2>
-          <p>
-            A personal text-file repository with a clear commit history, an isolated skills branch,
-            and a successful merge into main.
-          </p>
-          {assignment.sections.map((s) => (
-            <article className="overview-section" key={s.id}>
-              <span className="mission-number">{s.tag}</span>
-              <div>
-                <h3>
-                  {s.title}
-                  <small>
-                    {s.points} pts{s.id === 'bonus' ? ' · Optional' : ''}
-                  </small>
-                </h3>
-                <p>{s.description}</p>
-                <ul>
-                  {s.steps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ul>
-              </div>
-            </article>
-          ))}
-          <article className="overview-section">
-            <span className="mission-number">05</span>
-            <div>
-              <h3>
-                Theory assessment<small>25 pts</small>
-              </h3>
-              <p>
-                Twelve written questions and practical reflections. Your instructor reviews your
-                reasoning.
-              </p>
-            </div>
-          </article>
-        </section>
-        <aside className="form-card sticky-card">
-          <BookOpen size={25} />
-          <h3>Before you begin</h3>
-          <p>
-            Use the name and department in your student profile for about.txt. Verify your identity
-            details before your assessed attempt.
-          </p>
-          <p>
-            You’ll use only the topics through slide 27 of the course. Remote repositories and
-            conflict resolution are not required.
-          </p>
-          <p>
-            Work saves in this browser. Export a backup before changing devices or clearing browser
-            data.
-          </p>
-          <button className="primary" onClick={onStart}>
-            Enter the workspace
-            <ArrowUpRight size={16} />
-          </button>
-        </aside>
-      </div>
     </div>
   );
 }

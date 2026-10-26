@@ -1,5 +1,7 @@
 # Implementation report — 26 October 2026
 
+This is the historical initial-build report. The current incremental extension and its resolved authoring/exam limitations are documented in [REFINEMENT_REPORT.md](REFINEMENT_REPORT.md).
+
 ## Implemented
 
 The workspace started with only the course PPTX. A new React/TypeScript/Vite/Tailwind application, strict TypeScript configuration, feature modules, tests, PostgreSQL migration/seed, shared verifier, Supabase Edge Function, documentation and GitHub Actions workflows were created. Local Git source control was initialized on `main`; no existing checkout, branch, application, hosted database or repository was overwritten.

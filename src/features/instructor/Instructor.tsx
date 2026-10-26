@@ -8,16 +8,19 @@ import {
   BarChart3,
   ArrowLeft,
   RefreshCw,
-  Save,
 } from 'lucide-react';
 import { requireBackend } from '../../services/supabase';
-import { questions, ASSIGNMENT_ID } from '../assignments/assignment';
+import { firstAssessment, totals, type Definition } from '../assessments/model';
+import { AssessmentManager, AssessmentEditor, QuestionBank } from './AssessmentEditor';
 import { GitEngine, type RepoView, type Activity } from '../git-engine/engine';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS';
 import { GitGraph } from '../../components/GitGraph';
 type Attempt = {
   id: string;
   student_id: string;
+  assignment_id: string;
+  assignment_version: number;
+  assignments: { title: string; type: string } | null;
   status: string;
   practical_score: number | null;
   theory_score: number | null;
@@ -48,14 +51,16 @@ export function Instructor() {
         <NavLink end to="/instructor">
           Attempts & grades
         </NavLink>
-        <NavLink to="/instructor/assignments">Assignments</NavLink>
+        <NavLink to="/instructor/assessments">Assignments & exams</NavLink>
         <NavLink to="/instructor/questions">Questions</NavLink>
         <NavLink to="/instructor/settings">Settings</NavLink>
       </nav>
       <Routes>
         <Route index element={<Attempts />} />
-        <Route path="assignments" element={<AssignmentManager />} />
-        <Route path="questions" element={<QuestionManager />} />
+        <Route path="assessments" element={<AssessmentManager />} />
+        <Route path="assessments/:id" element={<AssessmentEditor />} />
+        <Route path="assignments" element={<AssessmentManager />} />
+        <Route path="questions" element={<QuestionBank />} />
         <Route path="settings" element={<Settings />} />
       </Routes>
     </div>
@@ -63,7 +68,7 @@ export function Instructor() {
 }
 function Attempts() {
   const [rows, setRows] = useState<Attempt[]>([]);
-  const [enrolled, setEnrolled] = useState(0);
+  const [assessmentFilter, setAssessmentFilter] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -77,7 +82,7 @@ function Attempts() {
       const { data, error } = await client
         .from('attempts')
         .select(
-          '*,profiles(full_name,student_id,department,academic_year),grading_summaries(practical_score,theory_score,released,feedback)',
+          '*,assignments(title,type),profiles(full_name,student_id,department,academic_year),grading_summaries(practical_score,theory_score,released,feedback)',
         )
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -87,11 +92,6 @@ function Attempts() {
           ...(Array.isArray(r.grading_summaries) ? r.grading_summaries[0] : r.grading_summaries),
         })) as unknown as Attempt[],
       );
-      const response = await client
-        .from('student_enrollments')
-        .select('student_id', { count: 'exact', head: true });
-      if (response.error) throw response.error;
-      setEnrolled(response.count || 0);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -108,16 +108,13 @@ function Attempts() {
           .toLowerCase()
           .includes(search.toLowerCase())) &&
       (!department || r.profiles?.department === department) &&
-      (!year || r.profiles?.academic_year === year),
+      (!year || r.profiles?.academic_year === year) &&
+      (!assessmentFilter || r.assignment_id === assessmentFilter),
   );
   const graded = rows.filter((r) => r.status === 'graded');
-  const submitted = rows.filter((r) => ['submitted', 'graded'].includes(r.status));
-  const average = graded.length
-    ? (
-        graded.reduce((sum, r) => sum + (r.practical_score || 0) + (r.theory_score || 0), 0) /
-        graded.length
-      ).toFixed(1)
-    : '—';
+  const submitted = rows.filter((r) =>
+    ['submitted', 'pending_review', 'expired', 'graded'].includes(r.status),
+  );
   if (selected)
     return (
       <AttemptDetail
@@ -132,20 +129,9 @@ function Attempts() {
     <>
       <div className="stat-grid">
         {[
-          [Users, 'Enrolled students', enrolled],
-          [ClipboardCheck, 'Started attempts', rows.length],
-          [RefreshCw, 'In progress', rows.filter((r) => r.status === 'in_progress').length],
           [ClipboardCheck, 'Submitted', submitted.length],
+          [RefreshCw, 'In progress', rows.filter((r) => r.status === 'in_progress').length],
           [BarChart3, 'Graded', graded.length],
-          [BarChart3, 'Average verified score', average],
-          [
-            ClipboardCheck,
-            'Completion',
-            enrolled
-              ? Math.round((new Set(submitted.map((r) => r.student_id)).size / enrolled) * 100) +
-                '%'
-              : '—',
-          ],
         ].map(([Icon, label, value]) => {
           const I = Icon as typeof Users;
           return (
@@ -158,6 +144,22 @@ function Attempts() {
         })}
       </div>
       <div className="table-toolbar">
+        <select
+          aria-label="Assessment filter"
+          value={assessmentFilter}
+          onChange={(e) => setAssessmentFilter(e.target.value)}
+        >
+          <option value="">All assignments & exams</option>
+          {[
+            ...new Map(
+              rows.map((r) => [r.assignment_id, r.assignments?.title || r.assignment_id]),
+            ).entries(),
+          ].map(([id, title]) => (
+            <option key={id} value={id}>
+              {title}
+            </option>
+          ))}
+        </select>
         <label className="search">
           <Search size={16} />
           <input
@@ -202,6 +204,9 @@ function Attempts() {
                 'Student ID',
                 'Department',
                 'Year',
+                'Assessment',
+                'Type',
+                'Version',
                 'Status',
                 'Practical',
                 'Theory',
@@ -213,6 +218,9 @@ function Attempts() {
                 r.profiles?.student_id,
                 r.profiles?.department,
                 r.profiles?.academic_year,
+                r.assignments?.title,
+                r.assignments?.type,
+                r.assignment_version,
                 r.status,
                 r.practical_score,
                 r.theory_score,
@@ -250,6 +258,7 @@ function Attempts() {
               <tr>
                 <th>Student</th>
                 <th>Department</th>
+                <th>Assessment</th>
                 <th>Status</th>
                 <th>Practical</th>
                 <th>Theory</th>
@@ -264,6 +273,10 @@ function Attempts() {
                     <small>{r.profiles?.student_id}</small>
                   </td>
                   <td>{r.profiles?.department}</td>
+                  <td>
+                    {r.assignments?.title}
+                    <small>{r.assignments?.type}</small>
+                  </td>
                   <td>
                     <span className="badge">{r.status.replace('_', ' ')}</span>
                   </td>
@@ -286,6 +299,12 @@ function Attempts() {
 }
 function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }) {
   const [view, setView] = useState<RepoView>();
+  const [definition, setDefinition] = useState<Definition>(firstAssessment);
+  const questions = definition.questions;
+  const points = totals(definition);
+  const [taskResults, setTaskResults] = useState<
+    Array<{ task_key: string; passed: boolean; points: number }>
+  >([]);
   const [events, setEvents] = useState<Activity[]>([]);
   const [answers, setAnswers] = useState<Array<{ question_id: string; answer: string }>>([]);
   const [scores, setScores] = useState<Record<string, string>>({});
@@ -297,23 +316,43 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
     void (async () => {
       try {
         const client = requireBackend();
-        const [snapshot, answerData, eventData, gradeData] = await Promise.all([
-          client
-            .from('workspace_snapshots')
-            .select('snapshot')
-            .eq('attempt_id', attempt.id)
-            .maybeSingle(),
-          client.from('student_answers').select('question_id,answer').eq('attempt_id', attempt.id),
-          client
-            .from('command_events')
-            .select('event')
-            .eq('attempt_id', attempt.id)
-            .order('sequence'),
-          client.from('grading_results').select('question_id,points').eq('attempt_id', attempt.id),
-        ]);
-        for (const r of [snapshot, answerData, eventData, gradeData]) if (r.error) throw r.error;
+        const [snapshot, answerData, eventData, gradeData, stateData, taskData] = await Promise.all(
+          [
+            client
+              .from('workspace_snapshots')
+              .select('snapshot')
+              .eq('attempt_id', attempt.id)
+              .maybeSingle(),
+            client
+              .from('student_answers')
+              .select('question_id,answer')
+              .eq('attempt_id', attempt.id),
+            client
+              .from('command_events')
+              .select('event')
+              .eq('attempt_id', attempt.id)
+              .order('sequence'),
+            client
+              .from('grading_results')
+              .select('question_id,points')
+              .eq('attempt_id', attempt.id),
+            client.rpc('assessment_state', { p_attempt: attempt.id }),
+            client
+              .from('task_results')
+              .select('task_key,passed,points')
+              .eq('attempt_id', attempt.id),
+          ],
+        );
+        for (const r of [snapshot, answerData, eventData, gradeData, stateData, taskData])
+          if (r.error) throw r.error;
+        const pinned = stateData.data.definition as Definition;
+        setDefinition(pinned);
+        setTaskResults(taskData.data || []);
         if (snapshot.data) {
-          const engine = new GitEngine(VirtualFS.restore(snapshot.data.snapshot as Snapshot));
+          const engine = new GitEngine(
+            VirtualFS.restore(snapshot.data.snapshot as Snapshot),
+            '/' + pinned.projectName,
+          );
           setView(await engine.inspect());
         }
         setAnswers(answerData.data || []);
@@ -330,9 +369,14 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
     setBusy(true);
     setError('');
     try {
-      const { error } = await requireBackend().rpc('grade_attempt', {
+      const { error } = await requireBackend().rpc('grade_assessment', {
         p_attempt: attempt.id,
-        p_grades: questions.map((q) => ({ question_id: q.id, points: Number(scores[q.id] || 0) })),
+        p_grades: questions
+          .filter(
+            (q) =>
+              (q.manual || !['single', 'multiple', 'boolean'].includes(q.kind)) && q.points > 0,
+          )
+          .map((q) => ({ question_id: q.id, points: Number(scores[q.id] || 0) })),
         p_feedback: feedback,
         p_release: release,
       });
@@ -368,6 +412,14 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
         <section className="form-card">
           <h3>Verified repository</h3>
           {view ? <GitGraph view={view} /> : <p>No finalized repository snapshot.</p>}
+          <h3>Practical results</h3>
+          {taskResults.map((t) => (
+            <p className={t.passed ? 'passed' : 'muted'} key={t.task_key}>
+              {definition.sections.flatMap((s) => s.tasks).find((x) => x.id === t.task_key)
+                ?.title || t.task_key}{' '}
+              · {t.points} points
+            </p>
+          ))}
           <h3>Activity timeline</h3>
           <p className="muted">Supporting student-provided activity, not a verified replay.</p>
           <div className="timeline">
@@ -388,25 +440,30 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
         </section>
         <section className="form-card">
           <h3>Written responses</h3>
-          {answers.map((a) => {
-            const q = questions.find((q) => q.id === a.question_id);
+          {questions.map((q) => {
+            const a = answers.find((a) => a.question_id === q.id) || {
+              question_id: q.id,
+              answer: 'Unanswered',
+            };
             return (
               <article className="grading-question" key={a.question_id}>
                 <h4>{q?.prompt || a.question_id + ' reflection'}</h4>
                 <p className="written-answer">{a.answer}</p>
-                {q && (
-                  <label>
-                    Points (0–{q.points})
-                    <input
-                      type="number"
-                      min="0"
-                      max={q.points}
-                      step="0.5"
-                      value={scores[q.id] || ''}
-                      onChange={(e) => setScores({ ...scores, [q.id]: e.target.value })}
-                    />
-                  </label>
-                )}
+                {q &&
+                  (q.manual || !['single', 'multiple', 'boolean'].includes(q.kind)) &&
+                  q.points > 0 && (
+                    <label>
+                      Points (0–{q.points})
+                      <input
+                        type="number"
+                        min="0"
+                        max={q.points}
+                        step="0.5"
+                        value={scores[q.id] || ''}
+                        onChange={(e) => setScores({ ...scores, [q.id]: e.target.value })}
+                      />
+                    </label>
+                  )}
               </article>
             );
           })}
@@ -420,8 +477,8 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
             />
           </label>
           <p>
-            Theory total: {Object.values(scores).reduce((s, n) => s + Number(n || 0), 0)} / 25 ·
-            Practical: {attempt.practical_score ?? 'Pending'}
+            Theory total: {Object.values(scores).reduce((s, n) => s + Number(n || 0), 0)} /{' '}
+            {points.theory} · Practical: {attempt.practical_score ?? 'Pending'}
           </p>
           <div className="review-actions">
             <button
@@ -462,176 +519,6 @@ function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () => void }
         </section>
       </div>
     </>
-  );
-}
-function AssignmentManager() {
-  const [row, setRow] = useState<Record<string, any>>();
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  useEffect(() => {
-    void requireBackend()
-      .from('assignments')
-      .select('*')
-      .eq('id', ASSIGNMENT_ID)
-      .single()
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRow(data);
-      });
-  }, []);
-  if (!row) return <p>{error || 'Loading assignment…'}</p>;
-  return (
-    <form
-      className="form-card narrow"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setError('');
-        const { error } = await requireBackend().rpc('manage_assignment', {
-          p_assignment: ASSIGNMENT_ID,
-          p_title: row.title,
-          p_visible: row.visible,
-          p_starts_at: row.starts_at || null,
-          p_deadline: row.deadline || null,
-          p_allow_retake: row.allow_retake,
-          p_review_answers: row.review_answers,
-        });
-        if (error) setError(error.message);
-        else setNotice('Assignment settings saved and audited.');
-      }}
-    >
-      <h2>Assignment 01</h2>
-      <label>
-        Title
-        <input
-          required
-          maxLength={180}
-          value={row.title}
-          onChange={(e) => setRow({ ...row, title: e.target.value })}
-        />
-      </label>
-      {['starts_at', 'deadline'].map((key) => (
-        <label key={key}>
-          {key === 'starts_at' ? 'Start date' : 'Deadline'}
-          <input
-            type="datetime-local"
-            value={row[key]?.slice(0, 16) || ''}
-            onChange={(e) =>
-              setRow({
-                ...row,
-                [key]: e.target.value ? new Date(e.target.value).toISOString() : null,
-              })
-            }
-          />
-        </label>
-      ))}
-      {[
-        ['visible', 'Visible to students'],
-        ['allow_retake', 'Allow students to start retakes'],
-        ['review_answers', 'Allow answer review after submission'],
-      ].map(([key, label]) => (
-        <label className="checkbox-label" key={key}>
-          <input
-            type="checkbox"
-            checked={row[key]}
-            onChange={(e) => setRow({ ...row, [key]: e.target.checked })}
-          />
-          {label}
-        </label>
-      ))}
-      {error && <p className="error">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
-      <button className="primary">
-        <Save size={16} />
-        Save settings
-      </button>
-    </form>
-  );
-}
-function QuestionManager() {
-  const [rows, setRows] = useState<
-    Array<{ id: string; prompt: string; kind: string; points: number; options: string[] }>
-  >([]);
-  const [notice, setNotice] = useState('');
-  const [error, setError] = useState('');
-  useEffect(() => {
-    void requireBackend()
-      .from('questions')
-      .select('id,prompt,kind,points,options')
-      .eq('assignment_id', ASSIGNMENT_ID)
-      .order('position')
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRows(data || []);
-      });
-  }, []);
-  return (
-    <section className="form-card">
-      <h2>Questions & rubrics</h2>
-      <p className="muted">
-        Assignment 01 retains its twelve required written questions. Edit instructor rubrics here;
-        new assignments can use the schema’s objective question types. Answer keys live in a private
-        schema.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
-      {rows.map((q, i) => (
-        <details key={q.id}>
-          <summary>
-            Q{i + 1} · {q.prompt}
-          </summary>
-          <QuestionRubric id={q.id} onNotice={setNotice} onError={setError} />
-        </details>
-      ))}
-    </section>
-  );
-}
-function QuestionRubric({
-  id,
-  onNotice,
-  onError,
-}: {
-  id: string;
-  onNotice: (s: string) => void;
-  onError: (s: string) => void;
-}) {
-  const [rubric, setRubric] = useState('');
-  useEffect(() => {
-    void requireBackend()
-      .rpc('get_question_rubric', { p_question: id })
-      .then(({ data, error }) => {
-        if (error) onError(error.message);
-        else setRubric(data || '');
-      });
-  }, [id]);
-  return (
-    <div className="rubric">
-      <label>
-        Instructor rubric / explanation
-        <textarea
-          rows={4}
-          maxLength={5000}
-          value={rubric}
-          onChange={(e) => setRubric(e.target.value)}
-        />
-      </label>
-      <button
-        className="outline-button"
-        onClick={async () => {
-          const { error } = await requireBackend().rpc('set_question_rubric', {
-            p_question: id,
-            p_rubric: rubric,
-          });
-          if (error) onError(error.message);
-          else onNotice('Private rubric saved.');
-        }}
-      >
-        Save private rubric
-      </button>
-    </div>
   );
 }
 function Settings() {

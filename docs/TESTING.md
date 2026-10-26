@@ -1,5 +1,9 @@
 # Testing and release acceptance
 
+The current refinement adds reusable assessments and server-timed exams. Run `npm run test:e2e:fixtures` in addition to the original browser suite. The new local-only UI fixtures cover the authoring interface, per-assessment workspace isolation, opt-in accepted autosaves, refresh/clock manipulation, deadline locking, server-frozen answers, network failures and stale tabs. The embedded PostgreSQL suite runs both migrations and additionally checks existing-data preservation, immutable versions, publication, private keys, attempt limits, exact deadline rejection, abandoned expiry and grading/release. See [ASSESSMENTS_AND_EXAMS.md](ASSESSMENTS_AND_EXAMS.md) for the policy.
+
+For a hosted release, apply the additive migration to the dedicated staging project, deploy `assessment-attempt`, and install/check `supabase/exam-expiry-schedule.sql`. Verify an exam abandoned before its deadline is finalized by the actual scheduled job, without reopening a browser. Attempt a late save and confirm the earlier accepted answers/score remain unchanged. Complete an instructor-created assignment and exam through actual Auth, Edge, Data API and released-result screens. These live infrastructure checks remain unperformed locally.
+
 ## Reproducible local checks
 
 ```sh

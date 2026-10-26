@@ -1,13 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ArrowRight, ShieldCheck, Download, AlertCircle } from 'lucide-react';
-import {
-  questions,
-  validateRepository,
-  practicalScore,
-  reflectionQuestions,
-  type StudentIdentity,
-} from '../assignments/assignment';
+import { type StudentIdentity } from '../assignments/assignment';
+import { firstAssessment, outcomesFor, totals, type Definition } from '../assessments/model';
 import type { Lab } from '../../hooks/useLab';
 import { requireBackend, withRetry } from '../../services/supabase';
 import { saveOutbox, clearOutbox, loadOutbox } from '../../services/persistence';
@@ -26,23 +21,41 @@ export function Review({
   lab,
   identity,
   authenticated,
+  definition = firstAssessment,
+  basePath = '',
+  submit,
 }: {
   lab: Lab;
   identity: StudentIdentity;
   authenticated: boolean;
+  definition?: Definition;
+  basePath?: string;
+  submit?: () => Promise<string | undefined>;
 }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [agreed, setAgreed] = useState(false);
-  const outcomes = validateRepository(lab.view, identity);
-  const complete = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
+  const questions = definition.questions.filter((q) => q.points > 0);
+  const reflectionQuestions = definition.questions.filter((q) => q.points === 0);
+  const working = Object.fromEntries(
+    Object.entries(lab.engine.fs.entries)
+      .filter(([p, e]) => p.endsWith('.txt') && !p.includes('/.git/') && e.kind === 'file')
+      .map(([p, e]) => [
+        p.slice(lab.engine.dir.length + 1),
+        new TextDecoder().decode(new Uint8Array(e.data)),
+      ]),
+  );
+  const outcomes = outcomesFor(definition, lab.view, identity, working);
+  const points = totals(definition);
+  const complete =
+    !definition.requireComplete || outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   const answered =
-    questions.every((q) => lab.answers[q.id]?.trim()) &&
-    reflectionQuestions.slice(0, 2).every((q) => lab.answers[q.id]?.trim());
+    !definition.requireComplete ||
+    definition.questions.filter((q) => q.required).every((q) => lab.answers[q.id]?.trim());
   return (
     <div className="page narrow">
-      <span className="eyebrow">ASSIGNMENT 01 / FINAL REVIEW</span>
+      <span className="eyebrow">{definition.type.toUpperCase()} / FINAL REVIEW</span>
       <h1>Ready for your next chapter?</h1>
       <p>
         Review your work before submitting. Your repository is independently verified on the server;
@@ -66,13 +79,20 @@ export function Review({
         <div className="review-check">
           <ShieldCheck size={20} />
           <span>Local practical estimate</span>
-          <strong>{practicalScore(outcomes)} / 75 + 10</strong>
+          <strong>
+            {outcomes.filter((o) => o.passed).reduce((sum, o) => sum + o.points, 0)} /{' '}
+            {points.practical} + {points.bonus}
+          </strong>
         </div>
         <p className="muted">
           This is a preview, not a verified grade. Theory:{' '}
-          {questions.filter((q) => lab.answers[q.id]?.trim()).length}/12 answered · practical
-          reflections:{' '}
-          {reflectionQuestions.slice(0, 2).filter((q) => lab.answers[q.id]?.trim()).length}/2.
+          {questions.filter((q) => lab.answers[q.id]?.trim()).length}/{questions.length} answered ·
+          practical reflections:{' '}
+          {
+            reflectionQuestions.filter((q) => q.required).filter((q) => lab.answers[q.id]?.trim())
+              .length
+          }
+          /{reflectionQuestions.filter((q) => q.required).length}.
         </p>
         <details>
           <summary>Review your written responses</summary>
@@ -101,7 +121,7 @@ export function Review({
             reconnecting.
           </p>
         )}
-        <Checkpoints lab={lab} authenticated={authenticated} />
+        {!submit && <Checkpoints lab={lab} authenticated={authenticated} />}
         <div className="review-actions">
           <button
             className="outline-button"
@@ -125,6 +145,12 @@ export function Review({
               setBusy(true);
               setError('');
               try {
+                if (submit) {
+                  const receipt = await submit();
+                  if (!receipt) throw new Error('No server receipt returned');
+                  navigate(basePath + '/result');
+                  return;
+                }
                 const client = requireBackend();
                 const pending = await loadOutbox(lab.attemptId!);
                 const payload = pending || {
@@ -156,7 +182,11 @@ export function Review({
               }
             }}
           >
-            {busy ? 'Verifying repository…' : 'Submit assignment'}
+            {busy
+              ? 'Verifying work…'
+              : definition.type === 'exam'
+                ? 'Submit Exam'
+                : 'Submit assignment'}
             <ArrowRight size={16} />
           </button>
         </div>

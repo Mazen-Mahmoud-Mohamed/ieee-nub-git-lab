@@ -1,5 +1,15 @@
 # Architecture and database
 
+## Current shared assessment extension
+
+The incremental refinement retains the engine, filesystem, auth, persistence and submission foundations described below. The current application adds immutable `assessment_versions`, instructor-only `assessment_drafts` and `question_bank`, private versioned answer keys and verified checkpoints, and server deadline/revision fields on the existing `attempts` table. The catalog remains named `assignments`, with a shared assignment/exam type. The original validator remains a compatibility rule; new tasks use the safe predefined-rule evaluator in `src/features/assessments/model.ts`.
+
+`useAssessmentRoute` loads the public definition or an owned server-pinned attempt. `useLab` opens an isolated per-user/assessment/version/attempt filesystem and imports matching legacy active work without deletion. Existing workspace/question/review components receive the definition and route base as props. `useAssessmentSession` owns monotonic timer display, explicit autosave consent, serial checkpoint requests, retry envelopes, accepted revisions and read-only finalization. The instructor builder saves drafts and publishes new immutable documents. Student-visible versions exclude objective keys and explanations.
+
+The new `assessment-attempt` endpoint authenticates, loads the pinned private verification context, reuses canonical Git-object inspection, evaluates configured outcomes/objective keys, and calls service-only `accept_assessment_checkpoint`. PostgreSQL locks the attempt and enforces revision, deadline and lifecycle. Expiry atomically freezes the last verified checkpoint; it never accepts a late browser payload. The supplied Supabase Cron SQL calls the service-only expiry function every minute for abandoned attempts. This extends rather than replaces the preserved legacy endpoint and SQL evidence tables.
+
+The detailed source-of-truth for current authoring, scoring, consent, timing and interruption behavior is [ASSESSMENTS_AND_EXAMS.md](ASSESSMENTS_AND_EXAMS.md). Descriptions below of the initial Assignment 01-only contract and manual checkpoint flow are historical context; new assessed attempts use the shared versioned definition and opt-in verified autosave pipeline.
+
 ## Application boundary
 
 Static Vite assets run in the browser, with hash routes for GitHub Pages. `src/app/App.tsx` owns authentication, profile and role loading, theme, routes and the per-user lab. Feature modules handle the terminal, filesystem, Git, assignment, theory, submission and instructor views. `src/services` contains backend configuration and IndexedDB persistence.

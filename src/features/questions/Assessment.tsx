@@ -2,13 +2,23 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Flag, ShieldCheck, Check } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
-import { questions, reflectionQuestions, type Question } from '../assignments/assignment';
+import { firstAssessment, type Definition, totals } from '../assessments/model';
 import { supabase } from '../../services/supabase';
-export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
+export function Assessment({
+  lab,
+  unlocked,
+  definition = firstAssessment,
+  basePath = '',
+}: {
+  lab: Lab;
+  unlocked: boolean;
+  definition?: Definition;
+  basePath?: string;
+}) {
   const [index, setIndex] = useState(0);
   const [notice, setNotice] = useState('');
   const [pasteAllowed, setPasteAllowed] = useState(false);
-  const [configured, setConfigured] = useState<Question[]>(questions);
+  const configured = definition.questions.filter((q) => q.points > 0);
   useEffect(() => {
     if (!supabase) return;
     void supabase
@@ -19,23 +29,24 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
       .then(({ data }) => {
         if (data) setPasteAllowed(data.accessibility_paste);
       });
-    void supabase
-      .from('questions')
-      .select('id,prompt,kind,points,options')
-      .eq('assignment_id', 'b6f4b6d0-5fe2-4e4d-b9a5-000000000001')
-      .order('position')
-      .then(({ data }) => {
-        if (data?.length) setConfigured(data as Question[]);
-      });
   }, []);
-  const all = [...configured, ...reflectionQuestions];
+  const all = definition.questions;
   const question = all[index];
-  if (!unlocked && !lab.receipt)
+  if (!question)
+    return (
+      <div className="page narrow">
+        <h1>No theory questions</h1>
+        <Link className="primary" to={basePath + '/review'}>
+          Review submission
+        </Link>
+      </div>
+    );
+  if (definition.gateTheory && !unlocked && !lab.receipt)
     return (
       <div className="page narrow">
         <h1>A little more practice first.</h1>
         <p>Complete the required repository outcomes to unlock theory. Bonus work is optional.</p>
-        <Link className="primary" to="/workspace">
+        <Link className="primary" to={basePath + '/workspace'}>
           Return to workspace
         </Link>
       </div>
@@ -52,9 +63,12 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
     <div className="page assessment">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">ASSIGNMENT 01 / THEORY</span>
+          <span className="eyebrow">{definition.type.toUpperCase()} / THEORY</span>
           <h1>Understand the why.</h1>
-          <p>12 written questions · 25 points · Instructor reviewed</p>
+          <p>
+            {configured.length} questions · {totals(definition).theory} points · Written answers
+            reviewed by instructor
+          </p>
         </div>
         <span className="save-state">
           <i className="live-dot" />
@@ -85,7 +99,7 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
             required answers
           </p>
           <small>
-            Questions 13–14 are practical reflections. Question 15 is optional bonus reflection.
+            Required and optional reflections appear alongside the configured questions.
           </small>
           <hr />
           <ShieldCheck size={22} />
@@ -95,7 +109,7 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
               ? 'Your instructor has enabled paste accessibility support.'
               : 'Paste, drop insertion, and the context menu are restricted in answer fields. This is a deterrent, not a guarantee against cheating. Ask your instructor for an accessibility exception.'}
           </small>
-          <Link to="/workspace" className="practice-link">
+          <Link to={basePath + '/workspace'} className="practice-link">
             ← Back to workspace
           </Link>
         </aside>
@@ -133,17 +147,17 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
                 block(e);
             }}
           >
-            {['single', 'multiple'].includes(question.kind) ? (
+            {['single', 'multiple', 'boolean'].includes(question.kind) ? (
               <fieldset>
                 <legend>Select your answer{question.kind === 'multiple' ? 's' : ''}</legend>
                 {question.options?.map((option) => (
                   <label className="option" key={option}>
                     <input
-                      type={question.kind === 'single' ? 'radio' : 'checkbox'}
-                      disabled={!!lab.receipt}
+                      type={question.kind !== 'multiple' ? 'radio' : 'checkbox'}
+                      disabled={lab.readOnly}
                       name={question.id}
                       checked={
-                        question.kind === 'single'
+                        question.kind !== 'multiple'
                           ? lab.answers[question.id] === option
                           : (lab.answers[question.id] || '').split('\n').includes(option)
                       }
@@ -154,7 +168,7 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
                         lab.setAnswers({
                           ...lab.answers,
                           [question.id]:
-                            question.kind === 'single'
+                            question.kind !== 'multiple'
                               ? option
                               : e.target.checked
                                 ? [...previous, option].join('\n')
@@ -171,7 +185,7 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
                 Your response
                 <textarea
                   maxLength={8000}
-                  readOnly={!!lab.receipt}
+                  readOnly={lab.readOnly}
                   value={lab.answers[question.id] || ''}
                   placeholder="Explain your reasoning in your own words…"
                   rows={11}
@@ -202,7 +216,7 @@ export function Assessment({ lab, unlocked }: { lab: Lab; unlocked: boolean }) {
                 <ArrowRight size={15} />
               </button>
             ) : (
-              <Link className="primary" to="/review">
+              <Link className="primary" to={basePath + '/review'}>
                 Review submission
                 <ArrowRight size={15} />
               </Link>

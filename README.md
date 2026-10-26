@@ -1,6 +1,6 @@
-# IEEE NUB Git Lab
+# IEEE NUB Git Course Assessment Platform
 
-A static React application for IEEE Nahda University Student Branch’s first Git assignment. Students edit real virtual text files, execute local Git operations, inspect actual Git objects and branches, answer twelve written questions, and submit to a trusted Supabase verifier. No application server, Docker, GitHub account, remote Git, or operating system shell is needed by students.
+A focused Git assignment and examination platform. This extends the original Git Lab incrementally: the real browser Git engine, virtual filesystem, CodeMirror editor, themes, authentication, submission verifier, instructor review and Git regression tests are retained. No general LMS features are included.
 
 ## Run locally
 
@@ -11,64 +11,71 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. Without backend configuration, **local practice** works: enter your practice name and department above the workspace. Accounts, cloud checkpoints, final submission and instructor data require a dedicated configured Supabase project. The UI never fabricates a successful submission.
+Open the URL printed by Vite. Without backend configuration, the original Assignment 01 remains available as local practice. Enter your practice name and department above the workspace. Assessed accounts, multiple published assessments, instructor authoring and server-timed exams require the dedicated Supabase project configured below. No mock students, exam results or submission receipts are used in the application.
 
 ```sh
 npm test
 npm run lint
-npm run build
+npm run typecheck
 npm run test:e2e
+npm run test:e2e:fixtures
+npm run build
 ```
 
-On Windows, browser tests use installed Microsoft Edge. On Linux/macOS, first run `npx playwright install chromium`. The tests use synthetic student information and a disposable embedded PostgreSQL database; they never contact an existing Supabase database. No Docker is needed for tests. Vitest may need to run outside a restrictive Windows temporary-file sandbox.
-
-## Configure a dedicated Supabase project
-
-1. Create a new project specifically for this app. Do not use an unrelated database. Check project costs and institution policy before creating it.
-2. In its SQL editor, apply `supabase/migrations/20261026130655_initial_git_lab.sql`, then `supabase/seed.sql`. Alternatively, use the official Supabase CLI’s documented migration push workflow after verifying the linked project reference. No remote migration was applied during this build.
-3. Enable email/password authentication and **require email confirmation**. Configure the frontend origin as Site URL and its exact permitted authentication redirect URL. Enable password strength and breached-password controls available to your plan; use a minimum of 12 characters. Configure SMTP and suitable Auth rate limits for the class. The app uses the verified email account as identity; Student ID is self-reported, not proof of enrollment.
-4. Copy `.env.example` to `.env`. Set `VITE_SUPABASE_URL` to the dedicated project API URL and `VITE_SUPABASE_PUBLISHABLE_KEY` to its **public publishable key**. Never put a secret or service-role key in any `VITE_` variable.
-5. Deploy `supabase/functions/submit-attempt` with the Supabase CLI from this checkout. Inspect `supabase functions deploy --help` for the installed version. The function imports the shared engine/verifier from `src/`; keep the full checkout available to the bundler. Its import map pins server dependencies. Leave gateway JWT verification enabled. The function also calls `auth.getUser` to independently verify the access token and confirmed account.
-6. Set the Edge Function secret `ALLOWED_ORIGIN` to the exact frontend **origin**, without a path or trailing slash. Local development uses `http://127.0.0.1:5173`; GitHub Pages uses `https://YOUR-ACCOUNT.github.io`. Use separate development and production Supabase projects, because one exact origin is permitted at a time. Supabase supplies `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the function runtime. These never enter the frontend build.
-7. Create and confirm the initial instructor account normally. From the project’s privileged SQL editor, add its verified `auth.users.id` to `private.instructors`. Never grant instructor privileges from `user_metadata`, a Student ID, or the browser. See `docs/SECURITY.md`.
-8. Run the staging acceptance checklist in `docs/TESTING.md` before distributing the course URL. Verify email confirmation, gateway JWT configuration, Edge bundling, Data API grants, institution enrollment policy, and the whole student/instructor workflow against that **dedicated** staging project.
-
-Backend tables are RLS protected. Students cannot write attempts, verified scores, final snapshots, grade records, enrollment policies, or roles directly. Guarded RPCs enforce ownership, windows, retakes, and instructor authorization. An atomic service-only RPC finalizes all verified evidence and returns a receipt. A repeated idempotency key returns the same receipt; a different key cannot overwrite a final attempt.
-
-## GitHub Pages
-
-The frontend uses hash routing, so routes work on static Pages without a fallback server. Vite uses `VITE_BASE_PATH` at build time. Use `/REPOSITORY-NAME/` for a repository site and `/` for a user/organization root site or custom domain. The workflow defaults to a repository site; adjust it if needed.
-
-1. Create a **new, empty** GitHub repository. Check its owner and existing state before pushing. No remote URL is embedded in this project.
-2. Push this source to `main`, and choose **GitHub Actions** as the Pages source in repository settings.
-3. Add repository Actions variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for the dedicated production project. These are public configuration. Use the `github-pages` environment’s deployment protection if instructor approval is desired.
-4. The Pages workflow runs unit/integration/security tests, dependency audit, browser tests, and a production build before deploying. Missing production backend variables fail deployment. Pull requests run checks without publishing.
-5. After deployment, set the exact frontend auth redirect URL and Edge origin, then verify login, practical work, final receipt, instructor review, and released results using staging accounts before enrolling students.
-
-No GitHub repository or hosted deployment was created during this implementation. Source, migrations, workflow and setup instructions are ready locally. GitHub Pages cannot configure custom security response headers: see security documentation for hosting limitations.
+On Windows, Playwright uses installed Microsoft Edge. On Linux/macOS, first run `npx playwright install chromium`. Unit/integration tests use an isolated embedded PostgreSQL instance without Docker. The additional connected-UI browser suite starts a separate test-only Vite process and intercepts every local Auth/Data/Edge request; its synthetic keys and users never contact a real project. These fixtures verify UI behavior, while PostgreSQL tests exercise the actual migrations, authorization, expiry and grading functions. Neither substitutes for hosted staging acceptance.
 
 ## Student workflow
 
-- Open My learning and start Assignment 01. Confirm your profile first for an assessed attempt.
-- Use `help` in the terminal for the exact supported grammar. Run one command per line. All Git commands operate on `/IEEE-Git-Task`, never the host filesystem.
-- Select files in Explorer to edit. Files autosave to IndexedDB. Staged snapshots do not change when working files are edited afterward.
-- Progress checks commit trees and branch history. Early setup/observation actions and human explanations also appear in the activity timeline; activity is supporting evidence, not tamper-proof proof that a student personally typed a command.
-- Complete all eight practical outcomes to unlock theory; bonus work is optional. Answer twelve theory questions and two practical reflections. The bonus reflection is optional.
-- Review, export a local backup, and submit. A server receipt, not a local score or animation, confirms submission. Transient failures retain the exact submission payload and idempotency key for retry.
-- An instructor grades written responses and publishes results. Final attempts are read only. Approved retakes begin a separate, empty workspace and preserve prior server submissions.
+The dashboard has Assignments and Exams. Cards show the published title, instructions, availability/deadline, attempt policy, current status and released score. Start an assessment from its details page. Every attempt has an isolated IndexedDB key and server-pinned definition version.
 
-Local autosave uses the current browser/device. **Cloud draft checkpoints are explicit**: open Review → Backup & recovery → Save cloud checkpoint. The UI explains that repository files, answers, configuration and supporting activity are sent to the configured dedicated Supabase project. Restore is also explicit and replaces current local work. Export before restoring. Browser storage can be cleared by the user/browser and is not a substitute for a backup. Cloud draft sync is deliberately manual; final submission still uses its own verified pipeline.
+Practical assessments use the existing text editor, virtual filesystem, terminal and real Git history. Theory-only assessments open directly in the question interface. Objective questions use private server-side keys; written responses default to instructor review. Partial submissions are supported unless the instructor enables the complete-work requirement. Bonus points are separate and never required for normal completion.
 
-## Implementation details and limits
+At the beginning of an assessed attempt, enable the clearly disclosed **server autosave** control. It names the configured project and describes the virtual repository files, answers and supporting command activity being sent. Consent is scoped to that project and attempt in the current tab/session. No background coursework upload occurs before this explicit action. Work also autosaves locally. The **Save now** control forces an accepted checkpoint; the automatic interval is 15 seconds after consent.
 
-- React 19 / TypeScript / Vite / Tailwind; CodeMirror editor; accessible DOM terminal with history and tab completion; custom SVG commit parent graph; IndexedDB; isomorphic-git; Supabase Auth/PostgreSQL/RLS/Edge Functions; Vitest; Playwright.
-- The presentation supplied in this workspace was inspected through slide 28: slide 27 ends merge direction, and slide 28 starts conflicts. Assignment 01 is limited to local Git through merging, using `.txt` files.
-- Virtual `--global` configuration applies inside the sandbox and is mirrored into repository config for a portable, self-contained evidence snapshot. It never changes your computer’s global Git configuration.
-- Clean tracked files are required for branch switches; all working files must be clean for merging. This is a documented conservative teaching boundary. Conflicts abort safely and are outside Assignment 01.
-- Snapshot limits: version 1, 2 MB uncompressed stored bytes, 256 KB/file/object, 3,000 filesystem entries, 150 reachable commits, 700 loose objects on submission, 1,000 recent activity events, 9 MB request body, 8 submission requests/minute/user. No packed objects, symlinks, executable trees, alternates, shallow repositories or remotes are accepted.
-- The assignment definition supports question kinds and future assignment sections. The twelve required written questions stay intact; the instructor UI edits private rubrics, dates, visibility, retakes and review settings. Adding a new assignment requires a matching versioned trusted validator and a new seed/migration; arbitrary future assignments are not automatically gradeable.
-- Assignment 01 theory is intentionally instructor graded. Optional objective scoring and authoring an entire new assignment through the UI are future work. Paste accommodations currently apply to the class, rather than individual students.
-- Exact deterministic replay is not claimed. The instructor sees an activity timeline and actual commit/file snapshots. Editing a final local receipt cannot alter database authorization or verified results.
-- No full offline install/service-worker cache is included. An already open lab can continue working through a brief connection interruption; reopening the site from a cold cache while fully offline requires connectivity. Local data persists across ordinary refreshes.
+For exams, the server creates the start timestamp and immutable deadline when Start Exam is clicked. Refresh and other tabs resume that same attempt; browser wall-clock changes cannot extend it. Countdown display uses server timestamps and a monotonic clock. At expiry, editing locks and the server finalizes the **last accepted verified checkpoint**. Work arriving after the deadline, including work held offline, is excluded. Enable autosave promptly; without an accepted checkpoint the expired attempt contains no saved student work. See [the interruption policy](docs/ASSESSMENTS_AND_EXAMS.md).
 
-Read [architecture](docs/ARCHITECTURE.md), [security](docs/SECURITY.md), [testing and staging acceptance](docs/TESTING.md), and the [implementation report](docs/IMPLEMENTATION_REPORT.md).
+## Instructor workflow
+
+After privileged account authorization, open Instructor → Assignments & exams:
+
+- Create, edit, duplicate, publish/unpublish and archive assessments.
+- Choose practical-only, theory-only or mixed format; configure availability, duration, attempt limit, bonus tasks and release policy.
+- Add/reorder sections, practical tasks and questions. Task validation uses safe predefined rules for repository state, files/content, branches, commit history and merged ancestry. No instructor-authored executable code is accepted.
+- Add starter text files; optionally initialize/commit them, or import a bounded starter repository backup.
+- Author multiple-choice, multiple-select, true/false, short/long written, scenario and terminal-interpretation questions. Save/reuse them through the private question bank. Correct keys and explanations are removed from student-visible published versions.
+- Review attempts filtered by assessment and student identity. Inspect real task outcomes, commit/file snapshots, graph, answers and supporting activity; grade manual questions, give feedback, release results, approve retakes and export CSV.
+
+Publishing creates an immutable version. Editing a draft or publishing the next version never changes already-started attempts. Deleting a question from a draft/bank does not alter historical versions or submissions. Bank deletions and assessment archive actions are recoverable.
+
+## Dedicated Supabase setup / safe upgrade
+
+Do not apply this app to an unrelated database. No production infrastructure was changed during this refinement.
+
+1. Verify the dedicated development/staging project. For a new installation apply the original migration, then `supabase/seed.sql`, then `supabase/migrations/20261026160527_reusable_assessments_and_exams.sql`. For an existing original installation apply **only the new additive migration** after a database backup and staging validation. Do not rerun the baseline migration or erase student tables. The extension preserves existing data and backfills Assignment 01 versions.
+2. Enable email/password Auth with confirmation, a suitable password policy, SMTP, auth rate limits and exact redirect URLs. Complete each student's academic profile. A self-reported Student ID is not proof of identity.
+3. Copy `.env.example` to `.env`; set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and the appropriate `VITE_BASE_PATH`. Use only the public publishable key in the frontend. Never set a service-role or secret key in a `VITE_` variable.
+4. Deploy the existing `submit-attempt` function and the new `assessment-attempt` function from this complete checkout with their configured import map. The old endpoint is preserved for compatibility; new assessments use the new endpoint. Keep gateway JWT verification enabled. Both independently verify the confirmed account. Set the Edge secret `ALLOWED_ORIGIN` to the exact frontend origin. Supabase supplies its server URL and service-role key inside the function runtime only.
+5. In the verified project's privileged SQL editor, add the confirmed instructor's actual `auth.users.id` to `private.instructors`. Do not use editable metadata or a Student ID for roles.
+6. Install the recurring expiry job using `supabase/exam-expiry-schedule.sql` in that dedicated project. It uses Supabase Cron to call the service-only expiry function every minute, with no HTTP secret or separate backend. Check `cron.job` and `cron.job_run_details`. Every save also independently enforces the exact deadline, even if the scheduler is delayed. The scheduler is required to finalize abandoned exams without a returning browser.
+7. Run the hosted acceptance checklist in [TESTING.md](docs/TESTING.md). Local tests do not verify SMTP delivery, hosted gateway behavior, live cron installation or real PostgREST responses.
+
+Separate development and production project configuration is recommended. `ALLOWED_ORIGIN` accepts one exact origin per environment. Use `http://127.0.0.1:5173` for local development and your actual HTTPS Pages origin for production, without a path or trailing slash.
+
+## GitHub Pages
+
+The existing workflow is retained and extended to run lint, regression/security tests and both browser suites before building. Hash routing supports static deep links. Set repository Actions variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_BASE_PATH` defaults to `/REPOSITORY-NAME/` in the workflow. Adjust it to `/` for an organization root site/custom domain. Select GitHub Actions as the Pages source. The Edge workflow type-checks both endpoints with Deno.
+
+Check the intended repository and project before pushing or deploying. No remote repository, Pages deployment or Supabase migration/function/job was created or applied in this refinement. Roll back frontend code through a prior validated commit; use reviewed forward database migrations instead of disabling RLS or deleting evidence tables.
+
+## Preserved behavior and limits
+
+- React/TypeScript/Vite/Tailwind, CodeMirror, isomorphic-git and the virtual Git index/object/ref model are retained. Staged files remain separate from later working edits.
+- The original Assignment 01 and its 100 + 10 point learning contract remain available. Its compatibility validator is a named safe rule; new assessments use configurable rules and require no source-code edit.
+- Branch switching conservatively requires clean tracked files; merging requires a clean working tree. Conflicts abort safely. Remotes and OS shell access remain unsupported.
+- Coursework uses `.txt` files only. Existing snapshot bounds remain: 2 MB stored bytes, 256 KB/file/object, 3,000 entries, 150 commits, 700 loose objects, 1,000 activity events and a 9 MB request body. Definitions are bounded to 1 MB; imported starter backup input to 900 KB. No packed objects, symlinks or executable trees are accepted.
+- A stale tab cannot overwrite a newer server revision. It pauses editing and asks the student to reload the accepted checkpoint. Final attempts are immutable; retakes use new workspaces.
+- Local practice and old per-user data remain present. A matching legacy active attempt is copied to its new isolated key on first resume; the old key is not deleted.
+- Paste restrictions are lightweight and bypassable. Existing class-wide accessibility exceptions remain available. No webcam, screen recording, keystroke surveillance or lockdown software is used.
+- The activity viewer is supporting evidence, not proof of human authorship or a deterministic replay. Browser storage can be cleared; export important local work. No service-worker installation or cold-start fully offline loading is promised.
+
+See [current architecture](docs/ARCHITECTURE.md), [security](docs/SECURITY.md), [exam policy](docs/ASSESSMENTS_AND_EXAMS.md), [testing](docs/TESTING.md), and the [refinement report](docs/REFINEMENT_REPORT.md).

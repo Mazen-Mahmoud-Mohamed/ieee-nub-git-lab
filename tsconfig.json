@@ -13,5 +13,13 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests/unit", "tests/integration", "vite.config.ts", "playwright.config.ts"]
+  "include": [
+    "src",
+    "tests/unit",
+    "tests/integration",
+    "tests/browser-fixtures",
+    "vite.config.ts",
+    "playwright.config.ts",
+    "playwright.fixture.config.ts"
+  ]
 }

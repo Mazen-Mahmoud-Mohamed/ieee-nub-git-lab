@@ -11,3 +11,4 @@ jobs:
         with:
           deno-version: v2.x
       - run: deno check --import-map supabase/functions/submit-attempt/import_map.json supabase/functions/submit-attempt/index.ts
+      - run: deno check --import-map supabase/functions/submit-attempt/import_map.json supabase/functions/assessment-attempt/index.ts
