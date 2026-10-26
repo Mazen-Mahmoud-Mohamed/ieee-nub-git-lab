@@ -65,22 +65,26 @@ export function TaskInstructions({
             <li>Watch the checklist below, then continue to questions or review.</li>
           </ol>
         </details>
-        <div className="requirement-summary" aria-live="polite">
-          <strong>
-            {done} / {all.length} checks completed
-          </strong>
-          <span>
-            {tasks} / {required.length} scored tasks
-          </span>
-          <span>
-            {finishedSections} / {requiredSections.length} required sections
-          </span>
-          <span>
-            Local practical estimate: {score} / {points.practical}
-            {points.bonus ? ' · Bonus ' + bonus + ' / ' + points.bonus : ''}
-          </span>
-        </div>
-        <progress aria-label="Requirement progress" value={done} max={all.length || 1} />
+        {!error && (
+          <div className="requirement-summary" aria-live="polite">
+            <strong>
+              {done} / {all.length} checks completed
+            </strong>
+            <span>
+              {tasks} / {required.length} scored tasks
+            </span>
+            <span>
+              {finishedSections} / {requiredSections.length} required sections
+            </span>
+            <span>
+              Local practical estimate: {score} / {points.practical}
+              {points.bonus ? ' · Bonus ' + bonus + ' / ' + points.bonus : ''}
+            </span>
+          </div>
+        )}
+        {!error && (
+          <progress aria-label="Requirement progress" value={done} max={all.length || 1} />
+        )}
         <p className="progress-explanation">
           Checks show individual steps, including file preparation. Points are earned when a whole
           scored task passes. The server verifies your grade on save or submission.
@@ -110,8 +114,15 @@ export function TaskInstructions({
                 <span>
                   <strong>{s.title}</strong>
                   <small>
-                    {passed ? 'Completed' : finished ? 'In progress' : 'Not started'} · {finished}/
-                    {checks.length} checks · {s.tasks.reduce((n, t) => n + t.points, 0)} points
+                    {error
+                      ? 'Unable to verify'
+                      : passed
+                        ? 'Completed'
+                        : finished
+                          ? 'In progress'
+                          : 'Not started'}{' '}
+                    · {finished}/{checks.length} checks ·{' '}
+                    {s.tasks.reduce((n, t) => n + t.points, 0)} points
                     {s.tasks.every((t) => t.bonus) ? ' · Optional' : ''}
                   </small>
                 </span>
@@ -139,8 +150,12 @@ export function TaskInstructions({
                 <article key={task.id} className="task-feedback" aria-label={task.title}>
                   <h3>{task.title}</h3>
                   <span className={state.passed ? 'passed' : 'muted'}>
-                    {state.passed ? 'Scored task complete' : 'Scored task incomplete'} ·{' '}
-                    {task.points} points{task.bonus ? ' · Optional bonus' : ''}
+                    {error || state.requirements.some((c) => c.status === 'unverifiable')
+                      ? 'Unable to verify scored task'
+                      : state.passed
+                        ? 'Scored task complete'
+                        : 'Scored task incomplete'}{' '}
+                    · {task.points} points{task.bonus ? ' · Optional bonus' : ''}
                   </span>
                   {task.instructions !== current.steps.join('\n') && (
                     <p className="written-answer">{task.instructions}</p>

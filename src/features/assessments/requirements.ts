@@ -249,7 +249,10 @@ export function requirementProgress(
       );
       return {
         task,
-        passed: outcomes.find((o) => o.id === task.id)?.passed || false,
+        passed:
+          !unavailable &&
+          !requirements.some((c) => c.passed === null) &&
+          (outcomes.find((o) => o.id === task.id)?.passed || false),
         requirements,
         next:
           unavailable ||

@@ -169,6 +169,20 @@ describe('workspace requirements from real Git state', () => {
     ])
       await cmd(e, c);
     expect(requirementProgress(d, await e.inspect(), identity, files(e))[0].passed).toBe(true);
+    const unavailable = requirementProgress(
+      d,
+      await e.inspect(),
+      identity,
+      files(e),
+      false,
+      'Inspection failed',
+    )[0];
+    expect(unavailable.passed).toBe(false);
+    expect(unavailable.requirements.every((r) => r.status === 'unverifiable')).toBe(true);
+    expect(
+      requirementProgress(d, await e.inspect(), { full_name: '', department: '' }, files(e))[0]
+        .passed,
+    ).toBe(false);
     await e.write('summary.txt', 'changed');
     p = requirementProgress(d, await e.inspect(), identity, files(e));
     expect(check(p, 'Working files match the saved Git state').passed).toBe(false);
