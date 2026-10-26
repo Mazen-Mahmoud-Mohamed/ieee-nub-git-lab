@@ -44,6 +44,7 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
   const saved: Record<string, any>[] = [];
   const requests: string[] = [];
   let uploads = 0;
+  let profileFaculty = 'engineering';
   let network = true;
   const authUser = {
     id: USER,
@@ -81,16 +82,18 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
         user: authUser,
       };
     else if (path === '/auth/v1/user') response = authUser;
-    else if (path === '/rest/v1/profiles')
+    else if (path === '/rest/v1/profiles') {
+      if (request.method() === 'POST') profileFaculty = body.faculty;
       response = {
         id: USER,
         full_name: instructor ? 'Fixture Instructor' : 'Fixture Student',
         student_id: 'TEST-001',
         department: 'Engineering',
+        faculty: profileFaculty,
         academic_year: '2',
         university: 'Nahda University',
       };
-    else if (path.endsWith('/rpc/is_instructor')) response = instructor;
+    } else if (path.endsWith('/rpc/is_instructor')) response = instructor;
     else if (path === '/rest/v1/assignments') {
       const records = Object.entries(definitions).map(([id, d]) => ({
         id,
@@ -125,6 +128,7 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
           full_name: 'Fixture Student',
           student_id: 'TEST-001',
           department: 'Engineering',
+          faculty: profileFaculty,
           academic_year: '2',
         },
         assignments: { title: a.definition.title, type: a.definition.type },
@@ -231,6 +235,7 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     attempts,
     saved,
     requests,
+    faculty: () => profileFaculty,
     uploads: () => uploads,
     definitions,
     network: (enabled: boolean) => {
@@ -238,6 +243,38 @@ async function fixture(page: Page, instructor = false, examSeconds = 120) {
     },
   };
 }
+test('profile faculty choices and saved values use the corrected names', async ({ page }) => {
+  const api = await fixture(page);
+  await api.login();
+  await page.goto('/#/profile');
+  const faculty = page.getByRole('group', { name: 'Faculty', exact: true });
+  await expect(faculty.getByRole('radio')).toHaveCount(2);
+  await expect(faculty.getByRole('radio', { name: 'Engineering', exact: true })).toHaveAttribute(
+    'value',
+    'engineering',
+  );
+  await faculty.getByRole('radio', { name: 'Computer Science', exact: true }).check();
+  await page.getByRole('button', { name: 'Save profile', exact: true }).click();
+  await expect(page).toHaveURL(/dashboard/);
+  expect(api.faculty()).toBe('computer_science');
+  await page.goto('/#/profile');
+  await expect(page.getByRole('radio', { name: 'Computer Science', exact: true })).toBeChecked();
+});
+test('instructor faculty filter has only canonical faculties and an all option', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await page.goto('/#/instructor');
+  const filter = page.getByRole('combobox', { name: 'Faculty filter', exact: true });
+  await expect(filter.getByRole('option')).toHaveText([
+    'All faculties',
+    'Engineering',
+    'Computer Science',
+  ]);
+  await filter.selectOption('computer_science');
+  await expect(filter).toHaveValue('computer_science');
+});
 test('student sees published assignments/exams and each workspace stays isolated', async ({
   page,
 }) => {

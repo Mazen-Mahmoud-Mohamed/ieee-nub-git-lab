@@ -69,6 +69,9 @@ beforeAll(async () => {
   await db.exec(
     readFileSync('supabase/migrations/20261026160527_reusable_assessments_and_exams.sql', 'utf8'),
   );
+  await db.exec(
+    readFileSync('supabase/migrations/20261026171250_normalize_profile_faculty.sql', 'utf8'),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();

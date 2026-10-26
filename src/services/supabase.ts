@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { Faculty } from '../features/auth/faculty';
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 export const supabase = url && key ? createClient(url, key) : null;
@@ -8,6 +9,7 @@ export type Profile = {
   student_id: string;
   university: string;
   department: string;
+  faculty: Faculty | null;
   academic_year: string;
 };
 export function requireBackend() {

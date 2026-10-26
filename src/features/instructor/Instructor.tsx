@@ -15,6 +15,7 @@ import { AssessmentManager, AssessmentEditor, QuestionBank } from './AssessmentE
 import { GitEngine, type RepoView, type Activity } from '../git-engine/engine';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS';
 import { GitGraph } from '../../components/GitGraph';
+import { FACULTIES, facultyLabel, type Faculty } from '../auth/faculty';
 type Attempt = {
   id: string;
   student_id: string;
@@ -32,6 +33,7 @@ type Attempt = {
     full_name: string;
     student_id: string;
     department: string;
+    faculty: Faculty | null;
     academic_year: string;
   } | null;
 };
@@ -73,6 +75,7 @@ function Attempts() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [department, setDepartment] = useState('');
+  const [faculty, setFaculty] = useState('');
   const [year, setYear] = useState('');
   const [selected, setSelected] = useState<Attempt | null>(null);
   const load = async () => {
@@ -82,7 +85,7 @@ function Attempts() {
       const { data, error } = await client
         .from('attempts')
         .select(
-          '*,assignments(title,type),profiles(full_name,student_id,department,academic_year),grading_summaries(practical_score,theory_score,released,feedback)',
+          '*,assignments(title,type),profiles(full_name,student_id,department,faculty,academic_year),grading_summaries(practical_score,theory_score,released,feedback)',
         )
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -108,6 +111,7 @@ function Attempts() {
           .toLowerCase()
           .includes(search.toLowerCase())) &&
       (!department || r.profiles?.department === department) &&
+      (!faculty || r.profiles?.faculty === faculty) &&
       (!year || r.profiles?.academic_year === year) &&
       (!assessmentFilter || r.assignment_id === assessmentFilter),
   );
@@ -144,6 +148,18 @@ function Attempts() {
         })}
       </div>
       <div className="table-toolbar">
+        <select
+          aria-label="Faculty filter"
+          value={faculty}
+          onChange={(e) => setFaculty(e.target.value)}
+        >
+          <option value="">All faculties</option>
+          {FACULTIES.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
         <select
           aria-label="Assessment filter"
           value={assessmentFilter}
@@ -203,6 +219,7 @@ function Attempts() {
                 'Name',
                 'Student ID',
                 'Department',
+                'Faculty',
                 'Year',
                 'Assessment',
                 'Type',
@@ -217,6 +234,7 @@ function Attempts() {
                 r.profiles?.full_name,
                 r.profiles?.student_id,
                 r.profiles?.department,
+                facultyLabel(r.profiles?.faculty),
                 r.profiles?.academic_year,
                 r.assignments?.title,
                 r.assignments?.type,
@@ -258,6 +276,7 @@ function Attempts() {
               <tr>
                 <th>Student</th>
                 <th>Department</th>
+                <th>Faculty</th>
                 <th>Assessment</th>
                 <th>Status</th>
                 <th>Practical</th>
@@ -273,6 +292,7 @@ function Attempts() {
                     <small>{r.profiles?.student_id}</small>
                   </td>
                   <td>{r.profiles?.department}</td>
+                  <td>{facultyLabel(r.profiles?.faculty)}</td>
                   <td>
                     {r.assignments?.title}
                     <small>{r.assignments?.type}</small>

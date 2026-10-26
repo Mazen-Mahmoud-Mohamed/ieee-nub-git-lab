@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { requireBackend, supabase, type Profile } from '../../services/supabase';
+import { FACULTIES, isFaculty } from './faculty';
 export function AuthPage() {
   const [register, setRegister] = useState(false);
   const [error, setError] = useState('');
@@ -141,19 +142,23 @@ export function ProfilePage({
           setBusy(true);
           setError('');
           try {
+            const form = new FormData(e.currentTarget);
             const client = requireBackend();
             const {
               data: { user },
             } = await client.auth.getUser();
             if (!user) throw new Error('Sign in first.');
-            const form = new FormData(e.currentTarget);
+            const faculty = form.get('faculty');
+            if (!isFaculty(faculty)) throw new Error('Select Engineering or Computer Science.');
             const fields = Object.fromEntries(
               ['full_name', 'student_id', 'university', 'department', 'academic_year'].map((k) => [
                 k,
                 String(form.get(k)).trim(),
               ]),
             );
-            const { error } = await client.from('profiles').upsert({ id: user.id, ...fields });
+            const { error } = await client
+              .from('profiles')
+              .upsert({ id: user.id, ...fields, faculty });
             if (error) throw error;
             await onSave();
             navigate('/dashboard');
@@ -168,7 +173,7 @@ export function ProfilePage({
           ['full_name', 'Full name'],
           ['student_id', 'Student ID'],
           ['university', 'University'],
-          ['department', 'Faculty / department'],
+          ['department', 'Department'],
           ['academic_year', 'Academic year'],
         ].map(([key, label]) => (
           <label key={key}>
@@ -183,6 +188,21 @@ export function ProfilePage({
             />
           </label>
         ))}
+        <fieldset>
+          <legend>Faculty</legend>
+          {FACULTIES.map((faculty) => (
+            <label className="option" key={faculty.value}>
+              <input
+                type="radio"
+                name="faculty"
+                value={faculty.value}
+                required
+                defaultChecked={profile?.faculty === faculty.value}
+              />
+              {faculty.label}
+            </label>
+          ))}
+        </fieldset>
         {error && (
           <p className="error" role="alert">
             {error}
