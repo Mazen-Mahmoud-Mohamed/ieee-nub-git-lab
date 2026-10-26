@@ -4,6 +4,8 @@ A focused Git assignment and examination platform. This extends the original Git
 
 Students can sign in with Google or email/password, then complete one short profile form (name, authenticated email, Egyptian mobile and faculty). Faculty choices are **Engineering** and **Computer Science**. Existing Git work, academic details, attempts and grades are preserved. Start with the [Google/Auth and profile upgrade guide](docs/GOOGLE_AUTH_AND_PROFILES.md) for provider setup, migration order, account-linking behavior and hosted acceptance checks.
 
+The initial staging instance is at [GitHub Pages](https://mazen-mahmoud-mohamed.github.io/ieee-nub-git-lab/), with source at [GitHub](https://github.com/Mazen-Mahmoud-Mohamed/ieee-nub-git-lab). See the [deployment verification report](docs/INITIAL_DEPLOYMENT_REPORT.md) for the dedicated project, successful online checks and remaining Google/email onboarding requirements. This is a staging deployment for owner testing.
+
 ## Run locally
 
 Requires Node.js 24 and npm.
