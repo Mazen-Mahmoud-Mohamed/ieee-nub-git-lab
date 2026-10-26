@@ -33,7 +33,13 @@ Local results: TypeScript and lint passed; 88 unit/integration tests passed; 7 l
 
 ## Deployment
 
-Deployment and live verification results will be recorded after the staging workflows complete.
+Deployed application commit: `6ad2c9a521fc5609c27988e1e26fc9cbdf108412`.
+
+- [GitHub Pages validation and deployment](https://github.com/Mazen-Mahmoud-Mohamed/ieee-nub-git-lab/actions/runs/40413143913) passed, including all 88 unit/integration tests, all 7 local browser tests, all 19 connected browser tests, lint, dependency audit and production build.
+- [Both server verifier checks](https://github.com/Mazen-Mahmoud-Mohamed/ieee-nub-git-lab/actions/runs/40413143881) passed.
+- Both existing Edge Functions were redeployed to `spldzxeqxwicnffnkizm`; both are ACTIVE at version 3 with JWT verification and import maps enabled. No auth config push, schema migration or unrelated database change was performed.
+- [Live staging workspace](https://mazen-mahmoud-mohamed.github.io/ieee-nub-git-lab/#/workspace) verified in a fresh browser against the actual Pages deployment. Three acceptance tests passed: the exact reported sequence and granular checks, editor content/dirty-state/refresh recovery; the full real-Git Assignment 01 practice flow through separate commits, branch isolation, merge, 8/8 scored tasks and theory persistence; mobile instructions with no page overflow and missing-route recovery.
+- Screenshots of the deployed workspace were visually reviewed. Live acceptance used isolated local practice browser storage; it did not submit a real student's attempt or claim to reverify owner Google sign-in.
 
 ## Limits
 
