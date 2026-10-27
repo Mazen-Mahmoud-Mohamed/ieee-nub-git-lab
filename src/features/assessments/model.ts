@@ -5,6 +5,7 @@ import {
   questions,
   reflectionQuestions,
   validateRepository,
+  legacyRequirementChecks,
   type StudentIdentity,
   type Outcome,
 } from '../assignments/assignment.ts';
@@ -22,6 +23,7 @@ export type Rule = {
   target?: string;
   mergeCommit?: boolean;
   outcomeId?: string;
+  revision?: 1 | 2;
 };
 export type Task = {
   id: string;
@@ -285,6 +287,8 @@ export function assertDefinition(value: unknown): asserts value is Definition {
       )
         throw new Error('Invalid practical task');
       for (const r of t.rules) {
+        if (r.revision !== undefined && (r.type !== 'legacy' || ![1, 2].includes(r.revision)))
+          throw new Error('Unsupported compatibility revision');
         if (
           ![
             'repository',
@@ -381,12 +385,12 @@ export function outcomesFor(
   identity: StudentIdentity,
   working: Record<string, string> = {},
 ): Array<Outcome & { feedback: string[] }> {
-  const legacyResults = d.sections.some((s) =>
-    s.tasks.some((t) => t.rules.some((r) => r.type === 'legacy')),
-  )
-    ? validateRepository(view, identity)
-    : [];
-  const legacy = () => legacyResults;
+  const legacyResults = new Map<number, Outcome[]>();
+  const legacy = (revision: 1 | 2 = 1) => {
+    if (!legacyResults.has(revision))
+      legacyResults.set(revision, validateRepository(view, identity, revision, working));
+    return legacyResults.get(revision)!;
+  };
   const commits = new Map(view.commits.map((c) => [c.oid, c]));
   const ancestors = (ref: string) => {
     const seen = new Set<string>();
@@ -414,7 +418,7 @@ export function outcomesFor(
   const passes = (r: Rule): boolean => {
     switch (r.type) {
       case 'legacy':
-        return legacy().find((o) => o.id === r.outcomeId)?.passed || false;
+        return legacy(r.revision).find((o) => o.id === r.outcomeId)?.passed || false;
       case 'repository':
         return (
           view.initialized &&
@@ -491,6 +495,12 @@ export function outcomesFor(
           case 'isolation':
             return `Check that ${r.path} was introduced in a new commit on ${r.source}.`;
           case 'legacy':
+            if (r.revision === 2)
+              return (
+                legacyRequirementChecks(view, identity, working, 2)[r.outcomeId || '']?.find(
+                  (c) => c.passed !== true,
+                )?.hint || 'Compare the saved repository with this task’s requirements.'
+              );
             return (
               (
                 {
@@ -540,6 +550,15 @@ export function sanitizeAnswers(d: Definition, value: unknown) {
     result[id] = answer as string;
   }
   return result;
+}
+export function answerPresent(q: AssessmentQuestion, value = '') {
+  if (!['single', 'multiple', 'boolean'].includes(q.kind)) return !!value.trim();
+  const choices = value.split('\n').filter(Boolean);
+  return (
+    choices.length > 0 &&
+    choices.every((c) => q.options.includes(c)) &&
+    (q.kind === 'multiple' || choices.length === 1)
+  );
 }
 export function gradeObjective(
   d: Definition,

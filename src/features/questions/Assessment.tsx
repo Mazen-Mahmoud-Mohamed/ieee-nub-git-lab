@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Flag, ShieldCheck, Check } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
-import { firstAssessment, type Definition, totals } from '../assessments/model';
+import { firstAssessment, totals, answerPresent, type Definition } from '../assessments/model';
 import { supabase } from '../../services/supabase';
+import { StudentSteps } from '../assessments/StudentSteps';
 export function Assessment({
   lab,
   unlocked,
@@ -15,130 +15,106 @@ export function Assessment({
   definition?: Definition;
   basePath?: string;
 }) {
-  const [index, setIndex] = useState(0);
-  const [notice, setNotice] = useState('');
-  const [pasteAllowed, setPasteAllowed] = useState(false);
-  const configured = definition.questions.filter((q) => q.points > 0);
+  const [index, setIndex] = useState(0),
+    [notice, setNotice] = useState(''),
+    [pasteAllowed, setPasteAllowed] = useState(false);
+  const all = definition.questions,
+    question = all[index],
+    required = all.filter((q) => q.required),
+    answered = required.filter((q) => answerPresent(q, lab.answers[q.id])).length,
+    questionIds = all.map((q) => q.id).join('|');
   useEffect(() => {
-    if (!supabase) return;
-    void supabase
-      .from('app_settings')
-      .select('accessibility_paste')
-      .eq('id', true)
-      .single()
-      .then(({ data }) => {
-        if (data) setPasteAllowed(data.accessibility_paste);
-      });
+    setIndex(0);
+    setNotice('');
+  }, [lab.key, questionIds]);
+  useEffect(() => {
+    let live = true;
+    if (supabase)
+      void supabase
+        .from('app_settings')
+        .select('accessibility_paste')
+        .eq('id', true)
+        .single()
+        .then(({ data }) => {
+          if (live && data) setPasteAllowed(data.accessibility_paste);
+        });
+    return () => {
+      live = false;
+    };
   }, []);
-  const all = definition.questions;
-  const question = all[index];
-  if (!question)
-    return (
-      <div className="page narrow">
-        <h1>No theory questions</h1>
-        <Link className="primary" to={basePath + '/review'}>
-          Review submission
-        </Link>
-      </div>
-    );
-  if (definition.gateTheory && !unlocked && !lab.receipt)
-    return (
-      <div className="page narrow">
-        <h1>A little more practice first.</h1>
-        <p>Complete the required repository outcomes to unlock theory. Bonus work is optional.</p>
-        <Link className="primary" to={basePath + '/workspace'}>
-          Return to workspace
-        </Link>
-      </div>
-    );
   const block = (e: React.SyntheticEvent) => {
     if (!pasteAllowed) {
       e.preventDefault();
       setNotice(
-        'Please write your own response. Contact your instructor if you need a paste accessibility exception.',
+        'Write your own response. Ask your instructor if you need paste accessibility support.',
       );
     }
   };
+  const setAnswer = (value: string) =>
+    lab.setAnswers((previous) => ({ ...previous, [question.id]: value }));
   return (
-    <div className="page assessment">
-      <div className="page-heading">
+    <div className="page student-questions">
+      <StudentSteps basePath={basePath} />
+      <header className="questions-heading">
         <div>
-          <span className="eyebrow">{definition.type.toUpperCase()} / THEORY</span>
-          <h1>Understand the why.</h1>
+          <h1>Questions</h1>
           <p>
-            {configured.length} questions · {totals(definition).theory} points · Written answers
-            reviewed by instructor
+            {definition.title} · {totals(definition).theory} points
           </p>
         </div>
-        <span className="save-state">
-          <i className="live-dot" />
+        <span className="save-state" role="status">
           {lab.saving}
         </span>
-      </div>
-      <div className="assessment-grid">
-        <aside className="form-card">
-          <h3>Your questions</h3>
-          <div className="question-grid">
-            {all.map((q, i) => (
-              <button
-                key={q.id}
-                aria-label={`Question ${i + 1}${lab.answers[q.id] ? ' answered' : ' unanswered'}${lab.flagged.includes(q.id) ? ' flagged' : ''}`}
-                className={
-                  (index === i ? 'active ' : '') +
-                  (lab.answers[q.id] ? 'answered ' : '') +
-                  (lab.flagged.includes(q.id) ? 'flagged' : '')
-                }
-                onClick={() => setIndex(i)}
+      </header>
+      {definition.gateTheory && !unlocked && !lab.receipt ? (
+        <section className="form-card">
+          <h2>Complete the required practical tasks first.</h2>
+          <p>This published version gates Questions on required tasks. Bonus work is optional.</p>
+          <Link className="primary" to={basePath + '/workspace'}>
+            Return to workspace
+          </Link>
+        </section>
+      ) : !question ? (
+        <section className="form-card">
+          <h2>No questions in this assessment.</h2>
+          <Link className="primary" to={basePath + '/review'}>
+            Review submission
+          </Link>
+        </section>
+      ) : (
+        <section className="form-card simple-question">
+          <div className="question-position">
+            <label>
+              Question
+              <select
+                aria-label="Choose question"
+                value={index}
+                onChange={(e) => setIndex(Number(e.target.value))}
               >
-                {lab.answers[q.id] ? <Check size={13} /> : i + 1}
-              </button>
-            ))}
+                {all.map((q, i) => (
+                  <option key={q.id} value={i}>
+                    {i + 1}. {answerPresent(q, lab.answers[q.id]) ? 'Answered' : 'Unanswered'}
+                    {q.required ? ' · Required' : ' · Optional'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span>
+              {answered} of {required.length} required answers
+            </span>
           </div>
-          <p>✓ Answered · Number = unanswered · Flag = review later</p>
-          <Link className="outline-button" to={basePath + '/review'}>
-            Review and submit
-          </Link>
-          <p>
-            {configured.filter((q) => lab.answers[q.id]?.trim()).length} of {configured.length}{' '}
-            required answers
-          </p>
-          <small>
-            Required and optional reflections appear alongside the configured questions.
-          </small>
-          <hr />
-          <ShieldCheck size={22} />
-          <p>Assessment integrity</p>
-          <small>
-            {pasteAllowed
-              ? 'Your instructor has enabled paste accessibility support.'
-              : 'Paste, drop insertion, and the context menu are restricted in answer fields. This is a deterrent, not a guarantee against cheating. Ask your instructor for an accessibility exception.'}
-          </small>
-          <Link to={basePath + '/workspace'} className="practice-link">
-            ← Back to workspace
-          </Link>
-        </aside>
-        <section className="form-card question-card">
           <div className="question-meta">
             <span>
-              QUESTION {String(index + 1).padStart(2, '0')} / {all.length}
+              QUESTION {index + 1} / {all.length}
             </span>
-            <span>{question.points ? question.points + ' points' : 'Practical reflection'}</span>
+            <span>
+              {question.points ? question.points + ' points' : 'Practical reflection'} ·{' '}
+              {question.required ? 'Required' : 'Optional'}
+            </span>
           </div>
-          <h2>{question.prompt}</h2>
-          <button
-            className="text-button flag-button"
-            onClick={() =>
-              lab.setFlagged(
-                lab.flagged.includes(question.id)
-                  ? lab.flagged.filter((id) => id !== question.id)
-                  : [...lab.flagged, question.id],
-              )
-            }
-          >
-            <Flag size={14} />
-            {lab.flagged.includes(question.id) ? 'Flagged for review' : 'Flag for review'}
-          </button>
+          <h2 className="written-answer">{question.prompt}</h2>
           <div
+            key={question.id}
             onPaste={block}
             onDrop={block}
             onContextMenu={block}
@@ -152,31 +128,36 @@ export function Assessment({
             }}
           >
             {['single', 'multiple', 'boolean'].includes(question.kind) ? (
-              <fieldset>
-                <legend>Select your answer{question.kind === 'multiple' ? 's' : ''}</legend>
-                {question.options?.map((option) => (
+              <fieldset className="question-choices">
+                <legend>
+                  {question.kind === 'multiple' ? 'Select all that apply' : 'Choose one answer'}
+                </legend>
+                {question.options.map((option) => (
                   <label className="option" key={option}>
                     <input
-                      type={question.kind !== 'multiple' ? 'radio' : 'checkbox'}
-                      disabled={lab.readOnly}
+                      type={question.kind === 'multiple' ? 'checkbox' : 'radio'}
                       name={question.id}
+                      disabled={lab.readOnly}
                       checked={
-                        question.kind !== 'multiple'
-                          ? lab.answers[question.id] === option
-                          : (lab.answers[question.id] || '').split('\n').includes(option)
+                        question.kind === 'multiple'
+                          ? (lab.answers[question.id] || '').split('\n').includes(option)
+                          : lab.answers[question.id] === option
                       }
                       onChange={(e) => {
-                        const previous = (lab.answers[question.id] || '')
-                          .split('\n')
-                          .filter(Boolean);
-                        lab.setAnswers({
-                          ...lab.answers,
-                          [question.id]:
-                            question.kind !== 'multiple'
-                              ? option
-                              : e.target.checked
-                                ? [...previous, option].join('\n')
-                                : previous.filter((x) => x !== option).join('\n'),
+                        const checked = e.target.checked;
+                        lab.setAnswers((previous) => {
+                          const selected = (previous[question.id] || '')
+                            .split('\n')
+                            .filter(Boolean);
+                          return {
+                            ...previous,
+                            [question.id]:
+                              question.kind !== 'multiple'
+                                ? option
+                                : checked
+                                  ? [...new Set([...selected, option])].join('\n')
+                                  : selected.filter((s) => s !== option).join('\n'),
+                          };
                         });
                       }}
                     />
@@ -187,21 +168,34 @@ export function Assessment({
             ) : (
               <label className="answer-label">
                 Your response
-                <textarea
-                  maxLength={8000}
-                  readOnly={lab.readOnly}
-                  value={lab.answers[question.id] || ''}
-                  placeholder="Explain your reasoning in your own words…"
-                  rows={11}
-                  onChange={(e) =>
-                    lab.setAnswers({ ...lab.answers, [question.id]: e.target.value })
-                  }
-                />
+                {question.kind === 'short' ? (
+                  <input
+                    maxLength={8000}
+                    readOnly={lab.readOnly}
+                    value={lab.answers[question.id] || ''}
+                    onChange={(e) => setAnswer(e.target.value)}
+                  />
+                ) : (
+                  <textarea
+                    rows={6}
+                    maxLength={8000}
+                    readOnly={lab.readOnly}
+                    value={lab.answers[question.id] || ''}
+                    placeholder="Write your response…"
+                    onChange={(e) => setAnswer(e.target.value)}
+                  />
+                )}
               </label>
             )}
           </div>
+          <p className="question-answer-state">
+            {answerPresent(question, lab.answers[question.id]) ? 'Answered' : 'Unanswered'}
+            {question.manual || !['single', 'multiple', 'boolean'].includes(question.kind)
+              ? ' · Marked by your instructor.'
+              : ''}
+          </p>
           {notice && (
-            <p role="status" className="notice">
+            <p className="notice" role="status">
               {notice}
             </p>
           )}
@@ -209,25 +203,39 @@ export function Assessment({
             <button
               className="outline-button"
               disabled={index === 0}
-              onClick={() => setIndex(index - 1)}
+              onClick={() => {
+                setIndex((i) => i - 1);
+                setNotice('');
+              }}
             >
-              <ArrowLeft size={15} />
-              Previous
+              Previous question
             </button>
             {index < all.length - 1 ? (
-              <button className="primary" onClick={() => setIndex(index + 1)}>
+              <button
+                className="primary"
+                onClick={() => {
+                  setIndex((i) => i + 1);
+                  setNotice('');
+                }}
+              >
                 Next question
-                <ArrowRight size={15} />
               </button>
             ) : (
               <Link className="primary" to={basePath + '/review'}>
                 Review submission
-                <ArrowRight size={15} />
               </Link>
             )}
           </div>
+          <details className="question-integrity">
+            <summary>Answer-field accessibility</summary>
+            <p>
+              {pasteAllowed
+                ? 'Your instructor has enabled paste accessibility support.'
+                : 'Paste and drop are restricted in answer fields. Ask your instructor for an accessibility exception.'}
+            </p>
+          </details>
         </section>
-      </div>
+      )}
     </div>
   );
 }

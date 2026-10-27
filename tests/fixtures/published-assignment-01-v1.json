@@ -1,0 +1,347 @@
+{
+  "assessment_id": "b6f4b6d0-5fe2-4e4d-b9a5-000000000001",
+  "document": {
+    "attemptLimit": 1,
+    "deadline": null,
+    "description": "Build a local repository, tell the story of your changes, and bring two branches together.",
+    "durationMinutes": 0,
+    "endsAt": null,
+    "format": "mixed",
+    "gateTheory": true,
+    "instructions": "Complete the local Git tasks using plain text files. Then answer the theory questions and reflections.",
+    "projectName": "IEEE-Git-Task",
+    "questions": [
+      {
+        "id": "q1",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "What is the difference between Git and GitHub?",
+        "required": true
+      },
+      {
+        "id": "q2",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "What is a repository? What is stored inside the hidden .git directory?",
+        "required": true
+      },
+      {
+        "id": "q3",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 3,
+        "prompt": "Explain the difference between the Working Directory, Staging Area, and Local Repository.",
+        "required": true
+      },
+      {
+        "id": "q4",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "What is the difference between git add and git commit?",
+        "required": true
+      },
+      {
+        "id": "q5",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "What is the purpose of git status, and why should it be used frequently?",
+        "required": true
+      },
+      {
+        "id": "q6",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "Why are meaningful commit messages important? Provide two examples.",
+        "required": true
+      },
+      {
+        "id": "q7",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "You create file1.txt and file2.txt, then execute git add file1.txt. Which file becomes staged, and which remains untracked? Explain.",
+        "required": true
+      },
+      {
+        "id": "q8",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "You create feature/test with git branch feature/test, and git branch displays an asterisk next to main. Which branch are you on, and how would you switch?",
+        "required": true
+      },
+      {
+        "id": "q9",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "You are currently on feature/skills and execute git merge main. Which branch receives the changes? Does it update main?",
+        "required": true
+      },
+      {
+        "id": "q10",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "You modified notes.txt, but git commit -m \"Update notes\" reports \"Changes not staged for commit.\" Explain the problem and provide the necessary commands.",
+        "required": true
+      },
+      {
+        "id": "q11",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "A new file seems to disappear when switching from a feature branch back to main. Explain why and how to access the file again.",
+        "required": true
+      },
+      {
+        "id": "q12",
+        "kind": "scenario",
+        "manual": true,
+        "options": [],
+        "points": 2,
+        "prompt": "What is the difference between creating a branch and switching to a branch? Provide example commands.",
+        "required": true
+      },
+      {
+        "id": "isolation",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 0,
+        "prompt": "Explain the branch isolation you observed when switching between main and feature/skills.",
+        "required": true
+      },
+      {
+        "id": "merge",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 0,
+        "prompt": "Explain the direction and type of your Part 4 merge. Was a new merge commit created? Why?",
+        "required": true
+      },
+      {
+        "id": "bonus",
+        "kind": "long",
+        "manual": true,
+        "options": [],
+        "points": 0,
+        "prompt": "Optional bonus reflection: What happened during the merge? How did it differ from Part 4? Why might Git create a merge commit, and what does the graph reveal?",
+        "required": false
+      }
+    ],
+    "releaseImmediately": false,
+    "requireComplete": true,
+    "reviewAnswers": true,
+    "schemaVersion": 1,
+    "sections": [
+      {
+        "description": "Set up your project and make it your own.",
+        "id": "init",
+        "steps": [
+          "Verify Git availability and configure your name and email.",
+          "Create and enter IEEE-Git-Task. Initialize a repository with main as its primary branch.",
+          "Create about.txt, goals.txt and notes.txt with the contents below.",
+          "Inspect status and list hidden files to find .git."
+        ],
+        "tasks": [
+          {
+            "bonus": false,
+            "id": "repo",
+            "instructions": "Verify Git availability and configure your name and email.\nCreate and enter IEEE-Git-Task. Initialize a repository with main as its primary branch.\nCreate about.txt, goals.txt and notes.txt with the contents below.\nInspect status and list hidden files to find .git.",
+            "points": 5,
+            "rules": [
+              {
+                "outcomeId": "repo",
+                "type": "legacy"
+              }
+            ],
+            "title": "Local repository on main with configured identity"
+          },
+          {
+            "bonus": false,
+            "id": "files",
+            "instructions": "Verify Git availability and configure your name and email.\nCreate and enter IEEE-Git-Task. Initialize a repository with main as its primary branch.\nCreate about.txt, goals.txt and notes.txt with the contents below.\nInspect status and list hidden files to find .git.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "files",
+                "type": "legacy"
+              }
+            ],
+            "title": "Required project files contain your information and course content"
+          }
+        ],
+        "title": "Repository initialization"
+      },
+      {
+        "description": "Small commits. A clear story.",
+        "id": "commits",
+        "steps": [
+          "Stage only about.txt, inspect status, and commit with “Add personal information”.",
+          "Introduce goals.txt and notes.txt in separate commits with meaningful messages.",
+          "Add two more goals and commit the updated goals.",
+          "Inspect your short commit history. You should have at least four commits."
+        ],
+        "tasks": [
+          {
+            "bonus": false,
+            "id": "separate",
+            "instructions": "Stage only about.txt, inspect status, and commit with “Add personal information”.\nIntroduce goals.txt and notes.txt in separate commits with meaningful messages.\nAdd two more goals and commit the updated goals.\nInspect your short commit history. You should have at least four commits.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "separate",
+                "type": "legacy"
+              }
+            ],
+            "title": "The first three files were introduced in separate focused commits"
+          },
+          {
+            "bonus": false,
+            "id": "goals",
+            "instructions": "Stage only about.txt, inspect status, and commit with “Add personal information”.\nIntroduce goals.txt and notes.txt in separate commits with meaningful messages.\nAdd two more goals and commit the updated goals.\nInspect your short commit history. You should have at least four commits.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "goals",
+                "type": "legacy"
+              }
+            ],
+            "title": "Two additional goals saved in a later meaningful commit"
+          }
+        ],
+        "title": "Staging & commits"
+      },
+      {
+        "description": "A safe space to try something new.",
+        "id": "branches",
+        "steps": [
+          "Create feature/skills and switch to it.",
+          "Create skills.txt containing Problem Solving, Communication and Teamwork. Commit the file.",
+          "Switch to main and observe the file is absent. Switch back and observe it returns.",
+          "Be ready to explain branch isolation."
+        ],
+        "tasks": [
+          {
+            "bonus": false,
+            "id": "feature",
+            "instructions": "Create feature/skills and switch to it.\nCreate skills.txt containing Problem Solving, Communication and Teamwork. Commit the file.\nSwitch to main and observe the file is absent. Switch back and observe it returns.\nBe ready to explain branch isolation.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "feature",
+                "type": "legacy"
+              }
+            ],
+            "title": "feature/skills contains the three committed skills"
+          },
+          {
+            "bonus": false,
+            "id": "isolation",
+            "instructions": "Create feature/skills and switch to it.\nCreate skills.txt containing Problem Solving, Communication and Teamwork. Commit the file.\nSwitch to main and observe the file is absent. Switch back and observe it returns.\nBe ready to explain branch isolation.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "isolation",
+                "type": "legacy"
+              }
+            ],
+            "title": "History shows skills introduced after the branch point"
+          }
+        ],
+        "title": "Branching & switching"
+      },
+      {
+        "description": "Two lines of work, one shared history.",
+        "id": "merge",
+        "steps": [
+          "Ensure feature changes are committed. Switch to main and merge feature/skills.",
+          "Verify skills.txt is on main and inspect history.",
+          "Explain which branch received changes, the merge type, and whether a new commit was created."
+        ],
+        "tasks": [
+          {
+            "bonus": false,
+            "id": "merged",
+            "instructions": "Ensure feature changes are committed. Switch to main and merge feature/skills.\nVerify skills.txt is on main and inspect history.\nExplain which branch received changes, the merge type, and whether a new commit was created.",
+            "points": 15,
+            "rules": [
+              {
+                "outcomeId": "merged",
+                "type": "legacy"
+              }
+            ],
+            "title": "Feature history and skills are present on main"
+          },
+          {
+            "bonus": false,
+            "id": "clean",
+            "instructions": "Ensure feature changes are committed. Switch to main and merge feature/skills.\nVerify skills.txt is on main and inspect history.\nExplain which branch received changes, the merge type, and whether a new commit was created.",
+            "points": 5,
+            "rules": [
+              {
+                "outcomeId": "clean",
+                "type": "legacy"
+              }
+            ],
+            "title": "Finish on main with a clean working tree"
+          }
+        ],
+        "title": "Bring it all together"
+      },
+      {
+        "description": "Optional · Explore a three-way merge.",
+        "id": "bonus",
+        "steps": [
+          "From main, create feature/hobbies. Add hobbies.txt with three hobbies and commit.",
+          "Back on main, add “Assignment 1 completed.” to notes.txt and commit.",
+          "Merge feature/hobbies into main. Inspect the graph across all branches.",
+          "Explain the merge, how it differs from Part 4, why Git creates a merge commit, and what the graph reveals."
+        ],
+        "tasks": [
+          {
+            "bonus": true,
+            "id": "bonus",
+            "instructions": "From main, create feature/hobbies. Add hobbies.txt with three hobbies and commit.\nBack on main, add “Assignment 1 completed.” to notes.txt and commit.\nMerge feature/hobbies into main. Inspect the graph across all branches.\nExplain the merge, how it differs from Part 4, why Git creates a merge commit, and what the graph reveals.",
+            "points": 10,
+            "rules": [
+              {
+                "outcomeId": "bonus",
+                "type": "legacy"
+              }
+            ],
+            "title": "Diverged hobbies and completion histories joined by a merge commit"
+          }
+        ],
+        "title": "Different histories"
+      }
+    ],
+    "starter": {
+      "commit": false,
+      "files": {},
+      "initialize": false
+    },
+    "startsAt": null,
+    "title": "Git Fundamentals, Commits, Branching & Merging",
+    "type": "assignment"
+  },
+  "version": 1
+}

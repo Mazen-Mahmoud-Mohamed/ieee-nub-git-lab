@@ -51,12 +51,15 @@ test('unsupported commands fail, and blank theory cannot be submitted', async ({
 test('mobile instructions remain usable and 404 helps students return', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/workspace');
+  await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
   await expect(
-    page.getByText('A desktop keyboard gives you the best terminal experience.'),
+    page.getByRole('heading', {
+      name: 'Local repository on main with configured identity',
+      exact: true,
+    }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'Repository initialization', exact: true }),
-  ).toBeVisible();
+  await page.getByRole('tab', { name: 'Workspace', exact: true }).click();
+  await expect(page.getByLabel('Terminal command')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.goto('/#/missing');
   await expect(page.getByRole('heading', { name: 'Let’s switch back.' })).toBeVisible();
@@ -133,8 +136,8 @@ test('complete Assignment 01 locally, unlock theory, autosave answers, and keep 
     'Problem Solving',
   );
   await page.screenshot({ path: 'test-results/workspace-preview.png' });
-  await page.getByRole('link', { name: 'Continue to theory' }).click();
-  await expect(page.getByRole('heading', { name: 'Understand the why.' })).toBeVisible();
+  await page.getByRole('link', { name: 'Continue to Questions' }).click();
+  await expect(page.getByRole('heading', { name: 'Questions', exact: true })).toBeVisible();
   for (let i = 0; i < 14; i++) {
     await page
       .getByLabel('Your response')
@@ -143,7 +146,7 @@ test('complete Assignment 01 locally, unlock theory, autosave answers, and keep 
   }
   await expect(page.getByText('Saved on this device')).toBeVisible();
   await page.reload();
-  await expect(page.getByText('12 of 12 required answers')).toBeVisible();
+  await expect(page.getByText('14 of 14 required answers')).toBeVisible();
   await page.goto('/#/review');
   await expect(
     page.getByText('This is a local practice workspace.', { exact: false }),
@@ -185,11 +188,12 @@ test('reported sequence shows individual checks, editor progress, dirty state an
     'Git repository initialized',
     'Git username configured',
     'Valid Git email configured',
-    'about.txt created in this project',
-    'goals.txt created in this project',
-    'notes.txt created in this project',
   ])
     await expect(req(label)).toHaveAttribute('data-state', 'completed');
+  await page.getByLabel('Task', { exact: true }).selectOption('files');
+  for (const file of ['about.txt', 'goals.txt', 'notes.txt'])
+    await expect(req(file + ' created in this project')).toHaveAttribute('data-state', 'completed');
+  await page.getByLabel('Task', { exact: true }).selectOption('repo');
   await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'incomplete');
   await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
   await expect(
@@ -197,13 +201,14 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   ).toBeVisible();
   await command('nano about.txt');
   await expect(page.getByRole('log')).toContainText(
-    'To edit about.txt, select it from the Files panel on the left.',
+    'To edit about.txt, select it from Files above the editor.',
   );
   const texts: Record<string, string> = {
     'about.txt': 'Name: mazen\nUniversity: Nahda University\nDepartment: Engineering',
     'goals.txt': 'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects',
     'notes.txt': 'Git Course - Session 1\nIEEE NUB Student Branch',
   };
+  await page.getByLabel('Task', { exact: true }).selectOption('files');
   for (const [file, value] of Object.entries(texts)) {
     await page
       .getByRole('button', { name: new RegExp('^' + file.replace('.', '\\.') + '(?: U| M)?$') })
@@ -216,6 +221,7 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   }
   await command('git add about.txt');
   await command('git commit -m "Add personal information"');
+  await page.getByLabel('Task', { exact: true }).selectOption('repo');
   await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'completed');
   await expect(page.getByText('1 / 8 scored tasks')).toBeVisible();
   await page.getByRole('button', { name: /^about\.txt(?: U| M)?$/ }).click();
@@ -226,6 +232,7 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   await page.reload();
   await expect(input).toBeEnabled();
   await expect(req('Git username configured')).toHaveAttribute('data-state', 'completed');
+  await page.getByLabel('Task', { exact: true }).selectOption('files');
   await expect(req('about.txt created in this project')).toHaveAttribute('data-state', 'completed');
   await page.getByRole('button', { name: 'about.txt M', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
@@ -234,4 +241,39 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   await command('git log --oneline');
   await expect(page.getByRole('log')).toContainText('Add personal information');
   await page.screenshot({ path: 'test-results/requirement-progress-preview.png' });
+});
+
+test('same-size editor changes can be staged and committed again', async ({ page }) => {
+  await page.goto('/#/workspace');
+  const input = page.getByLabel('Terminal command');
+  const command = async (value: string) => {
+    await expect(input).toBeEnabled();
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toBeEnabled();
+  };
+  for (const value of [
+    'mkdir IEEE-Git-Task',
+    'cd IEEE-Git-Task',
+    'git config --global user.name "Test Student"',
+    'git config --global user.email test@example.test',
+    'git init',
+    'echo "first version" > about.txt',
+    'git add about.txt',
+    'git commit -m "Save first version"',
+  ])
+    await command(value);
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text file editor' }).fill('other version');
+  await expect(page.getByRole('button', { name: 'about.txt M', exact: true })).toBeVisible();
+  await command('git add about.txt');
+  await command('git commit -m "Save other version"');
+  await expect(page.getByRole('button', { name: 'about.txt', exact: true })).toBeVisible();
+  await command('git log --oneline');
+  await expect(page.getByRole('log')).toContainText('Save other version');
+  await page.reload();
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
+    'other version',
+  );
 });

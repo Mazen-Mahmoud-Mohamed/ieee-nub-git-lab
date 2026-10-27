@@ -199,7 +199,7 @@ describe('workspace requirements from real Git state', () => {
     ).toBe(false);
     const result = await e.execute('nano about.txt');
     expect(result.success).toBe(false);
-    expect(result.output).toContain('select it from the Files panel on the left');
+    expect(result.output).toContain('select it from Files above the editor');
     expect(await e.read('/about.txt')).toBe('');
   });
   it('serializes rapid editor, staging and commit operations without losing staged snapshots', async () => {

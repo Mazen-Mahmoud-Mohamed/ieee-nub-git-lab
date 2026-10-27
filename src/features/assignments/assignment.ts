@@ -130,6 +130,7 @@ function legacyEvaluation(
   view: RepoView,
   identity: StudentIdentity,
   working: Record<string, string> = {},
+  revision: 1 | 2 = 1,
 ): { outcomes: Outcome[]; requirements: Record<string, RequirementCheck[]> } {
   const commits = view.commits;
   const byId = new Map(commits.map((c) => [c.oid, c]));
@@ -564,17 +565,190 @@ function legacyEvaluation(
       ),
     ],
   };
+  if (revision === 2) {
+    // Explicitly versioned compatibility contract. Published revision 1 keeps
+    // its historical predicates; revision 2 removes undocumented ordering and
+    // uses committed parent/tree changes as evidence of a tracked-file update.
+    const descriptive = (c: CommitView) => c.message.trim().split(/\s+/).length >= 2;
+    const personal = (text: string | undefined) =>
+      aboutOK(
+        (text || '')
+          .split(/\r?\n/)
+          .map((line) => line.replace(/\s*:\s*/g, ': '))
+          .join('\n'),
+      );
+    const introductions = (file: string) =>
+      lineage.filter(
+        (c) => file in c.files && c.parents.every((p) => !(file in (byId.get(p)?.files || {}))),
+      );
+    const validIntro = (file: string, valid: (text: string | undefined) => boolean) =>
+      introductions(file).find((c) => separate(c, file) && valid(c.files[file]) && descriptive(c));
+    const firstAbout = validIntro('about.txt', personal);
+    const firstGoals = validIntro('goals.txt', goalsOK);
+    const firstNotes = validIntro('notes.txt', notesOK);
+    const goalLines = (text = '') => [
+      ...new Set(
+        text
+          .split(/\r?\n/)
+          .map((line) => norm(line.replace(/^\s*(?:\d+[.)]|[-*])\s*/, '')))
+          .filter((line) => line && line !== 'my goals:'),
+      ),
+    ];
+    const updated = (text: string | undefined) => {
+      if (!firstGoals || !goalsOK(text)) return false;
+      const original = goalLines(firstGoals.files['goals.txt']);
+      const next = goalLines(text);
+      return (
+        original.every((line) => next.includes(line)) &&
+        next.filter((line) => !original.includes(line)).length >= 2
+      );
+    };
+    const updateCommit =
+      firstGoals &&
+      lineage.find(
+        (c) =>
+          ancestors(c.oid).some((parent) => parent.oid === firstGoals.oid) &&
+          c.parents.some(
+            (p) =>
+              !!byId.get(p)?.files['goals.txt'] &&
+              byId.get(p)?.files['goals.txt'] !== c.files['goals.txt'],
+          ) &&
+          updated(c.files['goals.txt']) &&
+          descriptive(c),
+      );
+    const passed = (id: string, value: boolean) => {
+      outcomes.find((o) => o.id === id)!.passed = value;
+    };
+    passed(
+      'repo',
+      view.initialized &&
+        !!view.config['user.name']?.trim() &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(view.config['user.email'] || '') &&
+        (view.branch === 'main' || !!view.branches.main),
+    );
+    passed(
+      'files',
+      (personal(working['about.txt']) || personal(main?.files['about.txt'])) &&
+        (goalsOK(working['goals.txt']) || goalsOK(main?.files['goals.txt'])) &&
+        (notesOK(working['notes.txt']) || notesOK(main?.files['notes.txt'])),
+    );
+    passed(
+      'separate',
+      !!firstAbout &&
+        norm(firstAbout.message) === norm('Add personal information') &&
+        !!firstGoals &&
+        !!firstNotes,
+    );
+    passed('goals', !!updateCommit);
+    passed(
+      'isolation',
+      !!featureIntroduction &&
+        !!featureIntroduction.parents[0] &&
+        !byId.get(featureIntroduction.parents[0])?.files['skills.txt'] &&
+        descriptive(featureIntroduction),
+    );
+    requirements.isolation = requirements.isolation.map((c) =>
+      c.id === 'skills-message'
+        ? { ...c, passed: !!featureIntroduction && descriptive(featureIntroduction) }
+        : c,
+    );
+    requirements.repo = requirements.repo.filter((c) => c.id !== 'main-commit');
+    requirements.repo.push(
+      check(
+        'main',
+        'Main is the project’s primary branch',
+        view.initialized && (view.branch === 'main' || !!view.branches.main),
+        'Initialize the project on main.',
+      ),
+    );
+    requirements.files = fileChecks
+      .filter((c) => !c.id.endsWith('-committed'))
+      .map((c) => ({
+        ...c,
+        passed:
+          c.id === 'about.txt-draft'
+            ? requiredIdentity
+              ? personal(working['about.txt']) || personal(main?.files['about.txt'])
+              : null
+            : c.passed,
+        preparation: false,
+      }));
+    requirements.separate = [
+      check(
+        'about',
+        'about.txt has its own committed introduction',
+        !!firstAbout,
+        'Commit the required personal information as one focused change.',
+      ),
+      check(
+        'message',
+        'Personal information commit uses the requested message',
+        !!firstAbout && norm(firstAbout.message) === norm('Add personal information'),
+        'Use the published personal-information message.',
+      ),
+      check(
+        'goals',
+        'goals.txt has its own committed introduction',
+        !!firstGoals,
+        'Commit the initial goals as one focused change with a descriptive message.',
+      ),
+      check(
+        'notes',
+        'notes.txt has its own committed introduction',
+        !!firstNotes,
+        'Commit the course notes as one focused change with a descriptive message.',
+      ),
+    ];
+    const staged = view.status.some(
+      ([file, head, work, index]) =>
+        file === 'goals.txt' && head !== 0 && head !== index && work === index,
+    );
+    requirements.goals = [
+      check(
+        'tracked',
+        'Initial goals are committed',
+        !!firstGoals,
+        'Commit the original goals before updating this tracked file.',
+      ),
+      check(
+        'written',
+        'Two new goals added while keeping the original goals',
+        !!updateCommit || updated(working['goals.txt']),
+        'Edit goals.txt and keep the original goals while adding two new goals.',
+        true,
+      ),
+      check(
+        'staged',
+        'Updated goals staged or already committed',
+        !!updateCommit || (staged && updated(working['goals.txt'])),
+        'Stage the updated goals.txt file.',
+        true,
+      ),
+      check(
+        'committed',
+        'A later commit on main saves the updated tracked file',
+        !!updateCommit,
+        'Commit the goals update on main, or merge the committed update into main. Use a message of at least two words. A clean tree after committing is expected.',
+      ),
+    ];
+  }
   return { outcomes, requirements };
 }
-export function validateRepository(view: RepoView, identity: StudentIdentity): Outcome[] {
-  return legacyEvaluation(view, identity).outcomes;
+export function validateRepository(
+  view: RepoView,
+  identity: StudentIdentity,
+  revision: 1 | 2 = 1,
+  working: Record<string, string> = {},
+): Outcome[] {
+  return legacyEvaluation(view, identity, working, revision).outcomes;
 }
 export function legacyRequirementChecks(
   view: RepoView,
   identity: StudentIdentity,
   working: Record<string, string>,
+  revision: 1 | 2 = 1,
 ) {
-  return legacyEvaluation(view, identity, working).requirements;
+  return legacyEvaluation(view, identity, working, revision).requirements;
 }
 export function practicalScore(outcomes: Outcome[]) {
   return outcomes.filter((o) => o.passed).reduce((sum, o) => sum + o.points, 0);

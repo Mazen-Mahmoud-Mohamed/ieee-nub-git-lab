@@ -789,3 +789,111 @@ test('draft editing survives bank search and student preview runs real Git witho
   await page.getByRole('button', { name: 'Back to editor', exact: true }).click();
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved title');
 });
+
+test('all published question types are answerable, restore after refresh and submit once', async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  const types = [
+    'single',
+    'multiple',
+    'boolean',
+    'short',
+    'long',
+    'interpretation',
+    'scenario',
+  ] as const;
+  api.definitions[A].questions = types.map((kind, i) => ({
+    id: 'journey-' + i,
+    prompt: 'Question type ' + kind,
+    kind,
+    points: 1,
+    options:
+      kind === 'single'
+        ? ['Commit', 'Branch']
+        : kind === 'multiple'
+          ? ['Tree', 'Index', 'Server']
+          : kind === 'boolean'
+            ? ['True', 'False']
+            : [],
+    required: true,
+    manual: !['single', 'multiple', 'boolean'].includes(kind),
+  }));
+  api.definitions[A].requireComplete = true;
+  await api.login();
+  await api.start(A);
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByRole('radio', { name: 'Commit', exact: true }).check();
+  await page.getByRole('button', { name: 'Next question', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Tree', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Index', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Tree', exact: true }).uncheck();
+  await page.getByRole('checkbox', { name: 'Tree', exact: true }).check();
+  await page.getByRole('button', { name: 'Next question', exact: true }).click();
+  await page.getByRole('radio', { name: 'False', exact: true }).check();
+  for (let i = 3; i < 7; i++) {
+    await page.getByRole('button', { name: 'Next question', exact: true }).click();
+    await page.getByLabel('Your response').fill('My ' + types[i] + ' response.');
+  }
+  await page.getByRole('button', { name: 'Previous question', exact: true }).click();
+  await expect(page.getByLabel('Your response')).toHaveValue('My interpretation response.');
+  await expect(page.getByText('7 of 7 required answers')).toBeVisible();
+  await expect(page.getByText('Saved on this device')).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('radio', { name: 'Commit', exact: true })).toBeChecked();
+  await page.getByLabel('Choose question').selectOption('1');
+  await expect(page.getByRole('checkbox', { name: 'Tree', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Index', exact: true })).toBeChecked();
+  await page.getByLabel('Choose question').selectOption('3');
+  await expect(page.getByLabel('Your response')).toHaveValue('My short response.');
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  const uploads = api.uploads();
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  expect(api.uploads()).toBe(uploads);
+});
+
+test('a definite rejected submission can be corrected and retried with fresh answers', async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  api.definitions[A].requireComplete = true;
+  let reject = true;
+  let submitted: any;
+  await page.route('**/functions/v1/assessment-attempt', async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'submit') {
+      submitted = body;
+      if (reject) {
+        await route.fulfill({ status: 400, json: { error: 'Required work is incomplete' } });
+        return;
+      }
+    }
+    await route.fallback();
+  });
+  await api.login();
+  await api.start(A);
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByLabel('Your response').fill('Initial response');
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(page.getByRole('alert').first()).toContainText('Required work is incomplete');
+  reject = false;
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByLabel('Your response').fill('Corrected response after rejection');
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  expect(submitted.answers.q1).toBe('Corrected response after rejection');
+});

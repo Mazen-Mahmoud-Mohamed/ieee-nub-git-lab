@@ -21,7 +21,8 @@ export function requirementProgress(
   checking = false,
   unavailable = '',
 ): TaskProgress[] {
-  const legacy = legacyRequirementChecks(view, identity, working);
+  const legacy = (revision: 1 | 2 = 1) =>
+    legacyRequirementChecks(view, identity, working, revision);
   const outcomes = outcomesFor(d, view, identity, working);
   const at = (ref = 'main') =>
     ref === 'working'
@@ -60,7 +61,7 @@ export function requirementProgress(
         let rows: RequirementCheck[];
         switch (r.type) {
           case 'legacy':
-            rows = legacy[r.outcomeId || ''] || [
+            rows = legacy(r.revision)[r.outcomeId || ''] || [
               check(
                 'unsupported',
                 'Published requirement is supported',

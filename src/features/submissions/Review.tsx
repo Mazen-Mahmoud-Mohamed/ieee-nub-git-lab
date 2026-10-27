@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ArrowRight, ShieldCheck, Download, AlertCircle } from 'lucide-react';
 import { type StudentIdentity } from '../assignments/assignment';
-import { firstAssessment, outcomesFor, totals, type Definition } from '../assessments/model';
+import {
+  firstAssessment,
+  outcomesFor,
+  totals,
+  answerPresent,
+  type Definition,
+} from '../assessments/model';
+import { StudentSteps } from '../assessments/StudentSteps';
 import type { Lab } from '../../hooks/useLab';
 import { requireBackend, withRetry } from '../../services/supabase';
 import { saveOutbox, clearOutbox, loadOutbox } from '../../services/persistence';
@@ -45,11 +52,17 @@ export function Review({
     !definition.requireComplete || outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   const answered =
     !definition.requireComplete ||
-    definition.questions.filter((q) => q.required).every((q) => lab.answers[q.id]?.trim());
+    definition.questions
+      .filter((q) => q.required)
+      .every((q) => answerPresent(q, lab.answers[q.id]));
+  const missing = definition.questions
+    .map((q, i) => ({ q, number: i + 1 }))
+    .filter(({ q }) => q.required && !answerPresent(q, lab.answers[q.id]));
   return (
     <div className="page narrow">
+      <StudentSteps basePath={basePath} />
       <span className="eyebrow">{definition.type.toUpperCase()} / FINAL REVIEW</span>
-      <h1>Ready for your next chapter?</h1>
+      <h1>Review &amp; submit</h1>
       <p>
         Review your work before submitting. Your repository is independently verified on the server;
         written answers are reviewed by your instructor.
@@ -71,10 +84,16 @@ export function Review({
         <hr />
         <div className="review-check">
           <ShieldCheck size={20} />
-          <span>Local practical estimate</span>
+          <span>Provisional practical points</span>
           <strong>
-            {outcomes.filter((o) => o.passed).reduce((sum, o) => sum + o.points, 0)} /{' '}
-            {points.practical} + {points.bonus}
+            {outcomes.filter((o) => o.passed && !o.bonus).reduce((sum, o) => sum + o.points, 0)} /{' '}
+            {points.practical}
+            {points.bonus > 0
+              ? ' · Bonus ' +
+                outcomes.filter((o) => o.passed && o.bonus).reduce((s, o) => s + o.points, 0) +
+                ' / ' +
+                points.bonus
+              : ''}
           </strong>
         </div>
         <p className="muted">
@@ -110,8 +129,8 @@ export function Review({
         )}
         {error && (
           <p className="error" role="alert">
-            {error} Your submission payload is retained locally. Retry with the same reference after
-            reconnecting.
+            {error} Your work remains saved on this device. Correct any missing work and retry;
+            uncertain network failures retain the same submission reference.
           </p>
         )}
         {!submit && <Checkpoints lab={lab} authenticated={authenticated} />}
@@ -193,11 +212,27 @@ export function Review({
             <ArrowRight size={16} />
           </button>
         </div>
-        {(!complete || !answered) && (
+        {!complete && (
           <p className="muted">
-            Complete the required practical outcomes, theory answers, and two practical reflections
-            to submit.
+            Required practical tasks remaining:{' '}
+            {outcomes
+              .filter((o) => !o.bonus && !o.passed)
+              .map((o) => o.label)
+              .join('; ')}
+            .
           </p>
+        )}
+        {missing.length > 0 && (
+          <div className="notice">
+            <p>Unanswered required questions: {missing.map((m) => m.number).join(', ')}.</p>
+            <Link to={basePath + '/theory'}>Return to Questions</Link>
+            {!definition.requireComplete && (
+              <p>
+                This assessment permits partial submission. Unanswered questions receive no credit;
+                exam expiry still finalizes the last accepted save.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>

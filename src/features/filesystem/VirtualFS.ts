@@ -19,6 +19,16 @@ export function normalize(path: string, cwd = '/') {
   return '/' + parts.join('/');
 }
 export class VirtualFS {
+  // Git compares whole-second stat values. Logical ticks prevent same-size writes
+  // in one wall-clock second from aliasing its index cache. These are filesystem
+  // metadata only; assessment deadlines always use the server clock.
+  private clock = Math.floor(Date.now() / 1000) * 1000;
+  private stamps = new Map<string, number>();
+  private touch(path: string) {
+    this.clock += 1000;
+    this.stamps.set(normalize(path), this.clock);
+    return this.clock;
+  }
   entries: Record<string, Entry> = { '/': { kind: 'dir', data: [] } };
   promises = {
     readFile: async (path: string, options?: unknown): Promise<any> => {
@@ -47,12 +57,14 @@ export class VirtualFS {
       if (!this.entries[path] && Object.keys(this.entries).length >= 3000)
         throw new Error('Workspace file limit reached');
       this.entries[path] = { kind: 'file', data: Array.from(bytes) };
+      this.touch(path);
     },
     mkdir: async (path: string) => {
       path = normalize(path);
       if (this.entries[path]) fail('EEXIST', path);
       this.parent(path);
       this.entries[path] = { kind: 'dir', data: [] };
+      this.touch(path);
     },
     rmdir: async (path: string) => {
       path = normalize(path);
@@ -85,6 +97,7 @@ export class VirtualFS {
       this.parent(to);
       this.entries[normalize(to)] = e;
       delete this.entries[normalize(from)];
+      this.touch(to);
     },
   };
   private get(path: string) {
@@ -96,6 +109,7 @@ export class VirtualFS {
   }
   private stat(path: string) {
     const e = this.get(path);
+    const stamp = this.stamps.get(normalize(path)) ?? this.touch(path);
     return {
       type: e.kind,
       mode: e.kind === 'dir' ? 0o40755 : 0o100644,
@@ -104,8 +118,8 @@ export class VirtualFS {
       uid: 0,
       gid: 0,
       dev: 0,
-      mtimeMs: 0,
-      ctimeMs: 0,
+      mtimeMs: stamp,
+      ctimeMs: stamp,
       isFile: () => e.kind === 'file',
       isDirectory: () => e.kind === 'dir',
       isSymbolicLink: () => false,

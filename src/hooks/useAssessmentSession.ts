@@ -180,7 +180,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
             const response = await error.context?.json();
             if (response?.error) detail = response.error;
           } catch {}
-          throw new Error(detail);
+          throw Object.assign(new Error(detail), { status: error.context?.status });
         }
         if (data?.error) throw new Error(data.error);
         return data;
@@ -222,9 +222,15 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
       return undefined;
     };
     const promise = run()
-      .catch((e) => {
+      .catch(async (e) => {
         if (activeAttempt.current !== state.id) throw e;
         const message = e instanceof Error ? e.message : String(e);
+        // A definite validation rejection has not accepted this payload. Keep
+        // ambiguous network failures idempotent, but let corrected work retry.
+        if (finalize && (e.status === 400 || (e.status === 409 && message.includes('conflict'))))
+          await clearOutbox(state.id);
+        if (activeAttempt.current !== state.id) throw e;
+        if (finalize && !latest.current.readOnly) stopping.current = false;
         setError(message);
         setSync('Not synced · work remains on this device');
         if (message.includes('conflict')) {

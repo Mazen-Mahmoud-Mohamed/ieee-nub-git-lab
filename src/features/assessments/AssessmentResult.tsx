@@ -60,8 +60,14 @@ export function AssessmentResult({
           <>
             <h3>
               Score: {Number(result.practical_score) + Number(result.theory_score)} /{' '}
-              {points.practical + points.theory}
-              {points.bonus ? ' + ' + points.bonus + ' bonus' : ''}
+              {points.practical + points.theory + points.bonus}
+              {points.bonus
+                ? ' maximum (' +
+                  (points.practical + points.theory) +
+                  ' mandatory + ' +
+                  points.bonus +
+                  ' optional bonus)'
+                : ''}
             </h3>
             <p>
               Practical: {result.practical_score} · Theory: {result.theory_score}

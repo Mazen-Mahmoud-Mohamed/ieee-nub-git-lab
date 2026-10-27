@@ -1,22 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Files,
-  GitBranch,
-  Plus,
-  PanelLeftClose,
-  ArrowUpRight,
-  BookOpen,
-  FolderOpen,
-  Info,
-} from 'lucide-react';
-import { type StudentIdentity } from './assignment';
+import { Plus, Check } from 'lucide-react';
+import type { StudentIdentity } from './assignment';
 import { firstAssessment, type Definition } from '../assessments/model';
 import type { Lab } from '../../hooks/useLab';
 import { GitGraph } from '../../components/GitGraph';
@@ -24,6 +10,7 @@ import { Terminal } from '../terminal/Terminal';
 import { PracticeIdentity } from './PracticeIdentity';
 import { requirementProgress } from '../assessments/requirements';
 import { TaskInstructions } from './TaskInstructions';
+import { StudentSteps } from '../assessments/StudentSteps';
 export function Workspace({
   lab,
   identity,
@@ -39,8 +26,9 @@ export function Workspace({
 }) {
   const [selected, setSelected] = useState('');
   const [text, setText] = useState('');
-  const [tab, setTab] = useState<'files' | 'history'>('files');
-  const [section, setSection] = useState(definition.sections[0]?.id || '');
+  const [history, setHistory] = useState(false);
+  const [mobile, setMobile] = useState('workspace');
+  const [taskId, setTaskId] = useState(definition.sections[0]?.tasks[0]?.id || '');
   const [expanded, setExpanded] = useState(false);
   const [newFile, setNewFile] = useState(false);
   const [filename, setFilename] = useState('');
@@ -51,10 +39,17 @@ export function Workspace({
   const focusEditor = useRef(false);
   const currentKey = useRef(lab.key);
   currentKey.current = lab.key;
-  const [terminalHeight, setTerminalHeight] = useState(280),
-    [instructionsWidth, setInstructionsWidth] = useState(360);
+  const [terminalHeight, setTerminalHeight] = useState(260);
   const [feedback, setFeedback] = useState('');
   const previous = useRef<{ key: string; done: Set<string> } | undefined>(undefined);
+  useEffect(() => {
+    draft.current = null;
+    setSelected('');
+    setText('');
+    setTaskId(definition.sections[0]?.tasks[0]?.id || '');
+    previous.current = undefined;
+    setFeedback('');
+  }, [lab.key]);
   const progress = useMemo(
     () =>
       requirementProgress(
@@ -127,169 +122,154 @@ export function Workspace({
     }
     previousFiles.current = { key: lab.key, files: now };
   }, [lab.key, lab.revision]);
-  if (!lab.ready) return <div className="page">Restoring your workspace…</div>;
+  if (!lab.ready)
+    return (
+      <p className="page" role="status">
+        Restoring your workspace…
+      </p>
+    );
+  const open = (path: string) => {
+    draft.current = null;
+    setText(lab.working[path.slice(lab.engine.dir.length + 1)] || '');
+    focusEditor.current = selected !== path;
+    setSelected(path);
+  };
   return (
-    <div className={'workspace ' + (expanded ? 'terminal-focused' : '')}>
+    <div
+      className={'workspace student-workspace ' + (expanded ? 'terminal-focused' : '')}
+      data-mobile={mobile}
+      style={{ '--terminal-height': terminalHeight + 'px' } as CSSProperties}
+    >
       {(!identity.full_name || !identity.department) && (
         <PracticeIdentity onSave={() => void lab.refresh()} />
       )}
-      <div className="workspace-top">
-        <div className="workspace-crumb">
-          <Link to="/dashboard">My learning</Link>
-          <ChevronRight size={14} />
-          <span>{definition.title}</span>
-          <span className="badge">IN PROGRESS</span>
-        </div>
-        <div className="workspace-actions">
-          <span className="save-state">
-            <i className="live-dot" />
-            {lab.saving}
-          </span>
-          <Link to={basePath + '/review'} className="small-button">
-            Review submission
-            <ArrowUpRight size={14} />
-          </Link>
-        </div>
+      <header className="student-workspace-header">
+        <h1>{definition.title}</h1>
+        <StudentSteps basePath={basePath} />
+        <span className="save-state" role="status">
+          {lab.saving}
+        </span>
+      </header>
+      <div className="workspace-view-tabs" role="tablist" aria-label="Workspace views">
+        <button
+          role="tab"
+          aria-selected={mobile === 'workspace'}
+          onClick={() => setMobile('workspace')}
+        >
+          Workspace
+        </button>
+        <button role="tab" aria-selected={mobile === 'tasks'} onClick={() => setMobile('tasks')}>
+          Tasks
+        </button>
       </div>
-      <div className="mobile-notice">
-        <Info size={16} />A desktop keyboard gives you the best terminal experience. Instructions
-        and questions work on mobile.
-      </div>
-      <div
-        className="workspace-grid"
-        style={
-          {
-            '--terminal-height': terminalHeight + 'px',
-            '--instructions-width': instructionsWidth + 'px',
-          } as CSSProperties
-        }
-      >
-        <aside className="explorer">
-          <div className="panel-heading">
-            <span>Files</span>
-            <PanelLeftClose size={15} />
-          </div>
-          <div className="explorer-tabs">
-            <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>
-              <Files size={14} />
-              Files
-            </button>
-            <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
-              <GitBranch size={14} />
-              History
-            </button>
-          </div>
-          {tab === 'files' ? (
-            <>
-              <div className="folder-heading">
-                <span>
-                  <ChevronDown size={13} />
-                  <FolderOpen size={15} /> {definition.projectName}
-                </span>
-                <button
-                  aria-label="Create text file"
-                  disabled={lab.readOnly}
-                  onClick={() => setNewFile(!newFile)}
-                >
-                  <Plus size={15} />
-                </button>
-              </div>
-              {newFile && (
-                <form
-                  className="new-file"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (lab.readOnly) return;
-                    try {
-                      const expectedKey = lab.key;
-                      const path = lab.engine.dir + '/' + filename;
-                      await lab.createTextFile(filename);
-                      if (currentKey.current !== expectedKey) return;
-                      setText('');
-                      focusEditor.current = true;
-                      setSelected(path);
-                      setNewFile(false);
-                      setFilename('');
-                      setLocalError('');
-                    } catch (e) {
-                      setLocalError(String(e));
-                    }
-                  }}
-                >
-                  <input
-                    aria-label="New file name"
-                    placeholder="filename.txt"
-                    required
-                    value={filename}
-                    onChange={(e) => setFilename(e.target.value)}
-                  />
-                  <button aria-label="Confirm new file">
-                    <Check size={14} />
-                  </button>
-                </form>
-              )}
-              {files.length ? (
-                files.map((p) => {
-                  const status = lab.view.status.find(([f]) => p.endsWith('/' + f));
-                  return (
-                    <button
-                      className={'file-row ' + (selected === p ? 'selected' : '')}
-                      key={p}
-                      onClick={() => {
-                        draft.current = null;
-                        setText(lab.working[p.slice(lab.engine.dir.length + 1)] || '');
-                        focusEditor.current = selected !== p;
-                        setSelected(p);
-                      }}
-                    >
-                      <FileText size={15} />
-                      <span>{p.replace(lab.engine.dir + '/', '')}</span>
-                      <small className="file-status">
-                        {!status ? '' : status[1] === 0 ? 'U' : status[1] !== status[2] ? 'M' : ''}
+      <div className="student-workspace-grid">
+        <section className="student-workarea" aria-label="Work area">
+          <div className="compact-files">
+            <strong>Files</strong>
+            <div className="compact-file-list">
+              {files.map((path) => {
+                const name = path.slice(lab.engine.dir.length + 1),
+                  row = lab.view.status.find(([file]) => file === name),
+                  code = !row
+                    ? ''
+                    : row[1] === 0 && row[3] === 0
+                      ? 'U'
+                      : row[1] === row[2] && row[1] === row[3]
+                        ? ''
+                        : row[1] === 0
+                          ? 'A'
+                          : 'M';
+                return (
+                  <button
+                    key={path}
+                    className={selected === path ? 'selected' : ''}
+                    onClick={() => open(path)}
+                  >
+                    {name}
+                    {code && (
+                      <small
+                        title={
+                          row && row[3] !== row[1] && row[3] === row[2]
+                            ? 'Staged change'
+                            : code === 'U'
+                              ? 'Untracked file'
+                              : 'Modified file'
+                        }
+                      >
+                        {' '}
+                        {code}
                       </small>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="explorer-empty">
-                  No files yet.
-                  <br />
-                  Create your project in the terminal, then add a text file.
-                </div>
-              )}
-              {lab.view.initialized && (
-                <div className="git-hidden">
-                  <FolderOpen size={14} />
-                  .git <span>Git internals</span>
-                </div>
-              )}
-              <div className="explorer-note">
-                <Info size={14} />
-                <p>Your editor and terminal share the same files. Changes save automatically.</p>
-              </div>
-              <div className="panel-heading">
-                <span>REPOSITORY HISTORY</span>
-                <GitBranch size={14} />
-              </div>
-              <GitGraph view={lab.view} />
-            </>
-          ) : (
-            <GitGraph view={lab.view} />
+                    )}
+                  </button>
+                );
+              })}
+              {!files.length && <span>No text files yet.</span>}
+            </div>
+            <button
+              className="text-button"
+              aria-label="Create text file"
+              disabled={lab.readOnly}
+              onClick={() => setNewFile(!newFile)}
+            >
+              <Plus size={16} />
+            </button>
+            <button
+              className="text-button"
+              aria-expanded={history}
+              onClick={() => setHistory(!history)}
+            >
+              View Git History
+            </button>
+          </div>
+          {newFile && (
+            <form
+              className="new-file"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const key = lab.key,
+                    path = lab.engine.dir + '/' + filename;
+                  await lab.createTextFile(filename);
+                  if (currentKey.current !== key) return;
+                  setText('');
+                  focusEditor.current = true;
+                  setSelected(path);
+                  setNewFile(false);
+                  setFilename('');
+                  setLocalError('');
+                } catch (e) {
+                  setLocalError(String(e));
+                }
+              }}
+            >
+              <input
+                aria-label="New file name"
+                placeholder="filename.txt"
+                required
+                value={filename}
+                onChange={(e) => setFilename(e.target.value)}
+              />
+              <button aria-label="Confirm new file">
+                <Check size={15} />
+              </button>
+            </form>
           )}
-        </aside>
-        <div className="editor-column">
-          <div className="editor-panel">
-            <div className="editor-tabs">
-              <span>
-                <FileText size={14} />
-                {selected ? selected.split('/').pop() : 'Welcome to your workspace'}
-                {selected && <i className="live-dot" />}
-              </span>
-              <span className="dim">Text Editor</span>
+          {history && (
+            <div className="optional-history">
+              <button className="text-button" onClick={() => setHistory(false)}>
+                Close history
+              </button>
+              <GitGraph view={lab.view} />
+            </div>
+          )}
+          <div className="student-editor">
+            <div className="student-editor-label">
+              {selected ? selected.split('/').pop() : 'Text editor'}
+              <small>Edit file text here · saves automatically</small>
             </div>
             {selected ? (
               <CodeMirror
-                key={selected}
+                key={lab.key + ':' + selected}
                 onCreateEditor={(view) => {
                   view.contentDOM.setAttribute('aria-label', 'Text file editor');
                   if (focusEditor.current) {
@@ -316,67 +296,35 @@ export function Workspace({
                 }}
               />
             ) : (
-              <div className="editor-welcome">
-                <div className="welcome-mark">
-                  <GitBranch size={34} />
-                </div>
-                <h2>Select a file from the left panel to start editing.</h2>
-                <p>
-                  The built-in Text Editor replaces Notepad, nano and Vim. Create a text file in
-                  your project, then select it from Files. Your changes save automatically on this
-                  device.
-                </p>
-                <button className="outline-button" onClick={() => void lab.command('help')}>
-                  <BookOpen size={15} />
-                  Explore terminal commands
-                </button>
-              </div>
+              <p className="editor-empty">
+                Choose a file above to edit its text. Use the terminal below for Git commands.
+              </p>
             )}
-            <div className="editor-footer">
-              <span>UTF-8</span>
-              <span>Plain Text</span>
-              <span>{selected ? text.split('\n').length + ' lines' : 'Ready when you are'}</span>
-            </div>
           </div>
-          <details className="workspace-layout-controls">
-            <summary>Resize panels</summary>
-            <label>
-              Terminal height
-              <input
-                aria-label="Terminal height"
-                type="range"
-                min="180"
-                max="520"
-                step="20"
-                value={terminalHeight}
-                onChange={(e) => setTerminalHeight(Number(e.target.value))}
-              />
-            </label>
-            <label>
-              Instructions width
-              <input
-                aria-label="Instructions width"
-                type="range"
-                min="300"
-                max="480"
-                step="20"
-                value={instructionsWidth}
-                onChange={(e) => setInstructionsWidth(Number(e.target.value))}
-              />
-            </label>
-          </details>
+          <label className="terminal-resize">
+            Terminal size
+            <input
+              aria-label="Terminal height"
+              type="range"
+              min="180"
+              max="480"
+              step="20"
+              value={terminalHeight}
+              onChange={(e) => setTerminalHeight(Number(e.target.value))}
+            />
+          </label>
           <Terminal
             lab={lab}
             feedback={previous.current?.key === lab.key ? feedback : ''}
             expanded={expanded}
             onExpand={() => setExpanded(!expanded)}
           />
-        </div>
+        </section>
         <TaskInstructions
           definition={definition}
           progress={progress}
-          section={section}
-          onSection={setSection}
+          taskId={taskId}
+          onTask={setTaskId}
           identity={identity}
           checking={lab.busy}
           error={lab.validationError}
@@ -396,19 +344,6 @@ export function Workspace({
           </button>
         </div>
       )}
-      <footer className="workspace-status">
-        <span>
-          <GitBranch size={12} />
-          {lab.view.branch}
-          <span>UTF-8</span>
-        </span>
-        <span>
-          Virtual workspace · Local Git only
-          <span>
-            <i className="live-dot" /> {lab.receipt ? 'Submitted · read only' : 'All systems ready'}
-          </span>
-        </span>
-      </footer>
     </div>
   );
 }

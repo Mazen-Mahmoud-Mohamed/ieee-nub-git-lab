@@ -17,9 +17,7 @@ export function SessionBar({
       aria-label="Assessment session"
     >
       <div>
-        <strong>
-          {state.definition.type === 'exam' ? 'Exam' : 'Assignment'} · {state.definition.title}
-        </strong>
+        <strong>{state.definition.type === 'exam' ? 'Exam' : 'Assignment'}</strong>
         {timed ? (
           <span role="timer" aria-label="Time remaining">
             {session.finalized
