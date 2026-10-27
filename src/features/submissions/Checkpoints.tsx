@@ -21,45 +21,48 @@ export function Checkpoints({ lab, authenticated }: { lab: Lab; authenticated: b
     <details className="checkpoint">
       <summary>Backup & recovery</summary>
       <p>
-        Local autosave keeps your repository, answers, and activity in this browser. A cloud
-        checkpoint sends this data to the dedicated Supabase project configured for this lab, under
-        your authenticated account. It does not submit or grade your attempt.
+        A backup keeps a copy of your files and answers. Importing a backup does not submit your
+        work or change who owns the attempt.
       </p>
       <div className="checkpoint-actions">
-        <button
-          className="outline-button"
-          disabled={!authenticated || !lab.attemptId || busy || !!lab.receipt}
-          onClick={() =>
-            void perform(async () => {
-              const { error } = await requireBackend().rpc('save_checkpoint', {
-                p_attempt: lab.attemptId,
-                p_payload: await lab.capture(),
-              });
-              if (error) throw error;
-              setNotice('Cloud checkpoint saved.');
-            })
-          }
-        >
-          Save cloud checkpoint
-        </button>
-        <button
-          className="outline-button"
-          disabled={!authenticated || !lab.attemptId || busy || !!lab.receipt}
-          onClick={() =>
-            void perform(async () => {
-              const { data, error } = await requireBackend()
-                .from('workspace_drafts')
-                .select('payload')
-                .eq('attempt_id', lab.attemptId)
-                .single();
-              if (error) throw error;
-              await lab.restore(data.payload as LocalWorkspace);
-              setNotice('Cloud checkpoint restored.');
-            })
-          }
-        >
-          Restore cloud checkpoint
-        </button>
+        {authenticated && lab.attemptId && (
+          <>
+            <button
+              className="outline-button"
+              disabled={!authenticated || !lab.attemptId || busy || !!lab.receipt}
+              onClick={() =>
+                void perform(async () => {
+                  const { error } = await requireBackend().rpc('save_checkpoint', {
+                    p_attempt: lab.attemptId,
+                    p_payload: await lab.capture(),
+                  });
+                  if (error) throw error;
+                  setNotice('Cloud checkpoint saved.');
+                })
+              }
+            >
+              Save cloud checkpoint
+            </button>
+            <button
+              className="outline-button"
+              disabled={!authenticated || !lab.attemptId || busy || !!lab.receipt}
+              onClick={() =>
+                void perform(async () => {
+                  const { data, error } = await requireBackend()
+                    .from('workspace_drafts')
+                    .select('payload')
+                    .eq('attempt_id', lab.attemptId)
+                    .single();
+                  if (error) throw error;
+                  await lab.restore(data.payload as LocalWorkspace);
+                  setNotice('Cloud checkpoint restored.');
+                })
+              }
+            >
+              Restore cloud checkpoint
+            </button>
+          </>
+        )}
         <label className="backup-import">
           Import local backup
           <input

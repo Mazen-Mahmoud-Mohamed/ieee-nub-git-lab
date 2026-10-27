@@ -305,10 +305,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
             current.setLocked(false);
           }
         }
-        throw Error(
-          error.message +
-            ' If the attempt limit is reached, ask your instructor to approve a retake.',
-        );
+        throw Error(error.message);
       }
       if (activeAttempt.current !== state.id) throw Error('Assessment changed.');
       return data.id as string;

@@ -1,3 +1,4 @@
+import { taskGuide, assessmentSummary } from './presentation';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Clock, GitBranch } from 'lucide-react';
@@ -95,6 +96,11 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
           </p>
         </div>
       </div>
+      <div className="learning-path">
+        <Link to="/learn">1. Learn the basics</Link>
+        <span>2. Open an assignment</span>
+        <span>3. Complete tasks and submit</span>
+      </div>
       {error && (
         <div className="error" role="alert">
           {error}
@@ -138,6 +144,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                       </div>
                       <h3>{d.title}</h3>
                       <p>{d.description}</p>
+                      <small>{assessmentSummary(d)}</small>
                       <div className="assessment-meta">
                         <span>
                           <GitBranch size={13} />
@@ -256,7 +263,7 @@ export function AssessmentDetails({
   authenticated,
 }: {
   definition: Definition;
-  onStart: () => Promise<void>;
+  onStart: (autosave?: boolean) => Promise<void>;
   authenticated: boolean;
 }) {
   const [consent, setConsent] = useState(false);
@@ -286,33 +293,52 @@ export function AssessmentDetails({
           <span>Closes {new Date(d.deadline || d.endsAt!).toLocaleString()}</span>
         )}
       </div>
+      <p>
+        <Link className="text-button" to="/learn">
+          New to Git? Read the short learning guide first.
+        </Link>
+      </p>
       <div className="overview-grid">
         <section>
           <h2>Instructions</h2>
-          <p className="written-answer">{d.instructions}</p>
-          {d.sections.map((s) => (
-            <article className="overview-section" key={s.id}>
-              <div>
-                <h3>{s.title}</h3>
-                <p>{s.description}</p>
+          <p className="written-answer" dir="auto">
+            {d.instructions}
+          </p>
+          <h3>Your tasks</h3>
+          <ol className="overview-task-list">
+            {d.sections
+              .flatMap((s) => s.tasks)
+              .map((t) => (
+                <li key={t.id}>
+                  <strong>{taskGuide(t).title}</strong>
+                  <span>
+                    {t.points} points{t.bonus ? ' · Optional bonus' : ''}
+                  </span>
+                  <p>{taskGuide(t).result}</p>
+                </li>
+              ))}
+          </ol>
+          <details className="published-instructions">
+            <summary>Full assessment instructions</summary>
+            {d.sections.map((s) => (
+              <section key={s.id}>
+                <h3 dir="auto">{s.title}</h3>
+                <p dir="auto">{s.description}</p>
                 <ol>
-                  {s.steps.map((step, i) => (
-                    <li key={i}>{step}</li>
+                  {s.steps.map((step) => (
+                    <li key={step}>{step}</li>
                   ))}
                 </ol>
-                {s.tasks.map((t) => (
-                  <div key={t.id}>
-                    <h4>
-                      {t.title} · {t.points} points {t.bonus ? '(optional bonus)' : ''}
-                    </h4>
-                    {t.instructions !== s.steps.join('\n') && (
-                      <p className="written-answer">{t.instructions}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </article>
-          ))}
+                {s.tasks
+                  .filter((t) => t.instructions !== s.steps.join('\n'))
+                  .map((t) => (
+                    <p key={t.id} className="written-answer" dir="auto">
+                      {t.instructions}
+                    </p>
+                  ))}
+              </section>
+            ))}
+          </details>
           <h3>Theory</h3>
           <p>
             {d.questions.length} question{d.questions.length === 1 ? '' : 's'} · {points.theory}{' '}
@@ -323,8 +349,8 @@ export function AssessmentDetails({
           <h3>{d.type === 'exam' ? 'Before starting your exam' : 'Before you begin'}</h3>
           <p>
             {d.type === 'exam'
-              ? 'The server starts your timer immediately. Refreshing, switching tabs, or changing the device clock does not extend it. At expiry, the server finalizes the last accepted autosave.'
-              : 'Each attempt has an isolated workspace. Published changes never alter an already-started assessment.'}
+              ? 'Your timer starts when you begin. At the deadline, your latest online save is submitted automatically.'
+              : 'You get your own workspace. Your current attempt keeps its original instructions.'}
           </p>
           {authenticated && (
             <label className="checkbox-label">
@@ -333,16 +359,18 @@ export function AssessmentDetails({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />
-              I authorize automatic saves of this attempt’s virtual repository files, answers and
-              supporting command activity to{' '}
-              {import.meta.env.VITE_SUPABASE_URL || 'the configured dedicated Supabase project'}{' '}
-              every 15 seconds. Offline changes arriving after the deadline are excluded.
+              Save my files, answers and command activity online every 15 seconds. Only saves
+              accepted before the deadline count.
             </label>
           )}
-          <p>
-            Work also saves on this device. Avoid using multiple tabs; a stale save will be
-            rejected. Server autosave consent can be enabled again inside a resumed attempt.
-          </p>
+          <details>
+            <summary>Where your work is saved</summary>
+            <p>
+              Your device keeps a local copy. With your permission, online saves go to{' '}
+              {import.meta.env.VITE_SUPABASE_URL || 'the configured IEEE NUB Git Lab server'}. Avoid
+              editing the same attempt in multiple tabs.
+            </p>
+          </details>
           {error && (
             <p role="alert" className="error">
               {error}
@@ -354,7 +382,7 @@ export function AssessmentDetails({
             onClick={async () => {
               setBusy(true);
               try {
-                await onStart();
+                await onStart(consent);
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {

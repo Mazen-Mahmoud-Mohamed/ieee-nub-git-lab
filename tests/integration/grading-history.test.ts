@@ -236,6 +236,7 @@ it('reproduces the reported 30/75 case without personal data and renders honest 
         definition,
         progress,
         taskId: 'separate',
+        view,
         onTask: () => {},
         identity,
         checking: false,
@@ -247,8 +248,8 @@ it('reproduces the reported 30/75 case without personal data and renders honest 
   expect(html).toContain('Expected:');
   expect(html).toContain('Detected:');
   expect(html).toContain('Fix a big bug');
-  expect(html).toContain('A later commit cannot change an original introduction');
-  expect(html).toContain('checklist items do not earn separate points');
+  expect(html).toContain('Adding another commit cannot split that original commit');
+  expect(html).toContain('Checklist items do not earn separate points');
 });
 
 it('deleting or renaming a required final file loses content credit and restoring it recalculates fairly', async () => {

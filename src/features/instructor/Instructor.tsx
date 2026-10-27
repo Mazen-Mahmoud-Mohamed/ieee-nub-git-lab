@@ -1,3 +1,4 @@
+import { HelpRequests } from './HelpRequests';
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { requireBackend } from '../../services/supabase';
@@ -13,7 +14,7 @@ export function Instructor() {
         </div>
         <span className="badge">AUTHORIZED INSTRUCTOR</span>
       </div>
-      <nav className="instructor-nav">
+      <nav className="instructor-nav" aria-label="Instructor navigation">
         {[
           ['', 'Overview'],
           ['students', 'Students'],
@@ -21,7 +22,9 @@ export function Instructor() {
           ['assignments', 'Assignments'],
           ['exams', 'Exams'],
           ['questions', 'Question Bank'],
-          ['results', 'Results'],
+          ['results', 'Grades'],
+          ['requests', 'Help requests'],
+          ['settings', 'Settings'],
         ].map(([path, label]) => (
           <NavLink key={path} end={!path} to={'/instructor' + (path ? '/' + path : '')}>
             {label}
@@ -41,12 +44,9 @@ export function Instructor() {
         <Route path="assessments" element={<AssessmentManager key="all" />} />
         <Route path="assessments/:id" element={<AssessmentEditor />} />
         <Route path="questions" element={<QuestionBank />} />
+        <Route path="requests" element={<HelpRequests />} />
         <Route path="settings" element={<Settings />} />
       </Routes>
-      <details className="admin-settings">
-        <summary>Accessibility settings</summary>
-        <Settings />
-      </details>
     </div>
   );
 }

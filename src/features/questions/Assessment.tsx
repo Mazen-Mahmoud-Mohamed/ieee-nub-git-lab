@@ -69,7 +69,7 @@ export function Assessment({
       {definition.gateTheory && !unlocked && !lab.receipt ? (
         <section className="form-card">
           <h2>Complete the required practical tasks first.</h2>
-          <p>This published version gates Questions on required tasks. Bonus work is optional.</p>
+          <p>Finish the required Git tasks to unlock these questions. The bonus is optional.</p>
           <Link className="primary" to={basePath + '/workspace'}>
             Return to workspace
           </Link>
@@ -112,7 +112,9 @@ export function Assessment({
               {question.required ? 'Required' : 'Optional'}
             </span>
           </div>
-          <h2 className="written-answer">{question.prompt}</h2>
+          <h2 dir="auto" className="written-answer">
+            {question.prompt}
+          </h2>
           <div
             key={question.id}
             onPaste={block}
@@ -161,7 +163,7 @@ export function Assessment({
                         });
                       }}
                     />
-                    {option}
+                    <span dir="auto">{option}</span>
                   </label>
                 ))}
               </fieldset>
@@ -170,6 +172,7 @@ export function Assessment({
                 Your response
                 {question.kind === 'short' ? (
                   <input
+                    dir="auto"
                     maxLength={8000}
                     readOnly={lab.readOnly}
                     value={lab.answers[question.id] || ''}
@@ -177,6 +180,7 @@ export function Assessment({
                   />
                 ) : (
                   <textarea
+                    dir="auto"
                     rows={6}
                     maxLength={8000}
                     readOnly={lab.readOnly}

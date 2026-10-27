@@ -76,13 +76,13 @@ export function Terminal({
   const events = lab.engine.events.slice(cleared);
   const warning = introductoryCommitWarning(definition, lab.view);
   return (
-    <section className="terminal">
+    <section className="terminal" dir="ltr">
       <div className="panel-heading terminal-tabs">
         <span>
           <ChevronRight size={15} /> Git Terminal <i className="live-dot" />
         </span>
         <div>
-          <span className="terminal-mode">BROWSER SHELL</span>
+          <span className="terminal-mode">Practice Git here</span>
           <button
             title="Clear terminal"
             aria-label="Clear terminal"

@@ -11,6 +11,7 @@ const A = '11111111-1111-4111-8111-111111111111',
   I = '33333333-3333-4333-8333-333333333333';
 const LEGACY = '44444444-4444-4444-8444-444444444444';
 let db: PGlite;
+let migrationBefore: Record<string, unknown>, migrationAfter: Record<string, unknown>;
 let assignment: string, exam: string, examAttempt: string;
 const q = (v: unknown) =>
   "'" + String(typeof v === 'object' ? JSON.stringify(v) : v).replaceAll("'", "''") + "'";
@@ -94,6 +95,27 @@ beforeAll(async () => {
   await db.exec(
     readFileSync('supabase/migrations/20261027140000_safe_attempt_restart.sql', 'utf8'),
   );
+  const snapshot = async (tables: Array<{ schemaname: string; tablename: string }>) => {
+    const result: Record<string, unknown> = {};
+    for (const t of tables)
+      result[t.schemaname + '.' + t.tablename] = (
+        await db.query(
+          `select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]') as rows from "${t.schemaname}"."${t.tablename}" t`,
+        )
+      ).rows[0];
+    return result;
+  };
+  const tables = (
+    await db.query<{ schemaname: string; tablename: string }>(
+      "select schemaname,tablename from pg_tables where schemaname in ('public','private','auth') order by schemaname,tablename",
+    )
+  ).rows;
+  migrationBefore = await snapshot(tables);
+  await db.exec(
+    readFileSync('supabase/migrations/20261027150000_attempt_help_requests.sql', 'utf8'),
+  );
+
+  migrationAfter = await snapshot(tables);
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -755,4 +777,171 @@ it('restart RPC is unavailable to anonymous users and does not grant students di
   await expect(
     user(A, `update public.attempts set status='in_progress' where id='${LEGACY}'`),
   ).rejects.toThrow('permission');
+});
+
+describe.sequential('student help requests and policy-aware options', () => {
+  it('adds recovery requests without changing any existing public, private or authentication record', async () => {
+    expect(Object.keys(migrationBefore).length).toBeGreaterThan(20);
+    expect(migrationAfter).toEqual(migrationBefore);
+    await db.exec('reset role;set role anon');
+    await expect(db.query(`select public.attempt_recovery_state('${LEGACY}')`)).rejects.toThrow(
+      'permission',
+    );
+    await expect(user(A, 'select public.instructor_help_requests()')).rejects.toThrow('Instructor');
+  });
+  it('shows the actual available action and resolves an idempotent student request through an instructor', async () => {
+    const id = await publish({ ...def(), title: 'Request another attempt', attemptLimit: 1 });
+    const attempt = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0]
+      .result.id;
+    const policy = (await user(A, `select public.attempt_recovery_state('${attempt}') as result`))
+      .rows[0].result;
+    expect(policy).toMatchObject({ code: 'attempt_limit', canRestart: false, canRequest: true });
+    const request = (
+      await user(
+        A,
+        `select public.request_attempt_help('${attempt}','I committed the files together') as result`,
+      )
+    ).rows[0].result;
+    expect(request.status).toBe('pending');
+    expect(
+      (await user(A, `select public.request_attempt_help('${attempt}','second click') as result`))
+        .rows[0].result.id,
+    ).toBe(request.id);
+    expect(
+      (await user(B, `select * from public.attempt_help_requests where id='${request.id}'`)).rows,
+    ).toHaveLength(0);
+    await expect(user(B, `select public.attempt_recovery_state('${attempt}')`)).rejects.toThrow(
+      'authorized',
+    );
+    await expect(
+      user(A, `select public.resolve_attempt_help('${request.id}',true,'')`),
+    ).rejects.toThrow('Instructor');
+    await expect(
+      user(
+        A,
+        `insert into public.attempt_help_requests(attempt_id,student_id,message) values('${attempt}','${A}','Bypass')`,
+      ),
+    ).rejects.toThrow('permission');
+    const queue = (await user(I, `select public.instructor_help_requests() as result`)).rows[0]
+      .result;
+    expect(
+      queue.rows.some(
+        (r: any) => r.id === request.id && r.message === 'I committed the files together',
+      ),
+    ).toBe(true);
+    await user(
+      I,
+      `select public.resolve_attempt_help('${request.id}',true,'Start over and commit each file separately.')`,
+    );
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${attempt}') as result`)).rows[0]
+        .result,
+    ).toMatchObject({
+      code: 'available',
+      canRestart: true,
+      request: { status: 'approved', reply: 'Start over and commit each file separately.' },
+    });
+    await expect(
+      user(I, `select public.resolve_attempt_help('${request.id}',true,'')`),
+    ).rejects.toThrow('already');
+    await user(A, `select public.restart_assessment('${attempt}',0)`);
+    expect(
+      (
+        await root(
+          `select retakes_remaining from public.student_enrollments where student_id='${A}' and assignment_id='${id}'`,
+        )
+      ).rows[0].retakes_remaining,
+    ).toBe(0);
+  });
+  it('declines without granting credit and preserves the response without duplicate requests', async () => {
+    const id = await publish({ ...def(), title: 'Declined request', attemptLimit: 1 });
+    const attempt = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0]
+      .result.id;
+    const request = (await user(A, `select public.request_attempt_help('${attempt}','') as result`))
+      .rows[0].result;
+    await user(
+      I,
+      `select public.resolve_attempt_help('${request.id}',false,'Keep working on the remaining tasks.')`,
+    );
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${attempt}') as result`)).rows[0]
+        .result,
+    ).toMatchObject({
+      canRestart: false,
+      canRequest: false,
+      request: { status: 'rejected', reply: 'Keep working on the remaining tasks.' },
+    });
+    expect(
+      (await user(A, `select public.request_attempt_help('${attempt}','again') as result`)).rows[0]
+        .result.status,
+    ).toBe('rejected');
+    expect(
+      (
+        await root(
+          `select retakes_remaining from public.student_enrollments where student_id='${A}' and assignment_id='${id}'`,
+        )
+      ).rows[0].retakes_remaining,
+    ).toBe(0);
+  });
+  it('does not offer requests or restart for exams, closed work, deadlines or finalized submissions', async () => {
+    const exam = await publish({
+      ...def('exam'),
+      title: 'Exam help restrictions',
+      attemptLimit: 2,
+    });
+    const e = (await user(A, `select public.start_assessment('${exam}') as result`)).rows[0].result
+      .id;
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${e}') as result`)).rows[0].result,
+    ).toMatchObject({ code: 'exam', canRestart: false, canRequest: false });
+    await expect(
+      user(A, `select public.request_attempt_help('${e}','reset timer')`),
+    ).rejects.toThrow('not available');
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${LEGACY}') as result`)).rows[0].result,
+    ).toMatchObject({ code: 'finalized', canRestart: false, canRequest: false });
+    const id = await publish({ ...def(), title: 'Closed help', attemptLimit: 1 });
+    const a = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0].result
+      .id;
+    await user(I, `select public.set_assessment_visibility('${id}',false,false)`);
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${a}') as result`)).rows[0].result.code,
+    ).toBe('closed');
+    await user(I, `select public.set_assessment_visibility('${id}',true,false)`);
+    const r = (await user(A, `select public.request_attempt_help('${a}','Please help') as result`))
+      .rows[0].result;
+    await root(
+      `update public.attempts set deadline_at=clock_timestamp()-interval '1 second' where id='${a}'`,
+    );
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${a}') as result`)).rows[0].result.code,
+    ).toBe('deadline');
+    await expect(user(I, `select public.resolve_attempt_help('${r.id}',true,'')`)).rejects.toThrow(
+      'no longer',
+    );
+    expect(
+      (await user(A, `select public.attempt_recovery_state('${a}') as result`)).rows[0].result
+        .request.status,
+    ).toBe('pending');
+  });
+  it('never grants extra credit if a request became eligible through a newer published limit', async () => {
+    const d = { ...def(), title: 'Changed policy', attemptLimit: 1 };
+    const id = await publish(d);
+    const a = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0].result
+      .id;
+    const r = (await user(A, `select public.request_attempt_help('${a}','Help') as result`)).rows[0]
+      .result;
+    await publish({ ...d, attemptLimit: 2 }, id);
+    await user(
+      I,
+      `select public.resolve_attempt_help('${r.id}',true,'The current assessment allows another attempt.')`,
+    );
+    expect(
+      (
+        await root(
+          `select retakes_remaining from public.student_enrollments where student_id='${A}' and assignment_id='${id}'`,
+        )
+      ).rows[0].retakes_remaining,
+    ).toBe(0);
+  });
 });

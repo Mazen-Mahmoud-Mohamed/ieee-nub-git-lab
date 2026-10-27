@@ -54,7 +54,7 @@ test('mobile instructions remain usable and 404 helps students return', async ({
   await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
   await expect(
     page.getByRole('heading', {
-      name: 'Local repository on main with configured identity',
+      name: 'Set up your project',
       exact: true,
     }),
   ).toBeVisible();
@@ -305,21 +305,23 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
   await expect(page.getByRole('alert').filter({ hasText: 'History warning:' })).toBeVisible();
   await command('git commit -m "Combined introductory files"');
   await expect(page.getByRole('log')).toContainText('Combined introductory files');
+  if (!(await page.getByRole('button', { name: 'Restart Attempt', exact: true }).isVisible()))
+    await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('written answers');
+  await expect(dialog).toContainText('answers and task progress');
   await page.screenshot({ path: 'test-results/restart-confirmation-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'test-results/restart-confirmation-mobile.png', fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await expect(dialog).toContainText(
-    'Assessed attempts, submissions and official grades are unchanged',
-  );
+  await expect(dialog).toContainText('Previous submissions and official grades are unchanged');
   await page.getByRole('button', { name: 'Keep current work', exact: true }).click();
   await command('git log --oneline');
   await expect(page.getByRole('log')).toContainText('Combined introductory files');
+  if (!(await page.getByRole('button', { name: 'Restart Attempt', exact: true }).isVisible()))
+    await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
   await expect(page.getByText('Practice restarted.', { exact: false })).toBeVisible();
@@ -340,8 +342,86 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
     return keys.map(String).filter((k) => k.includes(':restart-backup:'));
   });
   expect(recovery).toHaveLength(1);
+  await page.getByLabel('Task', { exact: true }).selectOption('goals');
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByRole('link', { name: 'Workspace', exact: true }).click();
+  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('goals');
   await page.reload();
+  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('goals');
   await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
   await command('ls');
   await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
+});
+
+test('learning guide leads to focused tasks, exact requirements and keyboard recovery', async ({
+  page,
+}) => {
+  await page.goto('/#/learn');
+  await expect(page.getByRole('heading', { name: 'Git, one step at a time' })).toBeVisible();
+  await expect(page.locator('.lesson-grid article')).toHaveCount(6);
+  await page.getByRole('link', { name: 'Try it in the practice lab', exact: true }).click();
+  await page.getByLabel('Task', { exact: true }).selectOption('separate');
+  await expect(page.getByText('Exact commit message', { exact: true })).toBeVisible();
+  await expect(page.locator('.required-message code')).toHaveText('Add personal information');
+  await expect(page.locator('.task-caution')).toContainText('New commits cannot split');
+  await expect(page.locator('.check-evidence')).not.toHaveAttribute('open', '');
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByRole('link', { name: 'Workspace', exact: true }).click();
+  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('separate');
+  await page.getByText('Help with this attempt', { exact: true }).click();
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Start over?', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(page.getByText('Help with this attempt', { exact: true })).toBeFocused();
+  await page.locator('.student-task').evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await page.screenshot({ path: 'test-results/redesigned-workspace-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: 'test-results/redesigned-workspace-mobile.png', fullPage: true });
+});
+
+test('shared text colors stay readable in both themes and tablet lessons do not overflow', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto('/#/learn');
+  await page.keyboard.press('Tab');
+  const skip = page.getByRole('link', { name: 'Skip to main content', exact: true });
+  await expect(skip).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('main')).toBeFocused();
+  await expect(page).toHaveURL(/#\/learn$/);
+  await expect(skip).not.toBeInViewport();
+  for (const theme of ['dark', 'light']) {
+    if ((await page.locator('html').getAttribute('data-theme')) !== theme)
+      await page.getByRole('button', { name: 'Toggle light and dark theme', exact: true }).click();
+    const ratios = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      const luminance = (color: string) => {
+        const hex = color.trim().replace('#', '');
+        const value = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
+        const rgb = [0, 2, 4]
+          .map((i) => parseInt(value.slice(i, i + 2), 16) / 255)
+          .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+        return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+      };
+      return ['--text', '--muted', '--blue', '--green'].flatMap((text) =>
+        ['--panel', '--raised', '--bg'].map((bg) => {
+          const a = luminance(style.getPropertyValue(text)),
+            b = luminance(style.getPropertyValue(bg));
+          return { text, bg, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+        }),
+      );
+    });
+    for (const r of ratios)
+      expect(r.ratio, `${theme} ${r.text} on ${r.bg}`).toBeGreaterThanOrEqual(4.5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      768,
+    );
+    await page.screenshot({ path: `test-results/learning-tablet-${theme}.png`, fullPage: true });
+  }
 });

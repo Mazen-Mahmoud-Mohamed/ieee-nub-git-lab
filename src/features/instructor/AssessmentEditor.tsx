@@ -1,3 +1,4 @@
+import { taskGuide } from '../assessments/presentation';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, ArrowUp, ArrowDown, Copy, Save, Trash2 } from 'lucide-react';
@@ -86,7 +87,10 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
                 ? 'Assignments'
                 : 'Assignments & exams'}
           </h2>
-          <p>Create a draft, configure tasks and questions, then publish an immutable version.</p>
+          <p>
+            Create a draft, configure tasks and questions, then publish it for students. Current
+            attempts keep their original instructions.
+          </p>
         </div>
         <Link
           className="primary"
@@ -174,10 +178,18 @@ export function AssessmentEditor() {
   const creating = assessmentId === 'new';
   const [searchParams] = useSearchParams();
   const [preview, setPreview] = useState(false);
+  const [editorTab, setEditorTab] = useState('details');
   const [previewError, setPreviewError] = useState('');
   const [definition, setDefinition] = useState<Definition>(
     blankDefinition(searchParams.get('type') === 'exam' ? 'exam' : 'assignment'),
   );
+  useEffect(() => {
+    if (
+      (definition.format === 'theory' && ['tasks', 'starter'].includes(editorTab)) ||
+      (definition.format === 'practical' && editorTab === 'questions')
+    )
+      setEditorTab('details');
+  }, [definition.format, editorTab]);
   const [loading, setLoading] = useState(!creating);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -317,7 +329,32 @@ export function AssessmentEditor() {
           {notice}
         </p>
       )}
-      <section className="form-card editor-fields">
+      <nav className="editor-section-tabs" aria-label="Assessment editor sections">
+        {['details', 'tasks', 'questions', 'starter']
+          .filter(
+            (tab) =>
+              !(definition.format === 'theory' && ['tasks', 'starter'].includes(tab)) &&
+              !(definition.format === 'practical' && tab === 'questions'),
+          )
+          .map((tab) => (
+            <button
+              key={tab}
+              aria-current={editorTab === tab ? 'page' : undefined}
+              className={editorTab === tab ? 'primary' : 'outline-button'}
+              onClick={() => setEditorTab(tab)}
+            >
+              {
+                {
+                  details: '1. Details',
+                  tasks: '2. Tasks',
+                  questions: '3. Questions',
+                  starter: 'Starting files',
+                }[tab]
+              }
+            </button>
+          ))}
+      </nav>
+      <section hidden={editorTab !== 'details'} className="form-card editor-fields">
         <h3>Assessment details</h3>
         <div className="field-grid">
           <label>
@@ -444,8 +481,8 @@ export function AssessmentEditor() {
       </section>
       {definition.format !== 'theory' && (
         <>
-          <section className="form-card editor-fields">
-            <h3>Starter workspace (optional)</h3>
+          <section hidden={editorTab !== 'starter'} className="form-card editor-fields">
+            <h3>Starting files (optional)</h3>
             <label className="checkbox-label">
               <input
                 type="checkbox"
@@ -564,9 +601,9 @@ export function AssessmentEditor() {
               </button>
             )}
           </section>
-          <section className="form-card editor-fields">
+          <section hidden={editorTab !== 'tasks'} className="form-card editor-fields">
             <div className="page-heading">
-              <h3>Practical task builder</h3>
+              <h3>Practical tasks</h3>
               <button
                 className="outline-button"
                 onClick={() =>
@@ -662,6 +699,7 @@ export function AssessmentEditor() {
                         />
                       </label>
                     </div>
+                    <h5>What the student sees</h5>
                     <label>
                       Task instructions
                       <textarea
@@ -678,6 +716,11 @@ export function AssessmentEditor() {
                       />
                       Optional bonus task
                     </label>
+                    <h5>What earns the points</h5>
+                    <p className="muted">
+                      Describe the required result, then choose how to check it. All checks must
+                      pass for this task’s points.
+                    </p>
                     {task.rules.map((rule, ri) => (
                       <RuleEditor
                         key={ri}
@@ -705,7 +748,7 @@ export function AssessmentEditor() {
                         })
                       }
                     >
-                      + Add validation rule (all must pass)
+                      + Add a completion check
                     </button>
                   </div>
                 ))}
@@ -742,9 +785,9 @@ export function AssessmentEditor() {
         </>
       )}
       {definition.format !== 'practical' && (
-        <section className="form-card editor-fields">
+        <section hidden={editorTab !== 'questions'} className="form-card editor-fields">
           <div className="page-heading">
-            <h3>Theory question builder</h3>
+            <h3>Questions</h3>
             <button
               className="outline-button"
               onClick={() => update({ questions: [...definition.questions, newQuestion()] })}
@@ -879,14 +922,36 @@ function RuleEditor({
   return (
     <div className="rule-editor">
       <label>
-        Validation rule
+        Check completion by
         <select value={r.type} onChange={(e) => onChange({ type: e.target.value as Rule['type'] })}>
           {r.type === 'legacy' && (
-            <option value="legacy">Original Assignment 01: {r.outcomeId}</option>
+            <option value="legacy">
+              Course task:{' '}
+              {
+                taskGuide({
+                  id: 'guide',
+                  title: 'Course check',
+                  instructions: '',
+                  points: 0,
+                  bonus: false,
+                  rules: [r],
+                }).title
+              }
+            </option>
           )}
           {types.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {
+                {
+                  repository: 'Git setup and clean files',
+                  file: 'File content',
+                  branch: 'A saved branch',
+                  commits: 'Number of commits',
+                  message: 'A commit message',
+                  merged: 'Merged branch history',
+                  isolation: 'A file added on a branch',
+                }[t]
+              }
             </option>
           ))}
         </select>

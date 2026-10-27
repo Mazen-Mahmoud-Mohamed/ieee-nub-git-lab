@@ -55,6 +55,7 @@ async function fixture(
   const attempts: Record<string, AttemptState> = {};
   const saved: Record<string, any>[] = [];
   const requests: string[] = [];
+  const helpRequests: Record<string, any> = {};
   let uploads = 0;
   let restartReplyLost = false;
   let profileExists = !options.newUser;
@@ -258,6 +259,61 @@ async function fixture(
         attempts[id] = attempt;
       }
       response = { id: attempt.id };
+    } else if (path.endsWith('/rpc/attempt_recovery_state')) {
+      const a = attempts[body.p_attempt];
+      const request = Object.values(helpRequests).find((r) => r.attempt_id === a.id) || null;
+      const code =
+        a.status === 'restarted'
+          ? 'restarted'
+          : a.status !== 'in_progress'
+            ? 'finalized'
+            : a.definition.type === 'exam'
+              ? 'exam'
+              : options.restartDenied
+                ? 'attempt_limit'
+                : 'available';
+      response = {
+        code,
+        canRestart: code === 'available',
+        canRequest: code === 'attempt_limit' && !request,
+        request,
+        successor: a.restarted_to,
+      };
+    } else if (path.endsWith('/rpc/request_attempt_help')) {
+      let r = Object.values(helpRequests).find((r) => r.attempt_id === body.p_attempt);
+      if (!r) {
+        const a = attempts[body.p_attempt];
+        r = {
+          id: crypto.randomUUID(),
+          attempt_id: a.id,
+          assignment_id: a.assignment_id,
+          full_name: fullName,
+          email: authUser.email,
+          title: a.definition.title,
+          message: body.p_message || 'I need help starting over.',
+          status: 'pending',
+          reply: '',
+          attempt_number: 1,
+          created_at: new Date().toISOString(),
+          recovery_code: 'attempt_limit',
+        };
+        helpRequests[r.id] = r;
+      }
+      response = r;
+    } else if (path.endsWith('/rpc/instructor_help_requests')) {
+      const list = Object.values(helpRequests).filter(
+        (r) => !body.p_status || r.status === body.p_status,
+      );
+      response = {
+        total: list.length,
+        rows: list.slice(body.p_offset || 0, (body.p_offset || 0) + (body.p_limit || 25)),
+      };
+    } else if (path.endsWith('/rpc/resolve_attempt_help')) {
+      const r = helpRequests[body.p_request];
+      r.status = body.p_approve ? 'approved' : 'rejected';
+      r.reply = body.p_reply;
+      if (body.p_approve) options.restartDenied = false;
+      response = null;
     } else if (path.endsWith('/rpc/restart_assessment')) {
       if (options.restartDenied) {
         await route.fulfill({
@@ -385,6 +441,10 @@ async function fixture(
     authCalls,
     uploads: () => uploads,
     definitions,
+    helpRequests,
+    asInstructor: (value: boolean) => {
+      instructor = value;
+    },
     network: (enabled: boolean) => {
       network = enabled;
     },
@@ -448,6 +508,7 @@ test('instructor can create and publish a timed exam with an objective private k
   await page.getByRole('combobox', { name: 'Format', exact: true }).selectOption('theory');
   await page.getByLabel('Duration (minutes)').fill('20');
   await page.getByLabel('Allowed attempts').fill('2');
+  await page.getByRole('button', { name: '3. Questions', exact: true }).click();
   await page.getByRole('button', { name: 'Add question', exact: true }).click();
   await page.getByLabel('Question text').fill('Is git commit local?');
   await page.getByRole('combobox', { name: 'Question type', exact: true }).selectOption('boolean');
@@ -469,7 +530,7 @@ test('timer survives refresh and browser clock changes; consent gates autosave a
   await expect(page.getByRole('timer')).toContainText('remaining');
   await page.getByLabel('Your response').fill('My saved explanation');
   expect(api.uploads()).toBe(0);
-  await page.getByRole('button', { name: 'Enable server autosave for this attempt' }).click();
+  await expect(page.getByRole('button', { name: 'Save now', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Save now', exact: true }).click();
   await expect(
     page.getByRole('status').filter({ hasText: 'Server autosave accepted' }),
@@ -495,7 +556,7 @@ test('network interruption retains local answers and retries the accepted server
   const api = await fixture(page);
   await api.login();
   await api.start(E);
-  await page.getByRole('button', { name: 'Enable server autosave for this attempt' }).click();
+  await expect(page.getByRole('button', { name: 'Save now', exact: true })).toBeVisible();
   await page.getByLabel('Your response').fill('First accepted answer');
   await page.getByRole('button', { name: 'Save now', exact: true }).click();
   await expect(
@@ -520,7 +581,7 @@ test('a stale second tab cannot silently overwrite a newer server checkpoint', a
   const api = await fixture(page);
   await api.login();
   await api.start(E);
-  await page.getByRole('button', { name: 'Enable server autosave for this attempt' }).click();
+  await expect(page.getByRole('button', { name: 'Save now', exact: true })).toBeVisible();
   const other = await context.newPage();
   await other.goto(page.url());
   await expect(other.getByLabel('Your response')).toBeVisible();
@@ -717,7 +778,7 @@ test('instructor review preserves the attempt ID when the grading summary has it
   const release = page.waitForRequest((r) => r.url().endsWith('/rpc/grade_assessment'));
   await page.getByRole('button', { name: 'Publish grade', exact: true }).click();
   expect((await release).postDataJSON().p_release).toBe(true);
-  await page.getByRole('link', { name: 'Results', exact: true }).click();
+  await page.getByRole('link', { name: 'Grades', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
   await expect(page.getByLabel('Assessment filter')).toBeVisible();
 });
@@ -742,7 +803,7 @@ test('admin navigation loads real-shaped overview, students and dedicated assess
   await expect(page.getByLabel('Duration (minutes)', { exact: true })).toHaveValue('30');
   await page.getByRole('link', { name: 'Question Bank', exact: true }).click();
   await expect(page.getByLabel('Search questions')).toBeVisible();
-  await page.getByRole('link', { name: 'Results', exact: true }).click();
+  await page.getByRole('link', { name: 'Grades', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
 });
 
@@ -809,7 +870,9 @@ test('draft editing survives bank search and student preview runs real Git witho
   await api.login();
   await page.goto('/ieee-git-lab/#/instructor/assessments/' + A);
   await page.getByLabel('Title', { exact: true }).fill('Unsaved title');
+  await page.getByRole('button', { name: '3. Questions', exact: true }).click();
   await page.getByLabel('Search bank to reuse').fill('staging');
+  await page.getByRole('button', { name: '1. Details', exact: true }).click();
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved title');
   await page.getByRole('button', { name: 'Preview as student', exact: true }).click();
   await expect(
@@ -946,10 +1009,11 @@ test('assessed restart changes attempt keys, clears answers and keeps previous w
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
   await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Accepted old work');
-  await page.getByRole('button', { name: 'Enable server autosave for this attempt' }).click();
+  await expect(page.getByRole('button', { name: 'Save now', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Save now', exact: true }).click();
   await expect(page.getByText('Server autosave accepted', { exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Old attempt local edit');
+  await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toContainText('instructor’s attempt limits');
   await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
@@ -979,23 +1043,38 @@ test('assessed restart changes attempt keys, clears answers and keeps previous w
   expect(api.uploads()).toBe(1);
 });
 
-test('denied restart keeps progress and exams expose no restart option', async ({ page }) => {
+test('limits show a real help request instead of a restart that will be denied', async ({
+  page,
+}) => {
   const api = await fixture(page, false, 120, { restartDenied: true });
   await api.login();
   await api.start(A);
-  const old = Object.values(api.attempts)[0].id;
   await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Keep this work');
-  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
-  await expect(page.getByRole('alertdialog')).toContainText('Attempt limit reached');
-  await expect(page).toHaveURL(new RegExp(old));
-  await expect(page.getByLabel('Terminal command')).toBeEnabled();
-  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
-    'Keep this work',
-  );
-  expect(Object.values(api.attempts)).toHaveLength(1);
+  await page.getByText('Help with this attempt', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Restart Attempt', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText('You’ve used all your available attempts.', { exact: false }),
+  ).toBeVisible();
+  await page
+    .getByLabel('Tell your instructor what happened (optional)')
+    .fill('I committed files together.');
+  await page.getByRole('button', { name: 'Request another attempt', exact: true }).click();
+  await expect(
+    page.getByText('Request sent · waiting for your instructor', { exact: true }),
+  ).toBeVisible();
+  expect(Object.keys(api.helpRequests)).toHaveLength(1);
+  await page.reload();
+  await page.getByText('Help with this attempt', { exact: true }).click();
+  await expect(
+    page.getByText('Request sent · waiting for your instructor', { exact: true }),
+  ).toBeVisible();
   await api.start(E);
+  await page.getByRole('link', { name: 'Workspace', exact: true }).click();
+  await page.getByText('Help with this attempt', { exact: true }).click();
+  await expect(
+    page.getByText('You cannot restart during an active exam.', { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Restart Attempt', exact: true })).toHaveCount(0);
 });
 
@@ -1006,12 +1085,142 @@ test('lost restart response locks old work and retry recovers the same new attem
   await api.login();
   await api.start(A);
   const old = Object.values(api.attempts)[0].id;
+  await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
-  await expect(page.getByRole('alertdialog').getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open the new attempt', exact: true })).toBeVisible();
   await expect(page.getByLabel('Terminal command')).toBeDisabled();
-  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await page.getByRole('link', { name: 'Open the new attempt', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(api.attempts[old].restarted_to!));
   await expect(page.getByLabel('Terminal command')).toBeEnabled();
   expect(Object.values(api.attempts)).toHaveLength(2);
+});
+
+for (const approve of [true, false]) {
+  test(`student help request is ${approve ? 'approved and used' : 'declined with a reply'}`, async ({
+    page,
+  }) => {
+    const api = await fixture(page, false, 120, { restartDenied: true });
+    await api.login();
+    await api.start(A);
+    const old = Object.values(api.attempts)[0].id;
+    const workspace = page.url();
+    await page.getByRole('button', { name: 'a.txt', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Text file editor' }).fill('Preserve my work');
+    await page.getByRole('button', { name: 'Save now', exact: true }).click();
+    await expect.poll(() => api.attempts[old].checkpoint_revision).toBeGreaterThan(0);
+    const oldPayload = JSON.stringify(api.attempts[old].payload);
+    await page.getByText('Help with this attempt', { exact: true }).click();
+    await page
+      .getByLabel('Tell your instructor what happened (optional)')
+      .fill('Combined my introductory files.');
+    await page.getByRole('button', { name: 'Request another attempt', exact: true }).click();
+    await expect(
+      page.getByText('Request sent · waiting for your instructor', { exact: true }),
+    ).toBeVisible();
+    api.asInstructor(true);
+    await page.goto('/ieee-git-lab/#/instructor/requests');
+    await page.reload();
+    await expect(page.getByText('Combined my introductory files.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Respond to request', exact: true }).click();
+    const response = page.getByRole('alertdialog', { name: 'Respond to help request' });
+    await response
+      .getByLabel('Response to the student (optional)')
+      .fill(approve ? 'Try each file separately.' : 'Please continue your current work.');
+    await response
+      .getByRole('button', {
+        name: approve ? 'Approve another attempt' : 'Decline request',
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByText(
+        approve
+          ? 'Approved. The student can start over while the assessment is open.'
+          : 'Request declined. The student can read your response.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    api.asInstructor(false);
+    await page.goto(workspace);
+    await page.reload();
+    await page.getByText('Help with this attempt', { exact: true }).click();
+    await expect(
+      page.getByText(approve ? 'Try each file separately.' : 'Please continue your current work.', {
+        exact: true,
+      }),
+    ).toBeVisible();
+    if (approve) {
+      await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+      await expect(page).not.toHaveURL(workspace);
+      expect(api.attempts[old].status).toBe('restarted');
+      expect(JSON.stringify(api.attempts[old].payload)).toBe(oldPayload);
+      expect(api.attempts[old].receipt).toBeNull();
+      await expect(page.getByLabel('Terminal command')).toBeEnabled();
+    } else {
+      await expect(
+        page.getByText('Your instructor did not approve another attempt', { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Restart Attempt', exact: true })).toHaveCount(
+        0,
+      );
+      expect(api.attempts[old].status).toBe('in_progress');
+      expect(Object.values(api.attempts)).toHaveLength(1);
+    }
+  });
+}
+
+test('instructor builds a task with plain forms, verifies real Git in preview and publishes its criteria', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await page.goto('/ieee-git-lab/#/instructor/assessments/new');
+  await page.getByLabel('Title', { exact: true }).fill('First file lesson');
+  await page.getByRole('combobox', { name: 'Format', exact: true }).selectOption('practical');
+  await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
+  await page.getByRole('button', { name: 'Add section', exact: true }).click();
+  await page.getByRole('button', { name: 'Add practical task', exact: true }).click();
+  await page.getByLabel('Task title', { exact: true }).fill('إنشاء greeting.txt');
+  await page
+    .getByLabel('Task instructions', { exact: true })
+    .fill('Create greeting.txt.\nWrite Hello Git in the editor.');
+  await page
+    .getByRole('combobox', { name: 'Check completion by', exact: true })
+    .selectOption('file');
+  await page.getByLabel('Expected file path', { exact: true }).fill('greeting.txt');
+  await page.getByLabel('Branch / snapshot', { exact: true }).fill('working');
+  await page.getByRole('combobox', { name: 'Content rule', exact: true }).selectOption('contains');
+  await page.getByLabel('Expected text', { exact: true }).fill('Hello Git');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: 'test-results/redesigned-instructor-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: 'Preview as student', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'إنشاء greeting.txt', exact: true }),
+  ).toHaveAttribute('dir', 'auto');
+  await expect(page.locator('.required-text pre')).toHaveText('Hello Git');
+  for (const cmd of ['mkdir Git-Exercise', 'cd Git-Exercise', 'git init', 'touch greeting.txt']) {
+    await page.getByLabel('Terminal command').fill(cmd);
+    await page.getByLabel('Terminal command').press('Enter');
+    await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  }
+  await page.getByRole('button', { name: 'greeting.txt U', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text file editor' }).fill('Hello Git');
+  await expect(page.locator('.task-status')).toHaveText('Complete');
+  expect(Object.values(api.attempts)).toHaveLength(0);
+  await page.screenshot({ path: 'test-results/redesigned-instructor-preview.png', fullPage: true });
+  await page.getByRole('button', { name: 'Back to editor', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish new version', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Published');
+  expect(api.saved[0].p_document.sections[0].tasks[0].rules[0]).toEqual({
+    type: 'file',
+    path: 'greeting.txt',
+    ref: 'working',
+    match: 'contains',
+    value: 'Hello Git',
+  });
+  expect(api.saved[0].p_publish).toBe(true);
 });

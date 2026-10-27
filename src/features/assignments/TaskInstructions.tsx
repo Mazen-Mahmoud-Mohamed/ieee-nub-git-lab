@@ -1,3 +1,6 @@
+import type { ReactNode } from 'react';
+import { taskGuide, taskFeedback } from '../assessments/presentation';
+import type { RepoView } from '../git-engine/engine';
 import { Link } from 'react-router-dom';
 import { totals, type Definition } from '../assessments/model';
 import type { TaskProgress } from '../assessments/requirements';
@@ -11,6 +14,8 @@ export function TaskInstructions({
   checking,
   error,
   basePath,
+  view,
+  recovery,
 }: {
   definition: Definition;
   progress: TaskProgress[];
@@ -20,6 +25,8 @@ export function TaskInstructions({
   checking: boolean;
   error: string;
   basePath: string;
+  view: RepoView;
+  recovery?: ReactNode;
 }) {
   const tasks = d.sections.flatMap((s) => s.tasks.map((task) => ({ task, section: s }))),
     index = Math.max(
@@ -33,7 +40,41 @@ export function TaskInstructions({
     earned = required.filter((p) => p.passed).reduce((n, p) => n + p.task.points, 0),
     bonus = progress.filter((p) => p.task.bonus && p.passed).reduce((n, p) => n + p.task.points, 0),
     complete = required.every((p) => p.passed),
-    done = state?.requirements.filter((c) => c.status === 'completed').length || 0;
+    done = state?.requirements.filter((c) => c.status === 'completed').length || 0,
+    guide = current ? taskGuide(current.task) : null,
+    feedback = state ? taskFeedback(state, view) : null;
+  const displayRequirements = (() => {
+    if (
+      !state ||
+      !current?.task.rules.some((r) => r.type === 'legacy' && r.outcomeId === 'separate')
+    )
+      return state?.requirements || [];
+    const groups = new Map<string, typeof state.requirements>();
+    for (const c of state.requirements) {
+      const file = /about|personal-message|message$/.test(c.id)
+        ? 'about.txt'
+        : /goals/.test(c.id)
+          ? 'goals.txt'
+          : /notes/.test(c.id)
+            ? 'notes.txt'
+            : c.id;
+      groups.set(file, [...(groups.get(file) || []), c]);
+    }
+    return [...groups].map(([key, checks]) => ({
+      ...checks[0],
+      id: key,
+      label: key.endsWith('.txt')
+        ? `First commit ${key} by itself, with the required text${key === 'about.txt' ? ' and message' : ''}`
+        : checks[0].label,
+      status: checks.every((c) => c.status === 'completed')
+        ? ('completed' as const)
+        : checks.some((c) => c.status === 'unverifiable')
+          ? ('unverifiable' as const)
+          : checking
+            ? ('checking' as const)
+            : ('incomplete' as const),
+    }));
+  })();
   const labels = {
     completed: 'Completed',
     incomplete: 'Not completed',
@@ -52,8 +93,9 @@ export function TaskInstructions({
           >
             {tasks.map((t, i) => (
               <option key={t.task.id} value={t.task.id}>
-                {i + 1}. {t.task.title}
+                {i + 1}. {taskGuide(t.task).title}
                 {t.task.bonus ? ' (optional)' : ''}
+                {progress.find((p) => p.task.id === t.task.id)?.passed ? ' · Complete' : ''}
               </option>
             ))}
           </select>
@@ -84,54 +126,35 @@ export function TaskInstructions({
       )}
       {current && state ? (
         <>
-          <h2>{current.task.title}</h2>
-          <p>
-            {current.task.instructions === current.section.steps.join('\n')
-              ? current.section.description
-              : current.task.instructions.split('\n')[0]}
+          <div className="task-heading">
+            <span className={'task-status ' + (state.passed ? 'done' : '')}>
+              {checking ? 'Checking…' : state.passed ? 'Complete' : 'In progress'}
+            </span>
+            <span>
+              {current.task.points} points{current.task.bonus ? ' · Optional bonus' : ''}
+            </span>
+          </div>
+          <h2 dir="auto">{guide?.title}</h2>
+          <p className="task-start">
+            <strong>Start here:</strong> {guide?.before}
           </p>
-          <h3>
-            Requirements · {current.task.points} points{current.task.bonus ? ' (optional)' : ''}
-          </h3>
-          <small>
-            Task credit: {state.passed ? current.task.points : 0} / {current.task.points}. Points
-            are awarded when all scored requirements pass; checklist items do not earn separate
-            points.
-          </small>
-          <ul className="requirement-list">
-            {state.requirements.map((c) => (
-              <li key={c.id} data-state={c.status}>
-                <span aria-hidden>
-                  {c.status === 'completed' ? '✓' : c.status === 'checking' ? '…' : '○'}
-                </span>
-                <span>
-                  {c.label}
-                  <small className="requirement-state">
-                    {labels[c.status]}
-                    {c.preparation ? ' · Preparation' : ''}
-                  </small>
-                  {c.status === 'incomplete' && c.detected && (
-                    <small className="requirement-state">
-                      Expected: {c.expected}. Detected: {c.detected}. {c.hint}
-                    </small>
-                  )}
-                </span>
+          <ol className="task-actions">
+            {guide?.steps.map((step) => (
+              <li key={step} dir="auto">
+                {step}
               </li>
             ))}
-          </ul>
-          <p className="task-progress">
-            {done} completed · {state.requirements.length - done} remaining
+          </ol>
+          {guide?.message && (
+            <div className="required-message">
+              <strong>Exact commit message</strong>
+              <code dir="ltr">{guide.message}</code>
+            </div>
+          )}
+          {guide?.warning && !state.passed && <p className="task-caution">{guide.warning}</p>}
+          <p className="expected-result">
+            <strong>You’re done when:</strong> {guide?.result}
           </p>
-          <div className="student-next">
-            <strong>Next step</strong>
-            <p>
-              {checking
-                ? 'Checking your latest changes…'
-                : state.passed
-                  ? 'This task is complete. Choose another task or continue to Questions.'
-                  : state.next}
-            </p>
-          </div>
           {current.task.rules
             .filter((r) => (r.type === 'file' && r.value) || (r.type === 'message' && r.value))
             .map((r, i) => (
@@ -159,11 +182,79 @@ export function TaskInstructions({
               <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
             </div>
           )}
+          <h3>Check your work</h3>
+          <small>
+            Earn all {current.task.points} points when every scored requirement passes. Checklist
+            items do not earn separate points.
+          </small>
+          <ol className="requirement-list">
+            {displayRequirements.map((c) => (
+              <li key={c.id} data-state={c.status}>
+                <span aria-hidden>
+                  {c.status === 'completed' ? '✓' : c.status === 'checking' ? '…' : '○'}
+                </span>
+                <span>
+                  {c.label}
+                  <small className="requirement-state">
+                    {labels[c.status]}
+                    {c.preparation ? ' · Preparation' : ''}
+                  </small>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="student-next" role="status">
+            <strong>
+              {state.passed
+                ? 'Ready for the next task'
+                : feedback?.history
+                  ? 'A mistake in the first commit'
+                  : 'What to do next'}
+            </strong>
+            <p>{checking ? 'Checking your latest changes…' : feedback?.text}</p>
+            {feedback?.history && recovery && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  const panel = document.getElementById('attempt-recovery');
+                  if (panel instanceof HTMLDetailsElement) {
+                    panel.open = true;
+                    panel.scrollIntoView({ block: 'nearest' });
+                    panel.querySelector('summary')?.focus();
+                  }
+                }}
+              >
+                See your recovery options
+              </button>
+            )}
+          </div>
+          <details className="check-evidence">
+            <summary>Technical check details</summary>
+            <p>
+              {done} completed · {state.requirements.length - done} remaining
+            </p>
+            {state.requirements.map((c) => (
+              <div key={c.id}>
+                <strong>{c.label}</strong>
+                <p>
+                  Expected: {c.expected || c.label}. Detected: {c.detected || labels[c.status]}.
+                </p>
+              </div>
+            ))}
+          </details>
           <details className="published-instructions">
             <summary>Full published instructions</summary>
-            <p className="written-answer">{current.task.instructions}</p>
+            <p className="written-answer" dir="auto">
+              {current.task.title}
+            </p>
+            <p className="written-answer" dir="auto">
+              {current.task.instructions}
+            </p>
+            {current.section.description && <p dir="auto">{current.section.description}</p>}
             {current.section.steps.map((step, i) => (
-              <p key={i}>{step}</p>
+              <p key={i} dir="auto">
+                {step}
+              </p>
             ))}
           </details>
           <div className="task-navigation">
@@ -186,6 +277,7 @@ export function TaskInstructions({
       ) : (
         <p>No practical tasks. Continue to Questions or Review.</p>
       )}
+      {recovery}
       <Link
         className={
           'primary continue-questions ' + (!complete && d.gateTheory ? 'disabled-link' : '')

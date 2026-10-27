@@ -5,7 +5,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: process.env.VITE_BASE_PATH || '/',
   define: { global: 'globalThis' },
-  test: { include: ['tests/{unit,integration}/**/*.test.ts'], environment: 'node' },
+  test: {
+    include: ['tests/{unit,integration}/**/*.test.ts'],
+    environment: 'node',
+    // Several suites boot a WASM PostgreSQL instance; bound concurrent startup and memory.
+    maxWorkers: 2,
+  },
   build: {
     rollupOptions: {
       output: {

@@ -106,7 +106,14 @@ export function AuthPage() {
         {register && (
           <label>
             Full name
-            <input name="full_name" autoComplete="name" required minLength={2} maxLength={120} />
+            <input
+              dir="auto"
+              name="full_name"
+              autoComplete="name"
+              required
+              minLength={2}
+              maxLength={120}
+            />
           </label>
         )}
         <label>
@@ -214,6 +221,7 @@ export function ProfilePage({
         <label>
           Full name
           <input
+            dir="auto"
             name="full_name"
             autoComplete="name"
             required

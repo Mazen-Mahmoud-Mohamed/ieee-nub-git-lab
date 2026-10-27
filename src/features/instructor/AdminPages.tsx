@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { requireBackend } from '../../services/supabase';
 import { FACULTIES, facultyLabel } from '../auth/faculty';
 import { adminRPC, adminError, resultsCSV, type Attempt, type Student } from './adminData';
@@ -69,9 +69,21 @@ export function Overview() {
   return (
     <section>
       <h2>Overview</h2>
-      <p>
-        Live account and assessment totals. Submitted totals include expired and graded attempts.
-      </p>
+      <div className="admin-shortcuts">
+        <Link className="primary" to="/instructor/submissions">
+          Review submissions
+        </Link>
+        <Link className="outline-button" to="/instructor/requests">
+          Review help requests
+        </Link>
+        <Link className="outline-button" to="/instructor/assessments/new">
+          Create an assessment
+        </Link>
+        <Link className="text-button" to="/learn">
+          Preview learning guide
+        </Link>
+      </div>
+      <p>Start with work that needs your attention.</p>
       {error && (
         <p role="alert" className="error">
           {error}
@@ -242,14 +254,15 @@ export function Attempts({
   results?: boolean;
   allAttempts?: boolean;
 }) {
-  const [search, setSearch] = useState(''),
+  const [routeParams] = useSearchParams();
+  const [search, setSearch] = useState(routeParams.get('search') || ''),
     [faculty, setFaculty] = useState(''),
     [type, setType] = useState(''),
     [assessment, setAssessment] = useState(''),
     [status, setStatus] = useState(''),
     [from, setFrom] = useState(''),
     [to, setTo] = useState(''),
-    [showOngoing, setShowOngoing] = useState(allAttempts),
+    [showOngoing, setShowOngoing] = useState(allAttempts || routeParams.get('ongoing') === '1'),
     [page, setPage] = useState(0),
     [refresh, setRefresh] = useState(0),
     [data, setData] = useState<{ rows: Attempt[]; total: number }>(),

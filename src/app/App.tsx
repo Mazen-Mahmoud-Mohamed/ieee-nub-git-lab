@@ -1,3 +1,4 @@
+import { LearningGuide } from '../features/assessments/LearningGuide';
 import { Component, useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -27,7 +28,7 @@ import { Workspace } from '../features/assignments/Workspace';
 import { ASSIGNMENT_ID } from '../features/assignments/assignment';
 import { outcomesFor } from '../features/assessments/model';
 import { useAssessmentRoute } from '../hooks/useAssessmentRoute';
-import { useAssessmentSession } from '../hooks/useAssessmentSession';
+import { useAssessmentSession, autosaveConsentKey } from '../hooks/useAssessmentSession';
 import { workspaceKey } from '../features/assessments/clock';
 import { CourseDashboard, AssessmentDetails } from '../features/assessments/CourseDashboard';
 import { SessionBar } from '../features/assessments/SessionBar';
@@ -149,7 +150,7 @@ export function App() {
   const working = lab.working;
   const outcomes = outcomesFor(course.definition, lab.view, identity, working);
   const unlocked = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
-  async function start() {
+  async function start(autosave = false) {
     if (!user) {
       if (location.pathname.startsWith('/assessments/')) {
         rememberDestination(location.pathname);
@@ -169,6 +170,7 @@ export function App() {
       setError(error.message);
       throw error;
     }
+    if (autosave) sessionStorage.setItem(autosaveConsentKey(data.id), 'enabled');
     navigate(
       '/assessments/' +
         course.assessmentId +
@@ -180,7 +182,14 @@ export function App() {
   }
   return (
     <ErrorBoundary>
-      <a className="skip-link" href="#main">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(e) => {
+          e.preventDefault();
+          document.getElementById('main')?.focus();
+        }}
+      >
         Skip to main content
       </a>
       <header className="app-header">
@@ -200,9 +209,9 @@ export function App() {
           </NavLink>
           {!course.active && !['/workspace', '/theory', '/review'].includes(location.pathname) && (
             <>
-              <NavLink to="/overview">
+              <NavLink to="/learn">
                 <BookOpen size={15} />
-                Practice guide
+                Learn Git
               </NavLink>
               <NavLink to="/workspace">
                 <TerminalSquare size={15} />
@@ -261,7 +270,7 @@ export function App() {
           <button onClick={() => setError('')}>Dismiss</button>
         </div>
       )}
-      <main id="main">
+      <main id="main" tabIndex={-1}>
         {!authReady ? (
           <div className="page">Checking your session…</div>
         ) : user &&
@@ -289,6 +298,7 @@ export function App() {
                 )
               }
             />
+            <Route path="/learn" element={<LearningGuide />} />
             <Route path="/dashboard" element={<CourseDashboard profile={profile} />} />
             <Route
               path="/overview"
@@ -396,8 +406,7 @@ export function App() {
                             definition={course.definition}
                             basePath={course.basePath}
                             onRestart={
-                              course.state.status === 'in_progress' &&
-                              course.definition.type === 'assignment'
+                              course.state.status === 'in_progress'
                                 ? async () => {
                                     const id = await session.restart();
                                     navigate(
@@ -507,8 +516,8 @@ function Landing({ onStart }: { onStart: () => void }) {
               Open the lab
               <ArrowUpRight size={18} />
             </button>
-            <Link to="/overview" className="outline-button">
-              Explore the assignment
+            <Link to="/learn" className="outline-button">
+              Learn the basics
               <ArrowRight size={16} />
             </Link>
           </div>

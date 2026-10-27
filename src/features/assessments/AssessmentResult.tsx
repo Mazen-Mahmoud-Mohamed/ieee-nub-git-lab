@@ -61,20 +61,21 @@ export function AssessmentResult({
         {result ? (
           <>
             <h3>
-              Score: {Number(result.practical_score) + Number(result.theory_score)} /{' '}
-              {points.practical + points.theory + points.bonus}
-              {points.bonus
-                ? ' maximum (' +
-                  (points.practical + points.theory) +
-                  ' mandatory + ' +
-                  points.bonus +
-                  ' optional bonus)'
-                : ''}
+              Official score: {Number(result.practical_score) + Number(result.theory_score)} /{' '}
+              {points.practical + points.theory}
             </h3>
+            {points.bonus > 0 && (
+              <p>
+                Up to {points.bonus} optional bonus points can raise this score above{' '}
+                {points.practical + points.theory}.
+              </p>
+            )}
             <p>
               Practical: {result.practical_score} · Theory: {result.theory_score}
             </p>
-            <p className="written-answer">{result.feedback || 'No additional feedback.'}</p>
+            <p className="written-answer" dir="auto">
+              {result.feedback || 'No additional feedback.'}
+            </p>
           </>
         ) : (
           <p>
@@ -93,8 +94,10 @@ export function AssessmentResult({
             <summary>Review your responses</summary>
             {definition.questions.map((q) => (
               <article key={q.id}>
-                <h4>{q.prompt}</h4>
-                <p className="written-answer">{lab.answers[q.id] || 'Unanswered'}</p>
+                <h4 dir="auto">{q.prompt}</h4>
+                <p className="written-answer" dir="auto">
+                  {lab.answers[q.id] || 'Unanswered'}
+                </p>
               </article>
             ))}
           </details>

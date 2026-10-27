@@ -11,10 +11,7 @@ export function SessionBar({
   if (state.status === 'restarted')
     return (
       <section className="session-bar" aria-label="Assessment session">
-        <p>
-          This previous attempt is read only after restart. Its deadline and saved evidence are
-          retained.
-        </p>
+        <p>This is your previous work. Open the new attempt to continue.</p>
       </section>
     );
   const seconds = Math.ceil(session.remaining / 1000);
@@ -72,14 +69,17 @@ export function SessionBar({
       {!session.consent && !session.finalized && state.status === 'in_progress' && (
         <div className="autosave-consent">
           <p>
-            Server autosave uploads this attempt’s virtual repository files, answers, and supporting
-            command activity every 15 seconds to{' '}
-            <strong>
-              {import.meta.env.VITE_SUPABASE_URL || 'the configured dedicated Supabase project'}
-            </strong>
-            . At expiry, the last accepted save is final. Offline changes arriving after the
-            deadline are not accepted.
+            Save your files, answers and command activity online every 15 seconds. At the deadline,
+            only your latest accepted online save is submitted.
           </p>
+          <details>
+            <summary>Where your work is saved</summary>
+            <p>
+              Online saves go to{' '}
+              {import.meta.env.VITE_SUPABASE_URL || 'the configured IEEE NUB Git Lab server'}.
+              Offline work stays on this device until accepted before the deadline.
+            </p>
+          </details>
           <button className="primary" onClick={session.enableAutosave}>
             Enable server autosave for this attempt
           </button>

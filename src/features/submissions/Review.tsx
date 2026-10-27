@@ -1,3 +1,4 @@
+import { taskGuide } from '../assessments/presentation';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ArrowRight, ShieldCheck, Download, AlertCircle } from 'lucide-react';
@@ -64,23 +65,29 @@ export function Review({
       <span className="eyebrow">{definition.type.toUpperCase()} / FINAL REVIEW</span>
       <h1>Review &amp; submit</h1>
       <p>
-        Review your work before submitting. Your repository is independently verified on the server;
-        written answers are reviewed by your instructor.
+        Check the tasks and answers below. Git work is checked automatically; written answers are
+        reviewed by your instructor.
       </p>
       <div className="form-card">
         <h3>Submission checklist</h3>
-        {outcomes.map((o) => (
-          <div key={o.id} className={'review-check ' + (o.passed ? 'passed' : '')}>
-            <CheckCircle2 size={18} />
-            <span>
-              {o.label}
-              {o.bonus ? ' (optional)' : ''}
-            </span>
-            <strong>
-              {o.passed ? o.points : 0}/{o.points}
-            </strong>
-          </div>
-        ))}
+        <details open={!complete}>
+          <summary>Task checklist</summary>
+          {outcomes.map((o) => (
+            <div key={o.id} className={'review-check ' + (o.passed ? 'passed' : '')}>
+              <CheckCircle2 size={18} />
+              <span>
+                {
+                  taskGuide(definition.sections.flatMap((s) => s.tasks).find((t) => t.id === o.id)!)
+                    .title
+                }
+                {o.bonus ? ' (optional)' : ''}
+              </span>
+              <strong>
+                {o.passed ? o.points : 0}/{o.points}
+              </strong>
+            </div>
+          ))}
+        </details>
         <hr />
         <div className="review-check">
           <ShieldCheck size={20} />
@@ -97,21 +104,22 @@ export function Review({
           </strong>
         </div>
         <p className="muted">
-          This is a preview, not a verified grade. Theory:{' '}
-          {questions.filter((q) => lab.answers[q.id]?.trim()).length}/{questions.length} answered ·
-          practical reflections:{' '}
+          Answered{' '}
           {
-            reflectionQuestions.filter((q) => q.required).filter((q) => lab.answers[q.id]?.trim())
+            definition.questions.filter((q) => q.required && answerPresent(q, lab.answers[q.id]))
               .length
-          }
-          /{reflectionQuestions.filter((q) => q.required).length}.
+          }{' '}
+          of {definition.questions.filter((q) => q.required).length} required questions. Written
+          answers are marked by your instructor; the final grade appears after release.
         </p>
         <details>
           <summary>Review your written responses</summary>
           {[...questions, ...reflectionQuestions].map((q) => (
             <article key={q.id}>
-              <h4>{q.prompt}</h4>
-              <p className="written-answer">{lab.answers[q.id] || 'Not answered'}</p>
+              <h4 dir="auto">{q.prompt}</h4>
+              <p className="written-answer" dir="auto">
+                {lab.answers[q.id] || 'Not answered'}
+              </p>
             </article>
           ))}
         </details>

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { RestartAttempt } from '../assessments/RestartAttempt';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
@@ -27,6 +28,7 @@ export function Workspace({
   basePath?: string;
   onRestart?: () => Promise<void>;
 }) {
+  const [routeParams] = useSearchParams();
   const [selected, setSelected] = useState('');
   const [text, setText] = useState('');
   const [history, setHistory] = useState(false);
@@ -45,11 +47,22 @@ export function Workspace({
   const [terminalHeight, setTerminalHeight] = useState(260);
   const [feedback, setFeedback] = useState('');
   const previous = useRef<{ key: string; done: Set<string> } | undefined>(undefined);
+  const lastReset = useRef({ key: lab.key, generation: lab.resetGeneration });
   useEffect(() => {
     draft.current = null;
     setSelected('');
     setText('');
-    setTaskId(definition.sections[0]?.tasks[0]?.id || '');
+    const focusKey = 'task-focus:' + lab.key;
+    const reset =
+      lastReset.current.key === lab.key && lastReset.current.generation !== lab.resetGeneration;
+    lastReset.current = { key: lab.key, generation: lab.resetGeneration };
+    if (reset) sessionStorage.removeItem(focusKey);
+    const wanted = reset ? null : routeParams.get('task') || sessionStorage.getItem(focusKey);
+    setTaskId(
+      definition.sections.flatMap((s) => s.tasks).some((t) => t.id === wanted)
+        ? wanted!
+        : definition.sections[0]?.tasks[0]?.id || '',
+    );
     previous.current = undefined;
     setFeedback('');
   }, [lab.key, lab.resetGeneration]);
@@ -153,13 +166,6 @@ export function Workspace({
           {lab.saving}
         </span>
       </header>
-      {(onRestart || (!basePath && !lab.readOnly)) && (
-        <RestartAttempt
-          practice={!basePath}
-          busy={lab.busy}
-          restart={onRestart || lab.restartPractice}
-        />
-      )}
       <div className="workspace-view-tabs" role="tablist" aria-label="Workspace views">
         <button
           role="tab"
@@ -336,11 +342,25 @@ export function Workspace({
           definition={definition}
           progress={progress}
           taskId={taskId}
-          onTask={setTaskId}
+          onTask={(id) => {
+            setTaskId(id);
+            sessionStorage.setItem('task-focus:' + lab.key, id);
+          }}
           identity={identity}
           checking={lab.busy}
           error={lab.validationError}
           basePath={basePath}
+          view={lab.view}
+          recovery={
+            onRestart || (!basePath && !lab.readOnly) ? (
+              <RestartAttempt
+                practice={!basePath}
+                busy={lab.busy}
+                restart={onRestart || lab.restartPractice}
+                attemptId={lab.attemptId}
+              />
+            ) : undefined
+          }
         />
       </div>
       {(lab.error || localError) && (
