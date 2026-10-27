@@ -46,6 +46,6 @@ Primary implementation files:
 
 ## Release status
 
-Implemented and verified locally. This feature has not been pushed or deployed, and its migration has not been applied to production. Production records remain untouched.
+Deployed and verified on 27 October 2026 from source `69605cfce9c313985fde456fc979891466b373f3`. The required migration was applied before the Edge Functions and frontend release. Both affected Edge Functions are ACTIVE at version 6, and the Pages pipeline completed successfully. Live synthetic-account tests verified recovery, limits, instructor approval, deadlines, exam restrictions, grading, persistence, actual submission and official-grade preservation. All pre-existing production row fingerprints matched before and after release/testing.
 
-A release must apply the migration before deploying the frontend; otherwise the assessed restart RPC will be unavailable. Redeploy both Edge Functions for the updated shared historical-recovery feedback. Do not reset old attempts, backfill grades, increase attempt limits or grant retakes globally. An assignment with no remaining attempt or approved retake will intentionally require instructor approval.
+See [production recovery deployment report](RECOVERY_DEPLOYMENT_REPORT.md) for the workflow links, production evidence, isolation/cleanup and resolved test infrastructure issues. An assignment with no remaining attempt or approved retake intentionally requires instructor approval; the release did not increase limits, grant retakes globally or backfill grades.
