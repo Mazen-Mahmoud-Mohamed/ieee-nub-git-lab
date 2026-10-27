@@ -91,6 +91,9 @@ beforeAll(async () => {
   await db.exec(
     readFileSync('supabase/migrations/20261027001000_review_checkpoint_context.sql', 'utf8'),
   );
+  await db.exec(
+    readFileSync('supabase/migrations/20261027140000_safe_attempt_restart.sql', 'utf8'),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -559,4 +562,197 @@ describe.sequential('instructor dashboard authorization and pagination', () => {
       ).rows[0].theory_score,
     ).toBe('4');
   });
+});
+
+describe.sequential('safe assignment restart policies', () => {
+  it('denies limit bypass atomically, then consumes exactly one instructor-approved retake and preserves evidence', async () => {
+    const id = await publish({ ...def(), title: 'Restart policy', attemptLimit: 1 });
+    const old = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0].result
+      .id;
+    await root(
+      `select public.accept_assessment_checkpoint('${A}','${old}',0,'{"snapshot":{"version":1,"entries":{}},"answers":{"q-written":"Previous answer"},"events":[]}','[]','[]',7,0,false,gen_random_uuid())`,
+    );
+    const checkpoint = (
+      await root(
+        `select to_jsonb(c) as value from private.verified_checkpoints c where attempt_id='${old}'`,
+      )
+    ).rows[0].value;
+    const before = (
+      await root(`select to_jsonb(a) as value from public.attempts a where id='${old}'`)
+    ).rows[0].value;
+    await expect(user(A, `select public.restart_assessment('${old}',1)`)).rejects.toThrow('limit');
+    expect(
+      (await root(`select to_jsonb(a) as value from public.attempts a where id='${old}'`)).rows[0]
+        .value,
+    ).toEqual(before);
+    await user(B, `select public.save_student_profile('Student B','01012345678','engineering')`);
+    await expect(user(B, `select public.restart_assessment('${old}',1)`)).rejects.toThrow(
+      'authorized',
+    );
+    await expect(user(A, `select public.approve_retake('${old}')`)).rejects.toThrow('Instructor');
+    await user(I, `select public.approve_retake('${old}')`);
+    await expect(user(A, `select public.restart_assessment('${old}',0)`)).rejects.toThrow(
+      'conflict',
+    );
+    const next = (await user(A, `select public.restart_assessment('${old}',1) as result`)).rows[0]
+      .result.id;
+    expect(next).not.toBe(old);
+    expect(
+      (await user(A, `select public.restart_assessment('${old}',1) as result`)).rows[0].result.id,
+    ).toBe(next);
+    expect(
+      (await root(`select count(*)::int as n from public.attempts where assignment_id='${id}'`))
+        .rows[0].n,
+    ).toBe(2);
+    expect(
+      (
+        await root(
+          `select retakes_remaining from public.student_enrollments where student_id='${A}' and assignment_id='${id}'`,
+        )
+      ).rows[0].retakes_remaining,
+    ).toBe(0);
+    expect(
+      (
+        await root(
+          `select to_jsonb(c) as value from private.verified_checkpoints c where attempt_id='${old}'`,
+        )
+      ).rows[0].value,
+    ).toEqual(checkpoint);
+    const archived = (await user(A, `select public.assessment_state('${old}') as result`)).rows[0]
+      .result;
+    expect(archived.status).toBe('restarted');
+    expect(archived.restarted_to).toBe(next);
+    expect(archived.payload.answers['q-written']).toBe('Previous answer');
+    const fresh = (await user(A, `select public.assessment_state('${next}') as result`)).rows[0]
+      .result;
+    expect(fresh.status).toBe('in_progress');
+    expect(fresh.checkpoint_revision).toBe(0);
+    expect(fresh.payload).toBeNull();
+    await expect(
+      root(
+        `select public.accept_assessment_checkpoint('${A}','${old}',1,'{}','[]','[]',0,0,false,gen_random_uuid())`,
+      ),
+    ).rejects.toThrow('finalized');
+    await expect(
+      user(I, `select public.instructor_save_grade_draft('${old}','[]','')`),
+    ).rejects.toThrow('cannot be graded');
+    await expect(
+      user(
+        I,
+        `select public.grade_assessment('${old}','[{"question_id":"q-written","points":1}]','',false)`,
+      ),
+    ).rejects.toThrow('read only');
+    expect(
+      (
+        await root(
+          `select count(*)::int as n from public.grading_results where attempt_id='${old}'`,
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await root(
+          `select count(*)::int as n from public.audit_logs where action='attempt.restarted' and target_id='${old}'`,
+        )
+      ).rows[0].n,
+    ).toBe(1);
+  });
+  it('retains submitted work and grades; blocks exams, expired attempts, unpublished assessments and closed windows', async () => {
+    const legacy = (
+      await root(`select to_jsonb(a) as value from public.attempts a where id='${LEGACY}'`)
+    ).rows[0].value;
+    await expect(user(A, `select public.restart_assessment('${LEGACY}',0)`)).rejects.toThrow(
+      'finalized',
+    );
+    expect(
+      (await root(`select to_jsonb(a) as value from public.attempts a where id='${LEGACY}'`))
+        .rows[0].value,
+    ).toEqual(legacy);
+    expect(
+      (
+        await root(
+          `select practical_score from public.grading_summaries where attempt_id='${LEGACY}'`,
+        )
+      ).rows[0].practical_score,
+    ).toBe('75');
+    const timed = await publish({ ...def('exam'), title: 'No timer bypass', attemptLimit: 3 });
+    const e = (await user(A, `select public.start_assessment('${timed}') as result`)).rows[0].result
+      .id;
+    await expect(user(A, `select public.restart_assessment('${e}',0)`)).rejects.toThrow('exams');
+    const id = await publish({ ...def(), title: 'Restart window', attemptLimit: 3 });
+    const old = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0].result
+      .id;
+    await root(
+      `update public.attempts set deadline_at=clock_timestamp()-interval '1 second' where id='${old}'`,
+    );
+    await expect(user(A, `select public.restart_assessment('${old}',0)`)).rejects.toThrow(
+      'Deadline',
+    );
+    await root(`update public.attempts set deadline_at=null where id='${old}'`);
+    await root(`update public.assignments set visible=false where id='${id}'`);
+    await expect(user(A, `select public.restart_assessment('${old}',0)`)).rejects.toThrow(
+      'published',
+    );
+    expect(
+      (await root(`select status from public.attempts where id='${old}'`)).rows[0].status,
+    ).toBe('in_progress');
+    await root(`update public.assignments set visible=true where id='${id}'`);
+    await publish(
+      {
+        ...def(),
+        title: 'Closed restart window',
+        attemptLimit: 3,
+        deadline: new Date(Date.now() - 1000).toISOString(),
+      },
+      id,
+    );
+    await expect(user(A, `select public.restart_assessment('${old}',0)`)).rejects.toThrow('closed');
+  });
+  it('uses distinct version-pinned attempt IDs and reads a restarted attempt without a checkpoint', async () => {
+    const initial = { ...def(), title: 'Version-pinned restart', attemptLimit: 2 };
+    const id = await publish(initial);
+    const old = (await user(A, `select public.start_assessment('${id}') as result`)).rows[0].result
+      .id;
+    const original = (
+      await root(
+        `select document from public.assessment_versions where assessment_id='${id}' and version=1`,
+      )
+    ).rows[0].document;
+    await publish({ ...initial, title: 'Version two' }, id);
+    const next = (await user(A, `select public.restart_assessment('${old}',0) as result`)).rows[0]
+      .result.id;
+    const state = (await user(A, `select public.assessment_state('${old}') as result`)).rows[0]
+      .result;
+    expect(state.payload).toBeNull();
+    expect(state.assignment_version).toBe(1);
+    expect(
+      (await user(A, `select public.assessment_state('${next}') as result`)).rows[0].result
+        .assignment_version,
+    ).toBe(2);
+    expect(
+      (
+        await root(
+          `select document from public.assessment_versions where assessment_id='${id}' and version=1`,
+        )
+      ).rows[0].document,
+    ).toEqual(original);
+    expect(
+      (
+        await user(
+          I,
+          `select public.instructor_attempts(p_assessment=>'${id}',p_submitted_only=>true) as result`,
+        )
+      ).rows[0].result.total,
+    ).toBe(0);
+  });
+});
+
+it('restart RPC is unavailable to anonymous users and does not grant students direct lifecycle updates', async () => {
+  await db.exec('reset role;set role anon');
+  await expect(db.query(`select public.restart_assessment('${LEGACY}',0)`)).rejects.toThrow(
+    'permission',
+  );
+  await expect(
+    user(A, `update public.attempts set status='in_progress' where id='${LEGACY}'`),
+  ).rejects.toThrow('permission');
 });

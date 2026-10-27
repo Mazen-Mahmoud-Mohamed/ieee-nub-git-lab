@@ -400,3 +400,37 @@ it('generic merge-commit rules preserve valid multi-parent merges', () => {
   };
   expect(outcomesFor(definitionWithMerge, view, identity)[0].passed).toBe(true);
 });
+
+it('a fresh course starter removes bad history without inheriting or weakening its grade', async () => {
+  const { createStarter } = await import('../../src/features/assessments/starter');
+  const previous = await prepare(true, 'Fix a big bug');
+  const original = previous.fs.snapshot();
+  const e = await createStarter(definition);
+  expect(passed(await previous.inspect(), 'separate')).toBe(false);
+  expect((await e.inspect()).commits).toHaveLength(0);
+  expect((await e.inspect()).initialized).toBe(false);
+  for (const command of [
+    'mkdir IEEE-Git-Task',
+    'cd IEEE-Git-Task',
+    'git init',
+    'git config user.name "Audit Student"',
+    'git config user.email audit@example.test',
+  ])
+    await run(e, command);
+  for (const [file, text] of Object.entries(texts)) await e.write(file, text);
+  await commit(e, 'about.txt', 'Add personal information');
+  await commit(e, 'goals.txt', 'Add learning goals');
+  await commit(e, 'notes.txt', 'Add session notes');
+  await finish(e);
+  expect(
+    (
+      await verifyAssessment(
+        definition,
+        { snapshot: e.fs.snapshot(), answers: {}, events: [] },
+        identity,
+        {},
+      )
+    ).practicalScore,
+  ).toBe(75);
+  expect(previous.fs.snapshot()).toEqual(original);
+});

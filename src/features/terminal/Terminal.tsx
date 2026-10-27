@@ -1,3 +1,5 @@
+import { introductoryCommitWarning } from './commitWarning';
+import { firstAssessment, type Definition } from '../assessments/model';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
@@ -54,11 +56,13 @@ export function Terminal({
   expanded,
   onExpand,
   feedback = '',
+  definition = firstAssessment,
 }: {
   lab: Lab;
   expanded: boolean;
   onExpand: () => void;
   feedback?: string;
+  definition?: Definition;
 }) {
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
@@ -70,6 +74,7 @@ export function Terminal({
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
   }, [lab.revision, cleared]);
   const events = lab.engine.events.slice(cleared);
+  const warning = introductoryCommitWarning(definition, lab.view);
   return (
     <section className="terminal">
       <div className="panel-heading terminal-tabs">
@@ -134,6 +139,11 @@ export function Terminal({
           <div className="terminal-task-feedback" role="status">
             {feedback}
           </div>
+        )}
+        {warning && (
+          <p className="notice" role="alert">
+            {warning}
+          </p>
         )}
         <form
           onSubmit={async (e) => {

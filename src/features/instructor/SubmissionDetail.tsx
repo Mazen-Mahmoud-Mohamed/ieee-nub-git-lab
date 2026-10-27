@@ -427,21 +427,21 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           <div className="review-actions">
             <button
               className="outline-button"
-              disabled={busy || loadError || status === 'in_progress'}
+              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
               onClick={() => void grade(false, true)}
             >
               Save draft grade
             </button>
             <button
               className="outline-button"
-              disabled={busy || loadError || status === 'in_progress'}
+              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
               onClick={() => void grade(false)}
             >
               Finalize grade privately
             </button>
             <button
               className="primary"
-              disabled={busy || loadError || status === 'in_progress'}
+              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
               onClick={() => void grade(true)}
             >
               Publish grade

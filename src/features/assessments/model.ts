@@ -93,6 +93,7 @@ export type AttemptState = {
   assignment_version: number;
   status: string;
   receipt: string | null;
+  restarted_to?: string | null;
   created_at: string;
   deadline_at: string | null;
   checkpoint_revision: number;

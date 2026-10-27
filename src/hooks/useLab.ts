@@ -34,6 +34,7 @@ export function useLab(
   enabled = true,
   migration?: { userId: string; attemptId: string },
 ) {
+  const [resetGeneration, setResetGeneration] = useState(0);
   const fallback = useRef(new GitEngine());
   const resource = useRef<Resource | null>(null);
   const epoch = useRef(0);
@@ -307,6 +308,27 @@ export function useLab(
       setServerRevisionState(0);
     });
   };
+  const restartPractice = async () => {
+    const r = context();
+    if (r.meta.attemptId || r.meta.receipt || r.locked || migration)
+      throw Error('Assessed attempts must restart through the server policy.');
+    await operate(async (current) => {
+      // Preserve the previous practice evidence before resetting its active key.
+      await current.saves.run(() =>
+        saveWorkspace(current.key + ':restart-backup:' + crypto.randomUUID(), saved(current)),
+      );
+      current.engine = await createStarter(definition);
+      current.meta = { answers: {}, flagged: [], serverRevision: 0 };
+      setAnswersState({});
+      setFlaggedState([]);
+      setAttemptIdState(undefined);
+      setReceiptState(undefined);
+      setServerRevisionState(0);
+      setError('');
+      setValidationError('');
+      setResetGeneration((x) => x + 1);
+    });
+  };
   const setAnswers = (value: SetStateAction<Record<string, string>>) => {
     const r = resource.current;
     if (!r || !active(r) || r.locked || r.meta.receipt) return;
@@ -381,6 +403,8 @@ export function useLab(
     snapshot: () => saved(context()),
     capture,
     newAttempt,
+    restartPractice,
+    resetGeneration,
     restore,
     persist,
   };

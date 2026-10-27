@@ -28,7 +28,13 @@ async function fixture(
   page: Page,
   instructor = false,
   examSeconds = 120,
-  options: { newUser?: boolean; cancel?: boolean; invalidCode?: boolean } = {},
+  options: {
+    newUser?: boolean;
+    cancel?: boolean;
+    invalidCode?: boolean;
+    restartDenied?: boolean;
+    restartLostReply?: boolean;
+  } = {},
 ) {
   page.on('dialog', (dialog) => void dialog.accept());
   const definitions: Record<string, Definition> = {
@@ -50,6 +56,7 @@ async function fixture(
   const saved: Record<string, any>[] = [];
   const requests: string[] = [];
   let uploads = 0;
+  let restartReplyLost = false;
   let profileExists = !options.newUser;
   const authCalls: Array<{ path: string; body: any; query: string }> = [];
   let profileFaculty = 'engineering';
@@ -251,6 +258,35 @@ async function fixture(
         attempts[id] = attempt;
       }
       response = { id: attempt.id };
+    } else if (path.endsWith('/rpc/restart_assessment')) {
+      if (options.restartDenied) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'P0001', message: 'Attempt limit reached' }),
+        });
+        return;
+      }
+      const previous = attempts[body.p_attempt];
+      if (!previous.restarted_to) {
+        const id = crypto.randomUUID();
+        attempts[id] = {
+          ...previous,
+          id,
+          status: 'in_progress',
+          checkpoint_revision: 0,
+          payload: undefined,
+          receipt: null,
+        };
+        previous.status = 'restarted';
+        previous.restarted_to = id;
+      }
+      response = { id: previous.restarted_to };
+      if (options.restartLostReply && !restartReplyLost) {
+        restartReplyLost = true;
+        await route.abort('failed');
+        return;
+      }
     } else if (path.endsWith('/rpc/assessment_state')) {
       const a = attempts[body.p_attempt];
       if (a.deadline_at && Date.parse(a.deadline_at) <= Date.now() && a.status === 'in_progress') {
@@ -896,4 +932,86 @@ test('a definite rejected submission can be corrected and retried with fresh ans
     page.getByRole('heading', { name: 'Submission received', exact: true }),
   ).toBeVisible();
   expect(submitted.answers.q1).toBe('Corrected response after rejection');
+});
+
+test('assessed restart changes attempt keys, clears answers and keeps previous work read only', async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  await api.login();
+  await api.start(A);
+  const old = Object.values(api.attempts)[0].id;
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.getByLabel('Your response').fill('Previous attempt explanation');
+  await page.getByRole('link', { name: 'Workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'a.txt', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text file editor' }).fill('Accepted old work');
+  await page.getByRole('button', { name: 'Enable server autosave for this attempt' }).click();
+  await page.getByRole('button', { name: 'Save now', exact: true }).click();
+  await expect(page.getByText('Server autosave accepted', { exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Text file editor' }).fill('Old attempt local edit');
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('instructor’s attempt limits');
+  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page).not.toHaveURL(new RegExp(old));
+  const next = api.attempts[old].restarted_to!;
+  await expect(page).toHaveURL(new RegExp(next));
+  await expect(
+    page.getByRole('button', { name: 'Enable server autosave for this attempt' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'a.txt', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
+    'Only Assignment A',
+  );
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await expect(page.getByLabel('Your response')).toHaveValue('');
+  await page.reload();
+  await expect(page.getByLabel('Your response')).toHaveValue('');
+  await page.goto(`/ieee-git-lab/#/assessments/${A}/attempts/${old}/workspace`);
+  await expect(page.getByLabel('Terminal command')).toBeDisabled();
+  await page.getByRole('button', { name: 'a.txt M', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
+    'Old attempt local edit',
+  );
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await expect(page.getByLabel('Your response')).toHaveValue('Previous attempt explanation');
+  await expect(page.getByLabel('Your response')).toHaveJSProperty('readOnly', true);
+  expect(api.uploads()).toBe(1);
+});
+
+test('denied restart keeps progress and exams expose no restart option', async ({ page }) => {
+  const api = await fixture(page, false, 120, { restartDenied: true });
+  await api.login();
+  await api.start(A);
+  const old = Object.values(api.attempts)[0].id;
+  await page.getByRole('button', { name: 'a.txt', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text file editor' }).fill('Keep this work');
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('Attempt limit reached');
+  await expect(page).toHaveURL(new RegExp(old));
+  await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
+    'Keep this work',
+  );
+  expect(Object.values(api.attempts)).toHaveLength(1);
+  await api.start(E);
+  await expect(page.getByRole('button', { name: 'Restart Attempt', exact: true })).toHaveCount(0);
+});
+
+test('lost restart response locks old work and retry recovers the same new attempt', async ({
+  page,
+}) => {
+  const api = await fixture(page, false, 120, { restartLostReply: true });
+  await api.login();
+  await api.start(A);
+  const old = Object.values(api.attempts)[0].id;
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page.getByRole('alertdialog').getByRole('alert')).toBeVisible();
+  await expect(page.getByLabel('Terminal command')).toBeDisabled();
+  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(api.attempts[old].restarted_to!));
+  await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  expect(Object.values(api.attempts)).toHaveLength(2);
 });

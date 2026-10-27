@@ -279,3 +279,69 @@ test('same-size editor changes can be staged and committed again', async ({ page
     'other version',
   );
 });
+
+test('restart practice confirms losses, preserves a recovery copy and restores a fresh state after reload', async ({
+  page,
+}) => {
+  await page.goto('/#/workspace');
+  const command = async (value: string) => {
+    const input = page.getByLabel('Terminal command');
+    await expect(input).toBeEnabled();
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toBeEnabled();
+  };
+  for (const value of [
+    'mkdir IEEE-Git-Task',
+    'cd IEEE-Git-Task',
+    'git init',
+    'git config user.name "Recovery Student"',
+    'git config user.email recovery@example.test',
+    'touch about.txt',
+    'touch goals.txt',
+    'git add .',
+  ])
+    await command(value);
+  await expect(page.getByRole('alert').filter({ hasText: 'History warning:' })).toBeVisible();
+  await command('git commit -m "Combined introductory files"');
+  await expect(page.getByRole('log')).toContainText('Combined introductory files');
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('written answers');
+  await page.screenshot({ path: 'test-results/restart-confirmation-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: 'test-results/restart-confirmation-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await expect(dialog).toContainText(
+    'Assessed attempts, submissions and official grades are unchanged',
+  );
+  await page.getByRole('button', { name: 'Keep current work', exact: true }).click();
+  await command('git log --oneline');
+  await expect(page.getByRole('log')).toContainText('Combined introductory files');
+  await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
+  await expect(page.getByText('Practice restarted.', { exact: false })).toBeVisible();
+  await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
+  await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
+  const recovery = await page.evaluate(async () => {
+    const open = indexedDB.open('ieee-nub-git-lab');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    const tx = db.transaction('workspaces', 'readonly');
+    const store = tx.objectStore('workspaces');
+    const request = store.getAllKeys();
+    const keys = await new Promise<IDBValidKey[]>((resolve) => {
+      request.onsuccess = () => resolve(request.result);
+    });
+    return keys.map(String).filter((k) => k.includes(':restart-backup:'));
+  });
+  expect(recovery).toHaveLength(1);
+  await page.reload();
+  await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
+  await command('ls');
+  await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
+});

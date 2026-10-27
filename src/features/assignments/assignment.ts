@@ -737,7 +737,7 @@ function legacyEvaluation(
       hint: c.passed
         ? c.hint
         : birth || (!file && (about || goals || notes))
-          ? 'A later commit cannot change an original introduction. Ask your instructor about an approved history correction or a fresh attempt before rewriting history.'
+          ? 'A later commit cannot change an original introduction or split its files into separate commits. Use Restart Attempt for a fresh repository if your instructor’s attempt policy permits it; otherwise request an approved retake.'
           : c.hint,
     };
   });

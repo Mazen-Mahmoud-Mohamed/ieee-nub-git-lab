@@ -3845,3 +3845,19 @@ td small {
   margin: 0;
   height: 18px;
 }
+
+/* Recovery is explicit and separate from Git commands and scored requirements. */
+.attempt-recovery {
+  padding: 8px 18px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+}
+.attempt-recovery > button {
+  font-size: 12px;
+}
+.attempt-recovery .form-card {
+  margin: 8px 0;
+  max-width: 860px;
+  max-height: min(65dvh, 500px);
+  overflow: auto;
+}

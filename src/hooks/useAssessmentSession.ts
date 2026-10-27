@@ -46,6 +46,9 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
       if (!live || activeAttempt.current !== state.id) return;
       if (
         state.payload &&
+        // The closed attempt's local key retains edits that were never uploaded.
+        // A new device still restores the last accepted server checkpoint.
+        !(state.status === 'restarted' && current.attemptId === state.id) &&
         (state.status !== 'in_progress' || current.serverRevision !== state.checkpoint_revision)
       )
         await current.restore(
@@ -82,6 +85,11 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     if (activeAttempt.current !== state.id) return;
     if (error) throw error;
     clock.current = new ServerClock(data.server_now, data.deadline_at, performance.now());
+    if (data.status !== 'in_progress') {
+      latest.current.setLocked(true);
+      stopping.current = true;
+    }
+    if (data.status === 'restarted') setSync('Attempt restarted · reopen it from My learning');
     if (data.receipt) {
       if (!latest.current.receipt && data.payload)
         await latest.current.restore(
@@ -103,7 +111,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     return data as AttemptState;
   };
   useEffect(() => {
-    if (!state || !initialized) return;
+    if (!state || !initialized || state.status !== 'in_progress') return;
     let fetching = false;
     const tick = () => {
       const ms = clock.current?.remaining(performance.now()) ?? Infinity;
@@ -136,6 +144,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
   }, [state?.id, initialized]);
   const send = async (finalize = false): Promise<string | undefined> => {
     if (!state || !initialized || conflict) throw new Error('Assessment session is not ready');
+    if (stopping.current && !finalize) throw new Error('Attempt is closing.');
     if (!finalize && !consent)
       throw new Error('Enable the disclosed autosave control before uploading work');
     while (saving.current) await saving.current;
@@ -264,7 +273,59 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
       window.removeEventListener('online', reconnect);
     };
   }, [state?.id, initialized, consent]);
+  const restart = async () => {
+    if (!state || !initialized || state.definition.type !== 'assignment')
+      throw Error('This attempt cannot be restarted.');
+    stopping.current = true;
+    const current = latest.current;
+    current.setLocked(true);
+    let definiteRejection = false;
+    try {
+      while (saving.current) await saving.current;
+      if (activeAttempt.current !== state.id) throw Error('Assessment changed.');
+      await current.persist();
+      const { data, error } = await requireBackend().rpc('restart_assessment', {
+        p_attempt: state.id,
+        p_revision: revision.current,
+      });
+      if (error) {
+        // An explicit database rejection rolls back the restart transaction.
+        if (error.code && !['', 'NETWORK_ERROR'].includes(error.code)) {
+          definiteRejection = true;
+          if (error.message.includes('conflict')) setConflict(true);
+          const authoritative = await refresh();
+          if (
+            !conflict &&
+            !error.message.includes('conflict') &&
+            authoritative?.status === 'in_progress' &&
+            (!authoritative.deadline_at ||
+              Date.parse(authoritative.deadline_at) > Date.parse(authoritative.server_now))
+          ) {
+            stopping.current = false;
+            current.setLocked(false);
+          }
+        }
+        throw Error(
+          error.message +
+            ' If the attempt limit is reached, ask your instructor to approve a retake.',
+        );
+      }
+      if (activeAttempt.current !== state.id) throw Error('Assessment changed.');
+      return data.id as string;
+    } catch (e) {
+      // Ambiguous transport failures keep this workspace locked. Retrying the
+      // same old attempt is idempotent on the server and recovers the new ID.
+      if (activeAttempt.current === state.id && !definiteRejection)
+        setError(
+          'Restart outcome is not confirmed. Use Restart Attempt again to recover its result before continuing.',
+        );
+      throw e instanceof Error
+        ? e
+        : Error('Restart could not be confirmed. Retry to recover its outcome.');
+    }
+  };
   return {
+    restart,
     remaining,
     sync,
     error,

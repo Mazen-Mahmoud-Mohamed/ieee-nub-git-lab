@@ -180,6 +180,27 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                           {attempt.feedback}
                         </p>
                       )}
+                      {attempts.filter((t) => t.assignment_id === a.id).length > 1 && (
+                        <details>
+                          <summary>Previous attempts</summary>
+                          <ul>
+                            {attempts
+                              .filter((t) => t.assignment_id === a.id && t.id !== attempt?.id)
+                              .map((t) => (
+                                <li key={t.id}>
+                                  <Link
+                                    to={`/assessments/${a.id}/attempts/${t.id}/${t.status === 'restarted' ? 'workspace' : 'result'}`}
+                                  >
+                                    {t.status === 'restarted'
+                                      ? 'Previous work (restarted)'
+                                      : t.status.replaceAll('_', ' ')}{' '}
+                                    · {t.id.slice(0, 8)}
+                                  </Link>
+                                </li>
+                              ))}
+                          </ul>
+                        </details>
+                      )}
                       <div className="assessment-card-actions">
                         <Link to={`/assessments/${a.id}`} className="text-button">
                           Details

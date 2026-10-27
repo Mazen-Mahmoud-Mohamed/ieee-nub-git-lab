@@ -1,3 +1,4 @@
+import { RestartAttempt } from '../assessments/RestartAttempt';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -17,12 +18,14 @@ export function Workspace({
   dark,
   definition = firstAssessment,
   basePath = '',
+  onRestart,
 }: {
   lab: Lab;
   identity: StudentIdentity;
   dark: boolean;
   definition?: Definition;
   basePath?: string;
+  onRestart?: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState('');
   const [text, setText] = useState('');
@@ -49,7 +52,7 @@ export function Workspace({
     setTaskId(definition.sections[0]?.tasks[0]?.id || '');
     previous.current = undefined;
     setFeedback('');
-  }, [lab.key]);
+  }, [lab.key, lab.resetGeneration]);
   const progress = useMemo(
     () =>
       requirementProgress(
@@ -150,6 +153,13 @@ export function Workspace({
           {lab.saving}
         </span>
       </header>
+      {(onRestart || (!basePath && !lab.readOnly)) && (
+        <RestartAttempt
+          practice={!basePath}
+          busy={lab.busy}
+          restart={onRestart || lab.restartPractice}
+        />
+      )}
       <div className="workspace-view-tabs" role="tablist" aria-label="Workspace views">
         <button
           role="tab"
@@ -314,7 +324,9 @@ export function Workspace({
             />
           </label>
           <Terminal
+            key={`${lab.key}:${lab.resetGeneration}`}
             lab={lab}
+            definition={definition}
             feedback={previous.current?.key === lab.key ? feedback : ''}
             expanded={expanded}
             onExpand={() => setExpanded(!expanded)}

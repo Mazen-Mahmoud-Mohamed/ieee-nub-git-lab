@@ -8,6 +8,15 @@ export function SessionBar({
   state: AttemptState | null;
 }) {
   if (!state) return null;
+  if (state.status === 'restarted')
+    return (
+      <section className="session-bar" aria-label="Assessment session">
+        <p>
+          This previous attempt is read only after restart. Its deadline and saved evidence are
+          retained.
+        </p>
+      </section>
+    );
   const seconds = Math.ceil(session.remaining / 1000);
   const timed = state.deadline_at !== null;
   const warning = timed && seconds <= 300 && !session.finalized;

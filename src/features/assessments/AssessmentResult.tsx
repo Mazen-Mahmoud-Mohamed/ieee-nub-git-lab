@@ -43,7 +43,9 @@ export function AssessmentResult({
             ? 'Submission received'
             : state.status === 'in_progress'
               ? 'Still in progress'
-              : 'Finalizing'}
+              : state.status === 'restarted'
+                ? 'Previous attempt retained after restart'
+                : 'Finalizing'}
         </h2>
         {(state.auto_submitted || state.status === 'expired') && (
           <p>
@@ -75,7 +77,11 @@ export function AssessmentResult({
             <p className="written-answer">{result.feedback || 'No additional feedback.'}</p>
           </>
         ) : (
-          <p>Results are pending instructor review or release.</p>
+          <p>
+            {state.status === 'restarted'
+              ? 'This attempt was not submitted for grading. Its previous work is retained; open the new attempt to continue.'
+              : 'Results are pending instructor review or release.'}
+          </p>
         )}
         {error && (
           <p className="error" role="alert">

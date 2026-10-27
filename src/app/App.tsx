@@ -373,6 +373,18 @@ export function App() {
                 ) : (
                   <>
                     <SessionBar session={session} state={course.state} />
+                    {course.state.restarted_to && (
+                      <div className="notice" role="status">
+                        This attempt was restarted. Its previous work is read only; no submission or
+                        grade was created.
+                        <Link
+                          to={`/assessments/${course.assessmentId}/attempts/${course.state.restarted_to}/workspace`}
+                        >
+                          Open the new attempt
+                        </Link>
+                      </div>
+                    )}
+
                     <Routes>
                       <Route
                         path="workspace"
@@ -383,6 +395,17 @@ export function App() {
                             dark={dark}
                             definition={course.definition}
                             basePath={course.basePath}
+                            onRestart={
+                              course.state.status === 'in_progress' &&
+                              course.definition.type === 'assignment'
+                                ? async () => {
+                                    const id = await session.restart();
+                                    navigate(
+                                      `/assessments/${course.assessmentId}/attempts/${id}/workspace`,
+                                    );
+                                  }
+                                : undefined
+                            }
                           />
                         }
                       />
