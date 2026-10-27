@@ -198,21 +198,18 @@ export function App() {
             <LayoutDashboard size={15} />
             My learning
           </NavLink>
-          <NavLink to={course.active ? course.detailsPath : '/overview'}>
-            <BookOpen size={15} />
-            {course.active ? 'Instructions' : 'Practice guide'}
-          </NavLink>
-          <NavLink
-            to={
-              course.active
-                ? course.basePath +
-                  (course.definition.format === 'theory' ? '/theory' : '/workspace')
-                : '/workspace'
-            }
-          >
-            <TerminalSquare size={15} />
-            {course.active ? 'Assessment' : 'Practice lab'}
-          </NavLink>
+          {!course.active && !['/workspace', '/theory', '/review'].includes(location.pathname) && (
+            <>
+              <NavLink to="/overview">
+                <BookOpen size={15} />
+                Practice guide
+              </NavLink>
+              <NavLink to="/workspace">
+                <TerminalSquare size={15} />
+                Practice lab
+              </NavLink>
+            </>
+          )}
           {isInstructor && <NavLink to="/instructor">Admin Dashboard</NavLink>}
         </nav>
         <div className="header-actions">
