@@ -1,3 +1,4 @@
+import { gitHistory } from './gitHistory.ts';
 import type { RepoView } from '../git-engine/engine.ts';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS.ts';
 import {
@@ -392,29 +393,12 @@ export function outcomesFor(
     return legacyResults.get(revision)!;
   };
   const commits = new Map(view.commits.map((c) => [c.oid, c]));
-  const ancestors = (ref: string) => {
-    const seen = new Set<string>();
-    const visit = (id: string) => {
-      if (seen.has(id)) return;
-      seen.add(id);
-      commits.get(id)?.parents.forEach(visit);
-    };
-    visit(view.branches[ref] || '');
-    return [...seen].map((id) => commits.get(id)).filter((c) => !!c);
-  };
+  const history = gitHistory(view.commits);
+  const ancestors = (ref: string) => history.ancestors(view.branches[ref] || '');
   const files = (ref = 'main') =>
     ref === 'working' ? working : commits.get(view.branches[ref])?.files || {};
   const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
-  const reaches = (start: string, target: string): boolean => {
-    const visited = new Set<string>();
-    const visit = (oid: string): boolean => {
-      if (oid === target) return true;
-      if (visited.has(oid)) return false;
-      visited.add(oid);
-      return commits.get(oid)?.parents.some(visit) || false;
-    };
-    return visit(start);
-  };
+  const reaches = history.reaches;
   const passes = (r: Rule): boolean => {
     switch (r.type) {
       case 'legacy':
@@ -455,17 +439,20 @@ export function outcomesFor(
             line.some(
               (c) =>
                 c.parents.length > 1 &&
-                c.parents.some((p) => reaches(p, source)) &&
-                c.parents.some((p) => !reaches(p, source)),
+                c.parents.some(
+                  (p) =>
+                    reaches(p, source) &&
+                    c.parents.some(
+                      (other) => !reaches(other, source) && history.diverged(p, other),
+                    ),
+                ),
             ))
         );
       }
-      case 'isolation':
-        return ancestors(r.source || '').some(
-          (c) =>
-            r.path! in c.files &&
-            c.parents.some((p) => !(r.path! in (commits.get(p)?.files || {}))),
-        );
+      case 'isolation': {
+        const birth = history.introduction(view.branches[r.source || ''] || '', r.path!);
+        return !!birth && birth.parents.length > 0;
+      }
     }
   };
   return taskList(d).map((t) => ({
@@ -495,32 +482,11 @@ export function outcomesFor(
           case 'isolation':
             return `Check that ${r.path} was introduced in a new commit on ${r.source}.`;
           case 'legacy':
-            if (r.revision === 2)
-              return (
-                legacyRequirementChecks(view, identity, working, 2)[r.outcomeId || '']?.find(
-                  (c) => c.passed !== true,
-                )?.hint || 'Compare the saved repository with this task’s requirements.'
-              );
             return (
-              (
-                {
-                  repo: 'Check your Git name and email, and the main branch.',
-                  files:
-                    'Compare the committed about.txt, goals.txt and notes.txt with the required file contents.',
-                  separate:
-                    'Each starting file needs its own focused commit in the required order. Check commit messages and file history.',
-                  goals:
-                    'The original three goals must remain, followed by two new goals in a later meaningful commit.',
-                  feature:
-                    'Check the committed skills.txt on feature/skills for all three required skills.',
-                  isolation: 'Check that skills.txt first appears after the feature branch point.',
-                  merged: 'Check that main includes the feature branch history and skills.txt.',
-                  clean: 'Finish on main with no staged or unstaged changes.',
-                  bonus:
-                    'Check the separate hobbies and completion histories and their final merge commit.',
-                } as Record<string, string>
-              )[r.outcomeId || ''] ||
-              'Compare your repository history with this task’s requirements.'
+              legacyRequirementChecks(view, identity, working, r.revision || 1)[
+                r.outcomeId || ''
+              ]?.find((c) => c.passed !== true)?.hint ||
+              'Compare the saved repository with the requirements for this task.'
             );
         }
       }),

@@ -1,4 +1,5 @@
 import type { RepoView, CommitView } from '../git-engine/engine.ts';
+import { gitHistory } from '../assessments/gitHistory.ts';
 export const ASSIGNMENT_ID = 'b6f4b6d0-5fe2-4e4d-b9a5-000000000001';
 export const assignment = {
   id: ASSIGNMENT_ID,
@@ -125,6 +126,8 @@ export type RequirementCheck = {
   passed: boolean | null;
   hint: string;
   preparation?: boolean;
+  expected?: string;
+  detected?: string;
 };
 function legacyEvaluation(
   view: RepoView,
@@ -133,38 +136,24 @@ function legacyEvaluation(
   revision: 1 | 2 = 1,
 ): { outcomes: Outcome[]; requirements: Record<string, RequirementCheck[]> } {
   const commits = view.commits;
-  const byId = new Map(commits.map((c) => [c.oid, c]));
-  const ancestors = (oid: string): CommitView[] => {
-    const seen = new Set<string>();
-    const result: CommitView[] = [];
-    const visit = (id: string) => {
-      if (seen.has(id)) return;
-      seen.add(id);
-      const c = byId.get(id);
-      if (!c) return;
-      result.push(c);
-      c.parents.forEach(visit);
-    };
-    visit(oid);
-    return result;
-  };
+  const {
+    byId,
+    ancestors,
+    before,
+    introduction,
+    changedPaths,
+    focused: separate,
+    diverged,
+  } = gitHistory(commits);
   const main = byId.get(view.branches.main);
   const feature = byId.get(view.branches['feature/skills']);
   const lineage = ancestors(view.branches.main || '');
-  const intro = (file: string) =>
-    commits.find(
-      (c) => file in c.files && c.parents.every((p) => !(file in (byId.get(p)?.files || {}))),
-    );
+  const intro = (file: string) => introduction(view.branches.main || '', file);
   const about = intro('about.txt'),
     goals = intro('goals.txt'),
     notes = intro('notes.txt');
   const meaningful = (c: CommitView) =>
     c.message.trim().length >= 8 && c.message.trim().split(/\s+/).length >= 2;
-  const separate = (c: CommitView | undefined, file: string) =>
-    !!c &&
-    Object.keys(c.files).filter((p) => c.files[p] !== (byId.get(c.parents[0])?.files || {})[p])
-      .length === 1 &&
-    file in c.files;
   const aboutOK = (text: string | undefined) => {
     const lines = (text || '').split('\n').map(norm);
     return (
@@ -188,24 +177,35 @@ function legacyEvaluation(
     includes(text, ['Git Course - Session 1', 'IEEE NUB Student Branch']);
   const skillsOK = (text: string | undefined) =>
     includes(text, ['Problem Solving', 'Communication', 'Teamwork']);
+  const skillsBirth = introduction(feature?.oid || '', 'skills.txt');
   const featureIntroduction =
-    feature &&
-    ancestors(feature.oid).find(
-      (c) =>
-        skillsOK(c.files['skills.txt']) && c.parents.some((p) => !byId.get(p)?.files['skills.txt']),
-    );
+    skillsBirth && skillsOK(skillsBirth.files['skills.txt']) ? skillsBirth : undefined;
   const bonusMerge = lineage.find(
     (c) =>
       c.parents.length === 2 &&
-      c.parents.some((p) =>
-        includes(byId.get(p)?.files['notes.txt'], ['Assignment 1 completed.']),
-      ) &&
+      diverged(c.parents[0], c.parents[1]) &&
       c.parents.some(
-        (p) =>
-          (byId.get(p)?.files['hobbies.txt'] || '').split('\n').filter((x) => x.trim()).length >= 3,
+        (p, i) =>
+          includes(byId.get(p)?.files['notes.txt'], ['Assignment 1 completed.']) &&
+          !includes(byId.get(c.parents[1 - i])?.files['notes.txt'], ['Assignment 1 completed.']) &&
+          !byId.get(p)?.files['hobbies.txt'] &&
+          (byId.get(c.parents[1 - i])?.files['hobbies.txt'] || '')
+            .split('\n')
+            .filter((x) => x.trim()).length >= 3,
       ) &&
-      c.files['hobbies.txt'] &&
+      (c.files['hobbies.txt'] || '').split('\n').filter((x) => x.trim()).length >= 3 &&
       includes(c.files['notes.txt'], ['Assignment 1 completed.']),
+  );
+  const expandedGoals = lineage.some(
+    (c) =>
+      c.oid !== goals?.oid &&
+      !!notes &&
+      before(notes.oid, c.oid) &&
+      c.files['goals.txt'] !== byId.get(c.parents[0])?.files['goals.txt'] &&
+      goalsOK(c.files['goals.txt']) &&
+      (c.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s)).length >=
+        5 &&
+      meaningful(c),
   );
   const outcomes: Outcome[] = [
     {
@@ -241,9 +241,10 @@ function legacyEvaluation(
         separate(notes, 'notes.txt') &&
         notesOK(notes?.files['notes.txt']) &&
         !!goals &&
-        ancestors(goals.oid).some((c) => c.oid === about?.oid) &&
+        !!about &&
+        before(about.oid, goals.oid) &&
         !!notes &&
-        ancestors(notes.oid).some((c) => c.oid === goals.oid),
+        before(goals.oid, notes.oid),
     },
     {
       id: 'goals',
@@ -254,16 +255,7 @@ function legacyEvaluation(
         !!goals &&
         (goals.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s))
           .length === 3 &&
-        lineage.some(
-          (c) =>
-            c.oid !== goals.oid &&
-            ancestors(c.oid).some((a) => a.oid === notes?.oid) &&
-            c.files['goals.txt'] !== byId.get(c.parents[0])?.files['goals.txt'] &&
-            goalsOK(c.files['goals.txt']) &&
-            (c.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s))
-              .length >= 5 &&
-            meaningful(c),
-        ) &&
+        expandedGoals &&
         [about, goals, notes].every((c) => !!c && meaningful(c)),
     },
     {
@@ -356,16 +348,6 @@ function legacyEvaluation(
       ),
     );
   }
-  const expandedGoals = lineage.some(
-    (c) =>
-      c.oid !== goals?.oid &&
-      ancestors(c.oid).some((a) => a.oid === notes?.oid) &&
-      c.files['goals.txt'] !== byId.get(c.parents[0])?.files['goals.txt'] &&
-      goalsOK(c.files['goals.txt']) &&
-      (c.files['goals.txt'] || '').split('\n').filter((s) => /^\s*\d+[.)]\s*\S/.test(s)).length >=
-        5 &&
-      meaningful(c),
-  );
   const requirements: Record<string, RequirementCheck[]> = {
     repo: [
       check(
@@ -427,8 +409,8 @@ function legacyEvaluation(
         !!about &&
           !!goals &&
           !!notes &&
-          ancestors(goals.oid).some((c) => c.oid === about.oid) &&
-          ancestors(notes.oid).some((c) => c.oid === goals.oid),
+          before(about.oid, goals.oid) &&
+          before(goals.oid, notes.oid),
         'Check the order of the three introductory commits.',
       ),
     ],
@@ -577,14 +559,13 @@ function legacyEvaluation(
           .map((line) => line.replace(/\s*:\s*/g, ': '))
           .join('\n'),
       );
-    const introductions = (file: string) =>
-      lineage.filter(
-        (c) => file in c.files && c.parents.every((p) => !(file in (byId.get(p)?.files || {}))),
-      );
-    const validIntro = (file: string, valid: (text: string | undefined) => boolean) =>
-      introductions(file).find((c) => separate(c, file) && valid(c.files[file]) && descriptive(c));
+    const validIntro = (file: string, valid: (text: string | undefined) => boolean) => {
+      const c = intro(file);
+      return c && separate(c, file) && valid(c.files[file]) && descriptive(c) ? c : undefined;
+    };
     const firstAbout = validIntro('about.txt', personal);
-    const firstGoals = validIntro('goals.txt', goalsOK);
+    const firstGoals = intro('goals.txt');
+    const focusedGoals = validIntro('goals.txt', goalsOK);
     const firstNotes = validIntro('notes.txt', notesOK);
     const goalLines = (text = '') => [
       ...new Set(
@@ -595,7 +576,7 @@ function legacyEvaluation(
       ),
     ];
     const updated = (text: string | undefined) => {
-      if (!firstGoals || !goalsOK(text)) return false;
+      if (!firstGoals || !goalsOK(firstGoals.files['goals.txt']) || !goalsOK(text)) return false;
       const original = goalLines(firstGoals.files['goals.txt']);
       const next = goalLines(text);
       return (
@@ -607,7 +588,7 @@ function legacyEvaluation(
       firstGoals &&
       lineage.find(
         (c) =>
-          ancestors(c.oid).some((parent) => parent.oid === firstGoals.oid) &&
+          before(firstGoals.oid, c.oid) &&
           c.parents.some(
             (p) =>
               !!byId.get(p)?.files['goals.txt'] &&
@@ -635,8 +616,8 @@ function legacyEvaluation(
     passed(
       'separate',
       !!firstAbout &&
-        norm(firstAbout.message) === norm('Add personal information') &&
-        !!firstGoals &&
+        firstAbout.message === 'Add personal information' &&
+        !!focusedGoals &&
         !!firstNotes,
     );
     passed('goals', !!updateCommit);
@@ -683,13 +664,13 @@ function legacyEvaluation(
       check(
         'message',
         'Personal information commit uses the requested message',
-        !!firstAbout && norm(firstAbout.message) === norm('Add personal information'),
+        about?.message === 'Add personal information',
         'Use the published personal-information message.',
       ),
       check(
         'goals',
         'goals.txt has its own committed introduction',
-        !!firstGoals,
+        !!focusedGoals,
         'Commit the initial goals as one focused change with a descriptive message.',
       ),
       check(
@@ -731,6 +712,61 @@ function legacyEvaluation(
         'Commit the goals update on main, or merge the committed update into main. Use a message of at least two words. A clean tree after committing is expected.',
       ),
     ];
+  }
+  requirements.separate = requirements.separate.map((c) => {
+    const file =
+      c.id.startsWith('about') || ['message', 'personal-message'].includes(c.id)
+        ? 'about.txt'
+        : c.id.startsWith('goals')
+          ? 'goals.txt'
+          : c.id.startsWith('notes')
+            ? 'notes.txt'
+            : undefined;
+    const birth = file ? intro(file) : undefined;
+    const detected = file
+      ? birth
+        ? `${file}: first introduced in ${birth.oid.slice(0, 7)}; changed paths: ${changedPaths(birth).join(', ')}; message: ${birth.message}`
+        : `${file}: no unique introductory commit reachable from main.`
+      : [about, goals, notes].map((commit) => commit?.oid.slice(0, 7) || 'missing').join(' → ');
+    return {
+      ...c,
+      expected: ['message', 'personal-message'].includes(c.id)
+        ? 'Exact introductory commit message: Add personal information'
+        : c.label,
+      detected,
+      hint: c.passed
+        ? c.hint
+        : birth || (!file && (about || goals || notes))
+          ? 'A later commit cannot change an original introduction. Ask your instructor about an approved history correction or a fresh attempt before rewriting history.'
+          : c.hint,
+    };
+  });
+  const evidence: Record<string, string> = {
+    repo: `Repository initialized: ${view.initialized}; active branch: ${view.branch || 'none'}; main commit: ${main?.oid.slice(0, 7) || 'none'}; name configured: ${!!view.config['user.name']?.trim()}; valid email: ${/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(view.config['user.email'] || '')}.`,
+    files: `Committed main files: ${Object.keys(main?.files || {}).join(', ') || 'none'}. Required content is checked against your profile and the published text.`,
+    goals: `Main has ${lineage.length} commits; first goals commit: ${goals?.oid.slice(0, 7) || 'none'}; original nonempty lines: ${(goals?.files['goals.txt'] || '').split('\n').filter((line) => line.trim()).length}.`,
+    feature: `feature/skills tip: ${feature?.oid.slice(0, 7) || 'none'}; required skills at tip: ${skillsOK(feature?.files['skills.txt'])}; valid first skills introduction: ${featureIntroduction?.oid.slice(0, 7) || 'none'}.`,
+    isolation: `First skills introduction: ${skillsBirth?.oid.slice(0, 7) || 'none'}; parent commits: ${skillsBirth?.parents.map((p) => p.slice(0, 7)).join(', ') || 'none'}; message: ${skillsBirth?.message || 'none'}.`,
+    merged: `Feature tip reachable from main: ${!!feature && lineage.some((c) => c.oid === feature.oid)}; required skills on main: ${skillsOK(main?.files['skills.txt'])}.`,
+    clean: `Active branch: ${view.branch || 'none'}; unsaved paths: ${
+      view.status
+        .filter(([, h, w, i]) => h !== w || h !== i)
+        .map(([file]) => file)
+        .join(', ') || 'none'
+    }.`,
+    bonus: `feature/hobbies tip: ${view.branches['feature/hobbies']?.slice(0, 7) || 'none'}; qualifying divergent merge: ${bonusMerge?.oid.slice(0, 7) || 'none'}.`,
+  };
+  for (const [id, checks] of Object.entries(requirements)) {
+    if (id === 'separate') continue;
+    requirements[id] = checks.map((c) => ({
+      ...c,
+      expected: c.label,
+      detected: evidence[id],
+      hint:
+        !c.passed && ['original-goals', 'meaningful-intros'].includes(c.id) && goals
+          ? 'Later edits do not alter the original commit. Ask your instructor about an approved history correction or a fresh attempt.'
+          : c.hint,
+    }));
   }
   return { outcomes, requirements };
 }

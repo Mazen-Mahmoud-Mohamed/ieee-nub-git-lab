@@ -197,7 +197,9 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'incomplete');
   await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
   await expect(
-    page.getByText('The published scored check needs the first commit on main.', { exact: false }),
+    page
+      .locator('.student-next')
+      .getByText('The published scored check needs the first commit on main.', { exact: false }),
   ).toBeVisible();
   await command('nano about.txt');
   await expect(page.getByRole('log')).toContainText(

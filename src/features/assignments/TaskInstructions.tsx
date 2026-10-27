@@ -93,6 +93,11 @@ export function TaskInstructions({
           <h3>
             Requirements · {current.task.points} points{current.task.bonus ? ' (optional)' : ''}
           </h3>
+          <small>
+            Task credit: {state.passed ? current.task.points : 0} / {current.task.points}. Points
+            are awarded when all scored requirements pass; checklist items do not earn separate
+            points.
+          </small>
           <ul className="requirement-list">
             {state.requirements.map((c) => (
               <li key={c.id} data-state={c.status}>
@@ -105,6 +110,11 @@ export function TaskInstructions({
                     {labels[c.status]}
                     {c.preparation ? ' · Preparation' : ''}
                   </small>
+                  {c.status === 'incomplete' && c.detected && (
+                    <small className="requirement-state">
+                      Expected: {c.expected}. Detected: {c.detected}. {c.hint}
+                    </small>
+                  )}
                 </span>
               </li>
             ))}
