@@ -35,3 +35,7 @@ See [Google/provider configuration and hosted acceptance](GOOGLE_AUTH_AND_PROFIL
 - The browser-started exam retained its immutable server deadline through refresh, accepted an actual Edge autosave, was abandoned before expiry, and was later found expired by a direct server read before reopening the app. Its saved answer was read only when reopened.
 - Synthetic confirmed Auth users are labeled staging fixtures. Passwords and tokens were generated/kept in process memory; no test credentials were committed. Test instructor membership was revoked after each acceptance run. Test assessment definitions are archived after verification, with submissions, grades and snapshots preserved.
 - The designated real instructor remains pending confirmed registration; email/password signup delivery, password recovery, full Google consent and existing-account provider linking are not claimed as verified. The staging site is not production-ready and no student invitations were sent.
+
+## 27 October follow-up
+
+The designated owner's email-confirmed Google account is now registered and explicitly provisioned through the existing instructor membership table. The completed admin dashboard and its deployed real integration checks are recorded in [the instructor report](INSTRUCTOR_DASHBOARD_REPORT.md). Earlier pending-account statements above describe the initial deployment snapshot.
