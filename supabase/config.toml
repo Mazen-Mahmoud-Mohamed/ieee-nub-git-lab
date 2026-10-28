@@ -20,3 +20,6 @@ import_map = "./functions/submit-attempt/import_map.json"
 [functions.assessment-attempt]
 verify_jwt = true
 import_map = "./functions/submit-attempt/import_map.json"
+[functions.learning-material]
+verify_jwt = true
+import_map = "./functions/submit-attempt/import_map.json"

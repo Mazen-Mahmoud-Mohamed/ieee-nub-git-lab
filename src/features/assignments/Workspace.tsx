@@ -1,8 +1,8 @@
+import { WorkspaceProgress } from './WorkspaceProgress';
 import { useSearchParams } from 'react-router-dom';
 import { RestartAttempt } from '../assessments/RestartAttempt';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties } from 'react';
+const DesktopTextEditor = lazy(() => import('./DesktopTextEditor'));
 import { Plus, Check } from 'lucide-react';
 import type { StudentIdentity } from './assignment';
 import { firstAssessment, type Definition } from '../assessments/model';
@@ -32,7 +32,24 @@ export function Workspace({
   const [selected, setSelected] = useState('');
   const [text, setText] = useState('');
   const [history, setHistory] = useState(false);
-  const [mobile, setMobile] = useState('workspace');
+  const [mobile, setMobile] = useState(
+    () => sessionStorage.getItem('workspace-view:' + lab.key) || 'task',
+  );
+  const [smallScreen, setSmallScreen] = useState(
+    () => window.matchMedia('(max-width: 900px)').matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const changed = () => setSmallScreen(media.matches);
+    media.addEventListener('change', changed);
+    return () => media.removeEventListener('change', changed);
+  }, []);
+  const switchView = (view: string) => {
+    setMobile(view);
+    sessionStorage.setItem('workspace-view:' + lab.key, view);
+  };
+  const [fileSave, setFileSave] = useState('');
+  const pendingFiles = useRef<Record<string, string>>({});
   const [taskId, setTaskId] = useState(definition.sections[0]?.tasks[0]?.id || '');
   const [expanded, setExpanded] = useState(false);
   const [newFile, setNewFile] = useState(false);
@@ -50,13 +67,32 @@ export function Workspace({
   const lastReset = useRef({ key: lab.key, generation: lab.resetGeneration });
   useEffect(() => {
     draft.current = null;
+    setMobile(sessionStorage.getItem('workspace-view:' + lab.key) || 'task');
+    try {
+      pendingFiles.current = JSON.parse(sessionStorage.getItem('file-drafts:' + lab.key) || '{}');
+    } catch {
+      pendingFiles.current = {};
+    }
     setSelected('');
     setText('');
     const focusKey = 'task-focus:' + lab.key;
     const reset =
       lastReset.current.key === lab.key && lastReset.current.generation !== lab.resetGeneration;
     lastReset.current = { key: lab.key, generation: lab.resetGeneration };
-    if (reset) sessionStorage.removeItem(focusKey);
+    if (reset) {
+      sessionStorage.removeItem(focusKey);
+      sessionStorage.removeItem('file-drafts:' + lab.key);
+      pendingFiles.current = {};
+    }
+    const lastFile = sessionStorage.getItem('selected-file:' + lab.key);
+    if (!reset && lastFile) {
+      setSelected(lastFile);
+      setText(
+        pendingFiles.current[lastFile] ??
+          lab.working[lastFile.slice(lab.engine.dir.length + 1)] ??
+          '',
+      );
+    }
     const wanted = reset ? null : routeParams.get('task') || sessionStorage.getItem(focusKey);
     setTaskId(
       definition.sections.flatMap((s) => s.tasks).some((t) => t.id === wanted)
@@ -115,16 +151,19 @@ export function Workspace({
     previous.current = { key: lab.key, done };
   }, [lab.key, lab.ready, lab.busy, lab.revision, progress]);
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || !lab.ready) return;
     if (!files.includes(selected)) {
       setSelected('');
       setText('');
       draft.current = null;
       return;
     }
-    if (draft.current?.path === selected) return;
+    if (draft.current?.path === selected || selected in pendingFiles.current) {
+      if (selected in pendingFiles.current) setText(pendingFiles.current[selected]);
+      return;
+    }
     setText(lab.working[selected.slice(lab.engine.dir.length + 1)] || '');
-  }, [selected, lab.revision, lab.key]);
+  }, [selected, lab.revision, lab.key, lab.ready]);
   const previousFiles = useRef<{ key: string; files: Set<string> } | undefined>(undefined);
   useEffect(() => {
     const before = previousFiles.current;
@@ -138,6 +177,51 @@ export function Workspace({
     }
     previousFiles.current = { key: lab.key, files: now };
   }, [lab.key, lab.revision]);
+  const editText = (value: string) => {
+    const path = selected,
+      key = lab.key;
+    setText(value);
+    pendingFiles.current[path] = value;
+    try {
+      sessionStorage.setItem('file-drafts:' + key, JSON.stringify(pendingFiles.current));
+    } catch {
+      setLocalError(
+        'Draft recovery storage is unavailable. Save and export your work before leaving.',
+      );
+    }
+    const version = ++editVersion.current;
+    draft.current = { path, version };
+    setFileSave('Saving file…');
+    void lab
+      .write(path, value)
+      .then(() => {
+        if (currentKey.current !== key || draft.current?.version !== version) return;
+        // The header reports actual IndexedDB persistence; retain a recovery draft until then.
+        setFileSave('');
+        draft.current = null;
+      })
+      .catch((e) => {
+        if (currentKey.current === key) {
+          setFileSave('File save failed · draft retained');
+          setLocalError(String(e));
+        }
+      });
+  };
+  useEffect(() => {
+    if (lab.saving !== 'Saved on this device' || lab.busy) return;
+    let changed = false;
+    for (const [path, value] of Object.entries(pendingFiles.current))
+      if (lab.working[path.slice(lab.engine.dir.length + 1)] === value) {
+        delete pendingFiles.current[path];
+        changed = true;
+      }
+    if (changed)
+      try {
+        sessionStorage.setItem('file-drafts:' + lab.key, JSON.stringify(pendingFiles.current));
+      } catch {
+        /* The persisted repository is already safe. */
+      }
+  }, [lab.saving, lab.busy, lab.revision, lab.key]);
   if (!lab.ready)
     return (
       <p className="page" role="status">
@@ -146,7 +230,9 @@ export function Workspace({
     );
   const open = (path: string) => {
     draft.current = null;
-    setText(lab.working[path.slice(lab.engine.dir.length + 1)] || '');
+    setFileSave('');
+    setText(pendingFiles.current[path] ?? lab.working[path.slice(lab.engine.dir.length + 1)] ?? '');
+    sessionStorage.setItem('selected-file:' + lab.key, path);
     focusEditor.current = selected !== path;
     setSelected(path);
   };
@@ -165,157 +251,205 @@ export function Workspace({
         <span className="save-state" role="status">
           {lab.saving}
         </span>
+        <WorkspaceProgress
+          definition={definition}
+          progress={progress}
+          taskId={taskId}
+          status={
+            lab.receipt
+              ? 'Submitted'
+              : lab.readOnly
+                ? 'Read only'
+                : basePath
+                  ? 'In progress'
+                  : 'Local practice'
+          }
+          error={lab.validationError}
+        />
       </header>
       <div className="workspace-view-tabs" role="tablist" aria-label="Workspace views">
-        <button
-          role="tab"
-          aria-selected={mobile === 'workspace'}
-          onClick={() => setMobile('workspace')}
-        >
-          Workspace
-        </button>
-        <button role="tab" aria-selected={mobile === 'tasks'} onClick={() => setMobile('tasks')}>
-          Tasks
-        </button>
+        {(['task', 'terminal', 'files'] as const).map((view, i) => (
+          <button
+            key={view}
+            id={'workspace-tab-' + view}
+            role="tab"
+            aria-selected={mobile === view}
+            aria-controls={'workspace-' + view}
+            tabIndex={mobile === view ? 0 : -1}
+            onClick={() => switchView(view)}
+            onKeyDown={(e) => {
+              if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+                const views = ['task', 'terminal', 'files'];
+                const next =
+                  e.key === 'Home'
+                    ? 0
+                    : e.key === 'End'
+                      ? 2
+                      : (i + (e.key === 'ArrowRight' ? 1 : 2)) % 3;
+                switchView(views[next]);
+                document.getElementById('workspace-tab-' + views[next])?.focus();
+              }
+            }}
+          >
+            {view === 'task' ? 'Task' : view === 'terminal' ? 'Terminal' : 'Files'}
+          </button>
+        ))}
       </div>
       <div className="student-workspace-grid">
         <section className="student-workarea" aria-label="Work area">
-          <div className="compact-files">
-            <strong>Files</strong>
-            <div className="compact-file-list">
-              {files.map((path) => {
-                const name = path.slice(lab.engine.dir.length + 1),
-                  row = lab.view.status.find(([file]) => file === name),
-                  code = !row
-                    ? ''
-                    : row[1] === 0 && row[3] === 0
-                      ? 'U'
-                      : row[1] === row[2] && row[1] === row[3]
-                        ? ''
-                        : row[1] === 0
-                          ? 'A'
-                          : 'M';
-                return (
-                  <button
-                    key={path}
-                    className={selected === path ? 'selected' : ''}
-                    onClick={() => open(path)}
-                  >
-                    {name}
-                    {code && (
-                      <small
-                        title={
-                          row && row[3] !== row[1] && row[3] === row[2]
-                            ? 'Staged change'
-                            : code === 'U'
-                              ? 'Untracked file'
-                              : 'Modified file'
-                        }
-                      >
-                        {' '}
-                        {code}
-                      </small>
-                    )}
-                  </button>
-                );
-              })}
-              {!files.length && <span>No text files yet.</span>}
-            </div>
-            <button
-              className="text-button"
-              aria-label="Create text file"
-              disabled={lab.readOnly}
-              onClick={() => setNewFile(!newFile)}
-            >
-              <Plus size={16} />
-            </button>
-            <button
-              className="text-button"
-              aria-expanded={history}
-              onClick={() => setHistory(!history)}
-            >
-              View Git History
-            </button>
-          </div>
-          {newFile && (
-            <form
-              className="new-file"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const key = lab.key,
-                    path = lab.engine.dir + '/' + filename;
-                  await lab.createTextFile(filename);
-                  if (currentKey.current !== key) return;
-                  setText('');
-                  focusEditor.current = true;
-                  setSelected(path);
-                  setNewFile(false);
-                  setFilename('');
-                  setLocalError('');
-                } catch (e) {
-                  setLocalError(String(e));
-                }
-              }}
-            >
-              <input
-                aria-label="New file name"
-                placeholder="filename.txt"
-                required
-                value={filename}
-                onChange={(e) => setFilename(e.target.value)}
-              />
-              <button aria-label="Confirm new file">
-                <Check size={15} />
+          <div
+            className="workspace-files-panel"
+            id="workspace-files"
+            role="tabpanel"
+            aria-labelledby="workspace-tab-files"
+          >
+            <div className="compact-files">
+              <strong>Files</strong>
+              <div className="compact-file-list">
+                {files.map((path) => {
+                  const name = path.slice(lab.engine.dir.length + 1),
+                    row = lab.view.status.find(([file]) => file === name),
+                    code = !row
+                      ? ''
+                      : row[1] === 0 && row[3] === 0
+                        ? 'U'
+                        : row[1] === row[2] && row[1] === row[3]
+                          ? ''
+                          : row[1] === 0
+                            ? 'A'
+                            : 'M';
+                  return (
+                    <button
+                      key={path}
+                      className={selected === path ? 'selected' : ''}
+                      onClick={() => open(path)}
+                    >
+                      {name}
+                      {code && (
+                        <small
+                          title={
+                            row && row[3] !== row[1] && row[3] === row[2]
+                              ? 'Staged change'
+                              : code === 'U'
+                                ? 'Untracked file'
+                                : 'Modified file'
+                          }
+                        >
+                          {' '}
+                          {code}
+                        </small>
+                      )}
+                    </button>
+                  );
+                })}
+                {!files.length && <span>No text files yet.</span>}
+              </div>
+              <button
+                className="text-button"
+                aria-label="Create text file"
+                disabled={lab.readOnly}
+                onClick={() => setNewFile(!newFile)}
+              >
+                <Plus size={16} />
               </button>
-            </form>
-          )}
-          {history && (
-            <div className="optional-history">
-              <button className="text-button" onClick={() => setHistory(false)}>
-                Close history
+              <button
+                className="text-button"
+                aria-expanded={history}
+                onClick={() => setHistory(!history)}
+              >
+                View Git History
               </button>
-              <GitGraph view={lab.view} />
             </div>
-          )}
-          <div className="student-editor">
-            <div className="student-editor-label">
-              {selected ? selected.split('/').pop() : 'Text editor'}
-              <small>Edit file text here · saves automatically</small>
-            </div>
-            {selected ? (
-              <CodeMirror
-                key={lab.key + ':' + selected}
-                onCreateEditor={(view) => {
-                  view.contentDOM.setAttribute('aria-label', 'Text file editor');
-                  if (focusEditor.current) {
-                    view.focus();
-                    focusEditor.current = false;
+            {newFile && (
+              <form
+                className="new-file"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const key = lab.key,
+                      path = lab.engine.dir + '/' + filename;
+                    await lab.createTextFile(filename);
+                    if (currentKey.current !== key) return;
+                    setText('');
+                    focusEditor.current = true;
+                    setSelected(path);
+                    setNewFile(false);
+                    setFilename('');
+                    setLocalError('');
+                  } catch (e) {
+                    setLocalError(String(e));
                   }
                 }}
-                aria-label="Text file editor"
-                value={text}
-                height="100%"
-                theme={dark ? oneDark : 'light'}
-                readOnly={lab.readOnly}
-                basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
-                onChange={(value) => {
-                  setText(value);
-                  const version = ++editVersion.current;
-                  draft.current = { path: selected, version };
-                  void lab
-                    .write(selected, value)
-                    .catch(() => {})
-                    .finally(() => {
-                      if (draft.current?.version === version) draft.current = null;
-                    });
-                }}
-              />
-            ) : (
-              <p className="editor-empty">
-                Choose a file above to edit its text. Use the terminal below for Git commands.
-              </p>
+              >
+                <input
+                  aria-label="New file name"
+                  placeholder="filename.txt"
+                  required
+                  value={filename}
+                  onChange={(e) => setFilename(e.target.value)}
+                />
+                <button aria-label="Confirm new file">
+                  <Check size={15} />
+                </button>
+              </form>
             )}
+            {history && (
+              <div className="optional-history">
+                <button className="text-button" onClick={() => setHistory(false)}>
+                  Close history
+                </button>
+                <GitGraph view={lab.view} />
+              </div>
+            )}
+            <div className="student-editor">
+              <div className="student-editor-label">
+                {selected ? selected.split('/').pop() : 'Text editor'}
+                <small role="status">
+                  {fileSave ||
+                    (lab.saving === 'Saved on this device' ? 'File saved locally' : lab.saving)}
+                </small>
+              </div>
+              {selected ? (
+                <>
+                  {smallScreen ? (
+                    <textarea
+                      aria-label="Text file editor"
+                      className="mobile-text-editor"
+                      dir="ltr"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      value={text}
+                      readOnly={lab.readOnly}
+                      onChange={(e) => editText(e.target.value)}
+                    />
+                  ) : (
+                    <Suspense fallback={<p role="status">Loading text editor…</p>}>
+                      <DesktopTextEditor
+                        key={lab.key + ':' + selected}
+                        value={text}
+                        dark={dark}
+                        readOnly={lab.readOnly}
+                        focus={focusEditor.current}
+                        onChange={editText}
+                      />
+                    </Suspense>
+                  )}
+                  <button
+                    className="outline-button file-save-button"
+                    disabled={lab.readOnly || lab.busy}
+                    onClick={() => editText(text)}
+                  >
+                    Save file
+                  </button>
+                </>
+              ) : (
+                <p className="editor-empty">
+                  Choose a file above to edit its text. Use the Terminal tab for Git commands.
+                </p>
+              )}
+            </div>
           </div>
           <label className="terminal-resize">
             Terminal size

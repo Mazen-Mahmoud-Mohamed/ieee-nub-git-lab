@@ -51,14 +51,14 @@ test('unsupported commands fail, and blank theory cannot be submitted', async ({
 test('mobile instructions remain usable and 404 helps students return', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/workspace');
-  await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
+  await page.getByRole('tab', { name: 'Task', exact: true }).click();
   await expect(
     page.getByRole('heading', {
       name: 'Set up your project',
       exact: true,
     }),
   ).toBeVisible();
-  await page.getByRole('tab', { name: 'Workspace', exact: true }).click();
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
   await expect(page.getByLabel('Terminal command')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.goto('/#/missing');
@@ -190,10 +190,10 @@ test('reported sequence shows individual checks, editor progress, dirty state an
     'Valid Git email configured',
   ])
     await expect(req(label)).toHaveAttribute('data-state', 'completed');
-  await page.getByLabel('Task', { exact: true }).selectOption('files');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
   for (const file of ['about.txt', 'goals.txt', 'notes.txt'])
     await expect(req(file + ' created in this project')).toHaveAttribute('data-state', 'completed');
-  await page.getByLabel('Task', { exact: true }).selectOption('repo');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('repo');
   await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'incomplete');
   await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
   await expect(
@@ -210,7 +210,7 @@ test('reported sequence shows individual checks, editor progress, dirty state an
     'goals.txt': 'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects',
     'notes.txt': 'Git Course - Session 1\nIEEE NUB Student Branch',
   };
-  await page.getByLabel('Task', { exact: true }).selectOption('files');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
   for (const [file, value] of Object.entries(texts)) {
     await page
       .getByRole('button', { name: new RegExp('^' + file.replace('.', '\\.') + '(?: U| M)?$') })
@@ -223,7 +223,7 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   }
   await command('git add about.txt');
   await command('git commit -m "Add personal information"');
-  await page.getByLabel('Task', { exact: true }).selectOption('repo');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('repo');
   await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'completed');
   await expect(page.getByText('1 / 8 scored tasks')).toBeVisible();
   await page.getByRole('button', { name: /^about\.txt(?: U| M)?$/ }).click();
@@ -234,7 +234,7 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   await page.reload();
   await expect(input).toBeEnabled();
   await expect(req('Git username configured')).toHaveAttribute('data-state', 'completed');
-  await page.getByLabel('Task', { exact: true }).selectOption('files');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
   await expect(req('about.txt created in this project')).toHaveAttribute('data-state', 'completed');
   await page.getByRole('button', { name: 'about.txt M', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
@@ -342,12 +342,12 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
     return keys.map(String).filter((k) => k.includes(':restart-backup:'));
   });
   expect(recovery).toHaveLength(1);
-  await page.getByLabel('Task', { exact: true }).selectOption('goals');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('goals');
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('goals');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
   await page.reload();
-  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('goals');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
   await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
   await command('ls');
   await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
@@ -360,14 +360,14 @@ test('learning guide leads to focused tasks, exact requirements and keyboard rec
   await expect(page.getByRole('heading', { name: 'Git, one step at a time' })).toBeVisible();
   await expect(page.locator('.lesson-grid article')).toHaveCount(6);
   await page.getByRole('link', { name: 'Try it in the practice lab', exact: true }).click();
-  await page.getByLabel('Task', { exact: true }).selectOption('separate');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
   await expect(page.getByText('Exact commit message', { exact: true })).toBeVisible();
   await expect(page.locator('.required-message code')).toHaveText('Add personal information');
   await expect(page.locator('.task-caution')).toContainText('New commits cannot split');
   await expect(page.locator('.check-evidence')).not.toHaveAttribute('open', '');
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('separate');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('separate');
   await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Start over?', exact: true })).toBeFocused();
@@ -379,7 +379,7 @@ test('learning guide leads to focused tasks, exact requirements and keyboard rec
   });
   await page.screenshot({ path: 'test-results/redesigned-workspace-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
+  await page.getByRole('tab', { name: 'Task', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'test-results/redesigned-workspace-mobile.png', fullPage: true });
 });

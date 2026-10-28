@@ -16,7 +16,7 @@ export function safeReturnPath(value: unknown): string {
   )
     return '/dashboard';
   if (
-    !/^\/(?:dashboard|profile|overview|workspace|theory|review|confirmation|assessments|instructor)(?:[/?#]|$)/.test(
+    !/^\/(?:dashboard|profile|overview|workspace|theory|review|confirmation|assessments|instructor|learn)(?:[/?#]|$)/.test(
       decoded,
     )
   )

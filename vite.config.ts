@@ -14,10 +14,17 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          editor: ['@uiw/react-codemirror', '@codemirror/theme-one-dark'],
-          git: ['isomorphic-git'],
-          supabase: ['@supabase/supabase-js'],
+        onlyExplicitManualChunks: true,
+        manualChunks(id) {
+          const path = id.replaceAll('\\', '/');
+          if (
+            path.includes('commonjsHelpers') ||
+            /\/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(path)
+          )
+            return 'react';
+          if (/\/node_modules\/(@codemirror|@lezer|@uiw)\//.test(path)) return 'editor';
+          if (path.includes('/node_modules/isomorphic-git/')) return 'git';
+          if (path.includes('/node_modules/@supabase/')) return 'supabase';
         },
       },
     },

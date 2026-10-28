@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { taskGuide, taskFeedback } from '../assessments/presentation';
 import type { RepoView } from '../git-engine/engine';
 import { Link } from 'react-router-dom';
-import { totals, type Definition } from '../assessments/model';
+import { type Definition } from '../assessments/model';
 import type { TaskProgress } from '../assessments/requirements';
 import type { StudentIdentity } from './assignment';
 export function TaskInstructions({
@@ -36,9 +36,6 @@ export function TaskInstructions({
     current = tasks[index],
     state = progress.find((p) => p.task.id === current?.task.id),
     required = progress.filter((p) => !p.task.bonus),
-    points = totals(d),
-    earned = required.filter((p) => p.passed).reduce((n, p) => n + p.task.points, 0),
-    bonus = progress.filter((p) => p.task.bonus && p.passed).reduce((n, p) => n + p.task.points, 0),
     complete = required.every((p) => p.passed),
     done = state?.requirements.filter((c) => c.status === 'completed').length || 0,
     guide = current ? taskGuide(current.task) : null,
@@ -82,7 +79,13 @@ export function TaskInstructions({
     unverifiable: 'Unable to verify',
   };
   return (
-    <aside className="student-task" aria-label="Task Instructions">
+    <aside
+      className="student-task"
+      id="workspace-task"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-task"
+      aria-label="Task Instructions"
+    >
       <div className="task-picker">
         <label>
           Task
@@ -104,25 +107,10 @@ export function TaskInstructions({
           {index + 1} / {tasks.length} · {current?.section.title}
         </small>
       </div>
-      {error ? (
+      {error && (
         <p role="alert" className="error">
           Unable to verify: {error}
         </p>
-      ) : (
-        <div className="student-score">
-          <strong>
-            Provisional: {earned} / {points.practical} points
-          </strong>
-          {points.bonus > 0 && (
-            <span>
-              Bonus {bonus} / {points.bonus}
-            </span>
-          )}
-          <small>
-            {required.filter((p) => p.passed).length} / {required.length} scored tasks · Official
-            score is verified on submission.
-          </small>
-        </div>
       )}
       {current && state ? (
         <>
@@ -228,6 +216,13 @@ export function TaskInstructions({
               </button>
             )}
           </div>
+          <details className="task-hint">
+            <summary>Hint</summary>
+            <p>
+              {guide?.before} Work in Files to edit text and Terminal to run Git commands. Check the
+              expected result before moving on.
+            </p>
+          </details>
           <details className="check-evidence">
             <summary>Technical check details</summary>
             <p>

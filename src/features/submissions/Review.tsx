@@ -162,6 +162,7 @@ export function Review({
             disabled={
               busy ||
               lab.busy ||
+              lab.readOnly ||
               !lab.ready ||
               !agreed ||
               !complete ||

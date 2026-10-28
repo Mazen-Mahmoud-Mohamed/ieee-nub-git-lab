@@ -43,9 +43,11 @@ export function AssessmentResult({
             ? 'Submission received'
             : state.status === 'in_progress'
               ? 'Still in progress'
-              : state.status === 'restarted'
-                ? 'Previous attempt retained after restart'
-                : 'Finalizing'}
+              : state.status === 'invalidated'
+                ? 'Attempt invalidated'
+                : state.status === 'restarted'
+                  ? 'Previous attempt retained after restart'
+                  : 'Finalizing'}
         </h2>
         {(state.auto_submitted || state.status === 'expired') && (
           <p>
@@ -79,9 +81,11 @@ export function AssessmentResult({
           </>
         ) : (
           <p>
-            {state.status === 'restarted'
-              ? 'This attempt was not submitted for grading. Its previous work is retained; open the new attempt to continue.'
-              : 'Results are pending instructor review or release.'}
+            {state.status === 'invalidated'
+              ? 'This attempt is retained read only. No submission or official grade was created. Ask your instructor about the invalidation.'
+              : state.status === 'restarted'
+                ? 'This attempt was not submitted for grading. Its previous work is retained; open the new attempt to continue.'
+                : 'Results are pending instructor review or release.'}
           </p>
         )}
         {error && (

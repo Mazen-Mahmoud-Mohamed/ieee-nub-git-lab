@@ -88,6 +88,7 @@ export type AssessmentRecord = {
   definition?: Definition;
 };
 export type AttemptState = {
+  invalidation_reason?: string;
   id: string;
   assignment_id: string;
   assignment_version: number;

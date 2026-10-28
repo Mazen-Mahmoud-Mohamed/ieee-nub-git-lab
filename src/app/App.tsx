@@ -1,5 +1,6 @@
+import { PublishedCourses } from '../features/assessments/PublishedCourses';
 import { LearningGuide } from '../features/assessments/LearningGuide';
-import { Component, useEffect, useState, type ReactNode } from 'react';
+import { Component, useEffect, useState, lazy, Suspense, type ReactNode } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
@@ -35,7 +36,9 @@ import { SessionBar } from '../features/assessments/SessionBar';
 import { AssessmentResult } from '../features/assessments/AssessmentResult';
 import { Assessment } from '../features/questions/Assessment';
 import { Review, Confirmation } from '../features/submissions/Review';
-import { Instructor } from '../features/instructor/Instructor';
+const Instructor = lazy(() =>
+  import('../features/instructor/Instructor').then((m) => ({ default: m.Instructor })),
+);
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(error: Error) {
@@ -207,12 +210,12 @@ export function App() {
             <LayoutDashboard size={15} />
             My learning
           </NavLink>
+          <NavLink to="/learn">
+            <BookOpen size={15} />
+            Course Content
+          </NavLink>
           {!course.active && !['/workspace', '/theory', '/review'].includes(location.pathname) && (
             <>
-              <NavLink to="/learn">
-                <BookOpen size={15} />
-                Learn Git
-              </NavLink>
               <NavLink to="/workspace">
                 <TerminalSquare size={15} />
                 Practice lab
@@ -299,6 +302,7 @@ export function App() {
               }
             />
             <Route path="/learn" element={<LearningGuide />} />
+            <Route path="/learn/:contentId" element={<PublishedCourses standalone />} />
             <Route path="/dashboard" element={<CourseDashboard profile={profile} />} />
             <Route
               path="/overview"
@@ -462,7 +466,15 @@ export function App() {
               path="/instructor/*"
               element={
                 user && isInstructor ? (
-                  <Instructor />
+                  <Suspense
+                    fallback={
+                      <p className="page" role="status">
+                        Loading instructor tools…
+                      </p>
+                    }
+                  >
+                    <Instructor />
+                  </Suspense>
                 ) : (
                   <div className="page narrow">
                     <ShieldCheck size={40} />

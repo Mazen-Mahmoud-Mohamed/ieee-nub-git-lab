@@ -22,9 +22,10 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm audit --audit-level=moderate
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e
       - run: npm run test:e2e:fixtures
+      - run: npm run test:e2e:mobile
       - name: Verify deployment configuration
         if: github.event_name != 'pull_request'
         env:
@@ -36,6 +37,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || format('/{0}/', github.event.repository.name) }}
+      - run: npm run test:e2e:production
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:

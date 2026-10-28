@@ -1,3 +1,4 @@
+import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { requireBackend } from '../../services/supabase';
@@ -255,6 +256,21 @@ export function Attempts({
   allAttempts?: boolean;
 }) {
   const [routeParams] = useSearchParams();
+  const selectedStudent = student || routeParams.get('student') || '';
+  const [course, setCourse] = useState(''),
+    [courses, setCourses] = useState<Array<{ id: string; title: string }>>([]),
+    [managementState, setManagementState] = useState('active');
+  useEffect(() => {
+    let live = true;
+    void adminRPC<Array<{ id: string; title: string }>>('manage_course_options')
+      .then((rows) => {
+        if (live) setCourses(rows || []);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
   const [search, setSearch] = useState(routeParams.get('search') || ''),
     [faculty, setFaculty] = useState(''),
     [type, setType] = useState(''),
@@ -297,7 +313,9 @@ export function Attempts({
     p_faculty: faculty,
     p_type: type,
     p_assessment: assessment || null,
-    p_student: student || null,
+    p_student: selectedStudent || null,
+    p_course: course || null,
+    p_management_state: managementState,
     p_status: status,
     p_from: from ? from + 'T00:00:00Z' : null,
     p_to: to ? new Date(Date.parse(to + 'T00:00:00Z') + 86400000).toISOString() : null,
@@ -308,7 +326,7 @@ export function Attempts({
     setData(undefined);
     setError('');
     const timer = setTimeout(() => {
-      void adminRPC<{ rows: Attempt[]; total: number }>('instructor_attempts', {
+      void adminRPC<{ rows: Attempt[]; total: number }>('manage_attempts', {
         ...params,
         p_offset: page * 25,
         p_limit: 25,
@@ -324,7 +342,21 @@ export function Attempts({
       live = false;
       clearTimeout(timer);
     };
-  }, [search, faculty, type, assessment, status, from, to, showOngoing, student, page, refresh]);
+  }, [
+    search,
+    faculty,
+    type,
+    assessment,
+    status,
+    from,
+    to,
+    showOngoing,
+    selectedStudent,
+    course,
+    managementState,
+    page,
+    refresh,
+  ]);
   const change = (setter: (s: string) => void) => (value: string) => {
     setter(value);
     setPage(0);
@@ -355,6 +387,28 @@ export function Attempts({
           onChange={(e) => change(setSearch)(e.target.value)}
         />
         <FacultyFilter value={faculty} onChange={change(setFaculty)} />
+        <select
+          aria-label="Course filter"
+          value={course}
+          onChange={(e) => change(setCourse)(e.target.value)}
+        >
+          <option value="">All courses</option>
+          {courses.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.title}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Record archive filter"
+          value={managementState}
+          onChange={(e) => change(setManagementState)(e.target.value)}
+        >
+          <option value="active">Active records</option>
+          <option value="archived">Archived Items</option>
+          <option value="trash">Trash</option>
+          <option value="all">All retained records</option>
+        </select>
         <select
           aria-label="Assessment type filter"
           value={type}
@@ -387,7 +441,7 @@ export function Attempts({
             'pending_review',
             'graded',
             'expired',
-            ...(showOngoing ? ['in_progress'] : []),
+            ...(showOngoing ? ['in_progress', 'invalidated'] : []),
           ].map((s) => (
             <option key={s} value={s}>
               {s.replaceAll('_', ' ')}
@@ -436,7 +490,7 @@ export function Attempts({
               let total = Infinity;
               for (let offset = 0; offset < total; offset += 100) {
                 const batch = await adminRPC<{ rows: Attempt[]; total: number }>(
-                  'instructor_attempts',
+                  'manage_attempts',
                   { ...params, p_offset: offset, p_limit: 100 },
                 );
                 total = batch.total;
@@ -535,6 +589,11 @@ export function Attempts({
                         <button className="text-button" onClick={() => setSelected(r)}>
                           Inspect attempt →
                         </button>
+                        <RecordActions
+                          kind="attempt"
+                          id={r.id}
+                          changed={() => setRefresh((n) => n + 1)}
+                        />
                       </td>
                     </tr>
                   ))}

@@ -116,6 +116,21 @@ beforeAll(async () => {
   );
 
   migrationAfter = await snapshot(tables);
+  await db.exec(
+    readFileSync('supabase/migrations/20261028010000_admin_content_management.sql', 'utf8'),
+  );
+  expect(await snapshot(tables)).toEqual(migrationAfter);
+  const managedTables = (
+    await db.query<{ schemaname: string; tablename: string }>(
+      "select schemaname,tablename from pg_tables where schemaname in ('public','private','auth') order by schemaname,tablename",
+    )
+  ).rows;
+  const managedBefore = await snapshot(managedTables);
+  await db.exec(
+    `create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb);alter table storage.objects enable row level security;grant usage on schema storage to anon,authenticated;grant select on storage.objects to anon,authenticated;`,
+  );
+  await db.exec(readFileSync('supabase/migrations/20261028020000_learning_sessions.sql', 'utf8'));
+  expect(await snapshot(managedTables)).toEqual(managedBefore);
 }, 30000);
 afterAll(async () => {
   await db?.close();

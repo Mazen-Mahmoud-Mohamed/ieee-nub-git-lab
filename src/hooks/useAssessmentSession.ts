@@ -8,6 +8,7 @@ export function autosaveConsentKey(attempt: string) {
   return `autosave-consent:${import.meta.env.VITE_SUPABASE_URL || 'unconfigured'}:${attempt}`;
 }
 export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
+  const [administrativeLock, setAdministrativeLock] = useState(false);
   const [remaining, setRemaining] = useState(Infinity);
   const [sync, setSync] = useState('Local practice');
   const [error, setError] = useState('');
@@ -32,6 +33,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
   useEffect(() => {
     let live = true;
     setInitialized(false);
+    setAdministrativeLock(state?.status === 'invalidated');
     setConflict(false);
     setError('');
     setRemaining(Infinity);
@@ -48,7 +50,7 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
         state.payload &&
         // The closed attempt's local key retains edits that were never uploaded.
         // A new device still restores the last accepted server checkpoint.
-        !(state.status === 'restarted' && current.attemptId === state.id) &&
+        !(['restarted', 'invalidated'].includes(state.status) && current.attemptId === state.id) &&
         (state.status !== 'in_progress' || current.serverRevision !== state.checkpoint_revision)
       )
         await current.restore(
@@ -88,6 +90,11 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     if (data.status !== 'in_progress') {
       latest.current.setLocked(true);
       stopping.current = true;
+    }
+    if (data.status === 'invalidated') {
+      setAdministrativeLock(true);
+      setSync('Attempt invalidated · read only');
+      setError(data.invalidation_reason || 'This attempt was invalidated by a data administrator.');
     }
     if (data.status === 'restarted') setSync('Attempt restarted · reopen it from My learning');
     if (data.receipt) {
@@ -329,7 +336,8 @@ export function useAssessmentSession(lab: Lab, state: AttemptState | null) {
     conflict,
     ready: !state || initialized,
     consent,
-    finalized: !!lab.receipt,
+    finalized: !!lab.receipt || administrativeLock,
+    invalidated: administrativeLock,
     enableAutosave,
     submit: () => send(true),
     save: () => send(false),

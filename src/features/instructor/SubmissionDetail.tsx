@@ -1,3 +1,4 @@
+import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { requireBackend } from '../../services/supabase';
@@ -235,6 +236,14 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
         Back to attempts
       </button>
       <h2>{attempt.profiles?.full_name}</h2>
+      <RecordActions
+        kind="attempt"
+        id={attempt.id}
+        changed={() => {
+          setNotice('Record management completed.');
+          setRefresh((n) => n + 1);
+        }}
+      />
       <h3>
         {definition.title} · {definition.type} · Attempt {attempt.attempt_number} · Version{' '}
         {attempt.assignment_version}
@@ -427,21 +436,27 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           <div className="review-actions">
             <button
               className="outline-button"
-              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
+              disabled={
+                busy || loadError || ['in_progress', 'restarted', 'invalidated'].includes(status)
+              }
               onClick={() => void grade(false, true)}
             >
               Save draft grade
             </button>
             <button
               className="outline-button"
-              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
+              disabled={
+                busy || loadError || ['in_progress', 'restarted', 'invalidated'].includes(status)
+              }
               onClick={() => void grade(false)}
             >
               Finalize grade privately
             </button>
             <button
               className="primary"
-              disabled={busy || loadError || ['in_progress', 'restarted'].includes(status)}
+              disabled={
+                busy || loadError || ['in_progress', 'restarted', 'invalidated'].includes(status)
+              }
               onClick={() => void grade(true)}
             >
               Publish grade

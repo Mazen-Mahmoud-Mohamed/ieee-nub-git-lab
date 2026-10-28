@@ -56,6 +56,9 @@ describe('student profile and OAuth navigation', () => {
   it('preserves the exact assessment attempt route', () => {
     const path = '/assessments/a/attempts/b/theory';
     expect(safeReturnPath(path)).toBe(path);
+    expect(safeReturnPath('/learn/70000000-0000-4000-8000-000000000011')).toBe(
+      '/learn/70000000-0000-4000-8000-000000000011',
+    );
   });
   it('returns to the deployed Pages base path with the PKCE query outside the hash', () => {
     expect(callbackURL('https://example.github.io', '/ieee-git-lab/')).toBe(

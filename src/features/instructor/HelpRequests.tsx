@@ -1,3 +1,4 @@
+import { RecordActions } from './RecordManagement';
 import { recoveryReason } from '../assessments/recoveryPresentation';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -142,6 +143,16 @@ export function HelpRequests() {
               </div>
               <p dir="auto">{r.message}</p>
               {r.reply && <p dir="auto">Your response: {r.reply}</p>}
+              {r.status !== 'pending' && (
+                <RecordActions
+                  kind="request"
+                  id={r.id}
+                  changed={() => {
+                    setNotice('Record management completed.');
+                    setRefresh((n) => n + 1);
+                  }}
+                />
+              )}
               <div className="review-actions">
                 <Link
                   className="text-button"

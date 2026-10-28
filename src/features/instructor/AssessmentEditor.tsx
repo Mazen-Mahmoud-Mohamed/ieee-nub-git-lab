@@ -1,3 +1,5 @@
+import { RecordActions } from './RecordManagement';
+import { AssessmentCourse } from './LearningContent';
 import { taskGuide } from '../assessments/presentation';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -35,6 +37,8 @@ function move<T>(items: T[], i: number, delta: number) {
   return next;
 }
 export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
+  const [archiveFilter, setArchiveFilter] = useState('active'),
+    [managementNotice, setManagementNotice] = useState('');
   const [page, setPage] = useState(0),
     [total, setTotal] = useState(0),
     [loading, setLoading] = useState(true);
@@ -50,6 +54,7 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
       .order('id', { ascending: false })
       .range(page * 25, page * 25 + 24);
     if (type) query = query.eq('type', type);
+    if (archiveFilter !== 'all') query = query.eq('archived', archiveFilter === 'archived');
     const { data, error, count } = await query;
     if (error) setError(error.message);
     else {
@@ -60,14 +65,12 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
   };
   useEffect(() => {
     void load();
-  }, [type, page]);
-  const action = async (fn: () => PromiseLike<any>) => {
-    if (
-      !window.confirm(
-        'Apply this assessment change? Active attempts retain their published version.',
-      )
-    )
-      return;
+  }, [type, page, archiveFilter]);
+  const action = async (
+    fn: () => PromiseLike<any>,
+    description = 'Apply this assessment change? Active attempts retain their published version.',
+  ) => {
+    if (!window.confirm(description)) return;
     try {
       const r = await fn();
       if (r.error) throw r.error;
@@ -110,6 +113,21 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
         </p>
       )}
       {loading && <p role="status">Loading assessments…</p>}
+      <label>
+        Show assessments
+        <select
+          value={archiveFilter}
+          onChange={(e) => {
+            setArchiveFilter(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="active">Active</option>
+          <option value="archived">Archived Items</option>
+          <option value="all">All retained assessments</option>
+        </select>
+      </label>
+      {managementNotice && <p role="status">{managementNotice}</p>}
       <div className="course-grid">
         {rows.map((r) => (
           <article className="form-card assessment-card" key={r.id}>
@@ -124,46 +142,56 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
             <h3>{r.assessment_drafts?.document?.title || r.title}</h3>
             <p>{r.description}</p>
             <div className="assessment-card-actions">
-              <Link className="primary" to={'/instructor/assessments/' + r.id}>
-                Edit
-              </Link>
+              {!r.archived && (
+                <Link className="primary" to={'/instructor/assessments/' + r.id}>
+                  Edit
+                </Link>
+              )}
               <button
                 className="outline-button"
                 onClick={() =>
-                  void action(() => requireBackend().rpc('duplicate_assessment', { p_id: r.id }))
+                  void action(
+                    () => requireBackend().rpc('duplicate_assessment', { p_id: r.id }),
+                    'Duplicate ' +
+                      r.title +
+                      ' as a new unpublished draft? Existing versions and student work stay unchanged.',
+                  )
                 }
               >
                 <Copy size={14} />
                 Duplicate
               </button>
-              <button
-                className="text-button"
-                onClick={() =>
-                  void action(() =>
-                    requireBackend().rpc('set_assessment_visibility', {
-                      p_id: r.id,
-                      p_visible: !r.visible,
-                      p_archive: false,
-                    }),
-                  )
-                }
-              >
-                {r.visible ? 'Unpublish' : 'Restore visibility'}
-              </button>
-              <button
-                className="text-button"
-                onClick={() =>
-                  void action(() =>
-                    requireBackend().rpc('set_assessment_visibility', {
-                      p_id: r.id,
-                      p_visible: false,
-                      p_archive: !r.archived,
-                    }),
-                  )
-                }
-              >
-                {r.archived ? 'Unarchive' : 'Archive'}
-              </button>
+              {r.published_version > 0 && !r.archived && (
+                <>
+                  {' '}
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      void action(
+                        () =>
+                          requireBackend().rpc('set_assessment_visibility', {
+                            p_id: r.id,
+                            p_visible: !r.visible,
+                            p_archive: false,
+                          }),
+                        (r.visible ? 'Hide ' : 'Make visible ') +
+                          r.title +
+                          '? Existing attempts keep their published version.',
+                      )
+                    }
+                  >
+                    {r.visible ? 'Unpublish' : 'Make visible'}
+                  </button>
+                </>
+              )}
+              <RecordActions
+                kind="assessment"
+                id={r.id}
+                changed={() => {
+                  setManagementNotice('Record management completed.');
+                  void load();
+                }}
+              />
             </div>
           </article>
         ))}
@@ -356,6 +384,7 @@ export function AssessmentEditor() {
       </nav>
       <section hidden={editorTab !== 'details'} className="form-card editor-fields">
         <h3>Assessment details</h3>
+        {!creating && assessmentId && <AssessmentCourse id={assessmentId} />}
         <div className="field-grid">
           <label>
             Title
@@ -541,6 +570,12 @@ export function AssessmentEditor() {
                 <button
                   className="text-button"
                   onClick={() => {
+                    if (
+                      !window.confirm(
+                        `Remove starter file ${path} from this draft? Published versions and student files stay unchanged.`,
+                      )
+                    )
+                      return;
                     const files = { ...definition.starter.files };
                     delete files[path];
                     update({ starter: { ...definition.starter, files } });
@@ -592,6 +627,12 @@ export function AssessmentEditor() {
               <button
                 className="text-button"
                 onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Remove the imported starter repository from the draft of ${definition.title}? Published versions and student work stay unchanged.`,
+                    )
+                  )
+                    return;
                   const starter = { ...definition.starter };
                   delete starter.snapshot;
                   update({ starter });
@@ -635,6 +676,7 @@ export function AssessmentEditor() {
                     />
                   </label>
                   <OrderButtons
+                    recordLabel={`section "${section.title}" and its ${section.tasks.length} draft tasks`}
                     index={si}
                     count={sections.length}
                     onMove={(delta) => update({ sections: move(sections, si, delta) })}
@@ -660,6 +702,7 @@ export function AssessmentEditor() {
                     <div className="builder-heading">
                       <h4>Task {ti + 1}</h4>
                       <OrderButtons
+                        recordLabel={`task "${task.title}" (${task.id}) and its completion checks`}
                         index={ti}
                         count={section.tasks.length}
                         onMove={(delta) =>
@@ -725,6 +768,8 @@ export function AssessmentEditor() {
                       <RuleEditor
                         key={ri}
                         rule={rule}
+                        taskTitle={task.title}
+                        canRemove={task.rules.length > 1}
                         onChange={(next) =>
                           setTask(si, ti, {
                             ...task,
@@ -837,6 +882,7 @@ export function AssessmentEditor() {
               <div className="builder-heading">
                 <h4>Question {qi + 1}</h4>
                 <OrderButtons
+                  recordLabel={`question ${qi + 1}: "${question.prompt.slice(0, 180)}" (${question.id})`}
                   index={qi}
                   count={definition.questions.length}
                   onMove={(delta) => update({ questions: move(definition.questions, qi, delta) })}
@@ -877,11 +923,13 @@ function localDate(value: string | null) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 function OrderButtons({
+  recordLabel,
   index,
   count,
   onMove,
   onRemove,
 }: {
+  recordLabel: string;
   index: number;
   count: number;
   onMove: (n: number) => void;
@@ -895,17 +943,31 @@ function OrderButtons({
       <button aria-label="Move down" disabled={index === count - 1} onClick={() => onMove(1)}>
         <ArrowDown size={15} />
       </button>
-      <button aria-label="Remove from draft" onClick={onRemove}>
+      <button
+        aria-label="Remove from draft"
+        onClick={() => {
+          if (
+            window.confirm(
+              `Remove ${recordLabel} from this draft? Published versions, student attempts, official grades and bank copies are unchanged. This removal is saved only when you Save draft or Publish.`,
+            )
+          )
+            onRemove();
+        }}
+      >
         <Trash2 size={15} />
       </button>
     </div>
   );
 }
 function RuleEditor({
+  taskTitle,
+  canRemove,
   rule: r,
   onChange,
   onRemove,
 }: {
+  taskTitle: string;
+  canRemove: boolean;
   rule: Rule;
   onChange: (r: Rule) => void;
   onRemove: () => void;
@@ -1084,9 +1146,26 @@ function RuleEditor({
           )}
         </>
       )}
-      <button className="text-button" onClick={onRemove}>
-        Remove rule
+      <button
+        className="text-button"
+        disabled={!canRemove}
+        onClick={() => {
+          if (
+            window.confirm(
+              `Remove the ${r.type} completion check ${r.path || r.outcomeId || ''} from task "${taskTitle}" in this draft? Published criteria and existing grades stay unchanged.`,
+            )
+          )
+            onRemove();
+        }}
+      >
+        Remove completion check
       </button>
+      {!canRemove && (
+        <small>
+          A task needs at least one completion check. Remove the draft task instead if it is no
+          longer needed.
+        </small>
+      )}
     </div>
   );
 }
@@ -1223,6 +1302,7 @@ export function QuestionEditor({
 }
 
 export function QuestionBank() {
+  const [archiveFilter, setArchiveFilter] = useState('active');
   const [rows, setRows] = useState<
       Array<{ id: string; document: AssessmentQuestion; archived: boolean }>
     >([]),
@@ -1248,6 +1328,7 @@ export function QuestionBank() {
         .order('updated_at', { ascending: false })
         .order('id')
         .range(page * 25, page * 25 + 24);
+      if (archiveFilter !== 'all') query = query.eq('archived', archiveFilter === 'archived');
       if (search) query = query.ilike('document->>prompt', '%' + search + '%');
       if (kind) query = query.eq('document->>kind', kind);
       void query.then(({ data, error, count }) => {
@@ -1264,7 +1345,7 @@ export function QuestionBank() {
       live = false;
       clearTimeout(timer);
     };
-  }, [search, kind, page, refresh]);
+  }, [search, kind, archiveFilter, page, refresh]);
   return (
     <section className="form-card editor-fields">
       <div className="page-heading">
@@ -1284,6 +1365,20 @@ export function QuestionBank() {
         Private answer keys and rubrics remain available only to instructors. Archiving never
         changes published assessments.
       </p>
+      <label>
+        Show bank questions
+        <select
+          value={archiveFilter}
+          onChange={(e) => {
+            setArchiveFilter(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="active">Active</option>
+          <option value="archived">Archived Items</option>
+          <option value="all">All retained questions</option>
+        </select>
+      </label>
       <div className="table-toolbar">
         <input
           aria-label="Search questions"
@@ -1365,6 +1460,7 @@ export function QuestionBank() {
               </div>
               <button
                 className="text-button"
+                disabled={q.archived}
                 onClick={() => {
                   setSelected(q.id);
                   setEditing(structuredClone(q.document));
@@ -1373,30 +1469,14 @@ export function QuestionBank() {
               >
                 Edit
               </button>
-              <button
-                className="text-button"
-                disabled={busy}
-                onClick={async () => {
-                  if (
-                    !window.confirm(
-                      q.archived
-                        ? 'Restore this bank question?'
-                        : 'Archive this bank question? Published versions remain unchanged.',
-                    )
-                  )
-                    return;
-                  setBusy(true);
-                  const { error } = await requireBackend().rpc('archive_bank_question', {
-                    p_id: q.id,
-                    p_archived: !q.archived,
-                  });
-                  if (error) setError(error.message);
-                  else setRefresh((n) => n + 1);
-                  setBusy(false);
+              <RecordActions
+                kind="question"
+                id={q.id}
+                changed={() => {
+                  setNotice('Record management completed.');
+                  setRefresh((n) => n + 1);
                 }}
-              >
-                {q.archived ? 'Restore' : 'Archive question'}
-              </button>
+              />
             </article>
           ))}
           {!rows.length && !error && <p>No questions match your filters.</p>}

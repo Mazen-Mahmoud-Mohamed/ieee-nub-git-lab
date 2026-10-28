@@ -175,7 +175,7 @@ async function fixture(
     } else if (
       path === '/rest/v1/attempts' ||
       path.endsWith('/rpc/instructor_submissions') ||
-      path.endsWith('/rpc/instructor_attempts')
+      path.endsWith('/rpc/manage_attempts')
     )
       response = Object.values(attempts).map((a) => ({
         ...a,
@@ -389,7 +389,7 @@ async function fixture(
       path.endsWith('/rpc/grade_assessment')
     )
       response = null;
-    if (path.endsWith('/rpc/instructor_attempts')) {
+    if (path.endsWith('/rpc/manage_attempts')) {
       const list = (response as any[]).map((r) => ({
         ...r,
         attempt_number: 1,
@@ -833,7 +833,7 @@ test('admin submissions paginate, send filters to the server and export every ma
     },
     assignments: { title: 'Assignment A', type: 'assignment' },
   }));
-  await page.route('**/rpc/instructor_attempts', (route) => {
+  await page.route('**/rpc/manage_attempts', (route) => {
     last = route.request().postDataJSON();
     return route.fulfill({
       json: { total: 31, rows: rows.slice(last.p_offset, last.p_offset + last.p_limit) },

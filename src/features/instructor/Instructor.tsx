@@ -1,3 +1,5 @@
+import { RecordManager, AdminActivity } from './RecordManagement';
+import { LearningContent } from './LearningContent';
 import { HelpRequests } from './HelpRequests';
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
@@ -17,6 +19,8 @@ export function Instructor() {
       <nav className="instructor-nav" aria-label="Instructor navigation">
         {[
           ['', 'Overview'],
+          ['content', 'Courses & lessons'],
+          ['sessions', 'Learning Sessions'],
           ['students', 'Students'],
           ['submissions', 'Submissions'],
           ['assignments', 'Assignments'],
@@ -24,6 +28,8 @@ export function Instructor() {
           ['questions', 'Question Bank'],
           ['results', 'Grades'],
           ['requests', 'Help requests'],
+          ['records', 'Archive & Trash'],
+          ['activity', 'Activity'],
           ['settings', 'Settings'],
         ].map(([path, label]) => (
           <NavLink key={path} end={!path} to={'/instructor' + (path ? '/' + path : '')}>
@@ -33,6 +39,10 @@ export function Instructor() {
       </nav>
       <Routes>
         <Route index element={<Overview />} />
+        <Route path="content" element={<LearningContent />} />
+        <Route path="sessions" element={<LearningContent />} />
+        <Route path="records" element={<RecordManager />} />
+        <Route path="activity" element={<AdminActivity />} />
         <Route path="students" element={<Students />} />
         <Route path="submissions" element={<Attempts key="submissions" />} />
         <Route path="results" element={<Attempts key="results" results />} />

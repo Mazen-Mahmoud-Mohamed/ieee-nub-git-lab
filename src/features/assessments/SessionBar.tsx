@@ -8,6 +8,16 @@ export function SessionBar({
   state: AttemptState | null;
 }) {
   if (!state) return null;
+  if (state.status === 'invalidated' || session.invalidated)
+    return (
+      <section className="session-bar" aria-label="Assessment session">
+        <strong>This attempt was invalidated by a data administrator.</strong>
+        <p dir="auto">
+          {state.invalidation_reason || session.error || 'Ask your instructor about the reason.'}{' '}
+          Your previous work is read only. No grade was changed and no extra attempt was granted.
+        </p>
+      </section>
+    );
   if (state.status === 'restarted')
     return (
       <section className="session-bar" aria-label="Assessment session">

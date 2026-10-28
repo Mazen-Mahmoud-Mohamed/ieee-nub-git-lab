@@ -76,7 +76,13 @@ export function Terminal({
   const events = lab.engine.events.slice(cleared);
   const warning = introductoryCommitWarning(definition, lab.view);
   return (
-    <section className="terminal" dir="ltr">
+    <section
+      className="terminal"
+      id="workspace-terminal"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-terminal"
+      dir="ltr"
+    >
       <div className="panel-heading terminal-tabs">
         <span>
           <ChevronRight size={15} /> Git Terminal <i className="live-dot" />
@@ -145,62 +151,121 @@ export function Terminal({
             {warning}
           </p>
         )}
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!input.trim() || lab.busy) return;
-            const value = input;
-            setInput('');
-            const h = [...history, value];
-            setHistory(h);
-            setCursor(h.length);
-            if (value === 'clear') setCleared(lab.engine.events.length + 1);
-            await lab.command(value);
+      </div>
+      <form
+        className="terminal-command-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!input.trim() || lab.busy || lab.readOnly) return;
+          const value = input;
+          setInput('');
+          const h = [...history, value];
+          setHistory(h);
+          setCursor(h.length);
+          if (value === 'clear') setCleared(lab.engine.events.length + 1);
+          await lab.command(value);
+          requestAnimationFrame(() => field.current?.focus());
+        }}
+      >
+        <label className="terminal-prompt" htmlFor="command">
+          <span className="prompt-user">student@ieee-nub</span>{' '}
+          <span className="prompt-path">{lab.engine.cwd}</span>{' '}
+          <span className="prompt-branch">({lab.view.branch})</span>
+          <br />
+          <span className="prompt-symbol">$</span>
+          <input
+            id="command"
+            ref={field}
+            aria-label="Terminal command"
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            enterKeyHint="go"
+            onFocus={() => {
+              if (window.matchMedia('(max-width:900px)').matches)
+                requestAnimationFrame(() => field.current?.scrollIntoView({ block: 'nearest' }));
+            }}
+            spellCheck={false}
+            value={input}
+            disabled={lab.busy || lab.readOnly}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const next = Math.max(0, cursor - 1);
+                setCursor(next);
+                setInput(history[next] || '');
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const next = Math.min(history.length, cursor + 1);
+                setCursor(next);
+                setInput(history[next] || '');
+              }
+              if (e.key === 'Tab') {
+                e.preventDefault();
+                const options = commands.filter((c) => c.startsWith(input));
+                if (options.length === 1) setInput(options[0]);
+              }
+              if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                setCleared(lab.engine.events.length);
+              }
+            }}
+          />
+          <button
+            type="submit"
+            className="terminal-run"
+            disabled={lab.busy || lab.readOnly || !input.trim()}
+          >
+            {lab.busy ? 'Running…' : 'Run'}
+          </button>
+        </label>
+      </form>
+      <div className="terminal-helpers" aria-label="Command helpers">
+        <button
+          type="button"
+          disabled={!history.length || lab.busy || lab.readOnly}
+          onClick={() => {
+            const next = Math.max(0, cursor - 1);
+            setCursor(next);
+            setInput(history[next] || '');
             field.current?.focus();
           }}
         >
-          <label className="terminal-prompt" htmlFor="command">
-            <span className="prompt-user">student@ieee-nub</span>{' '}
-            <span className="prompt-path">{lab.engine.cwd}</span>{' '}
-            <span className="prompt-branch">({lab.view.branch})</span>
-            <br />
-            <span className="prompt-symbol">$</span>
-            <input
-              id="command"
-              ref={field}
-              aria-label="Terminal command"
-              autoComplete="off"
-              spellCheck={false}
-              value={input}
-              disabled={lab.busy || lab.readOnly}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  const next = Math.max(0, cursor - 1);
-                  setCursor(next);
-                  setInput(history[next] || '');
-                }
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  const next = Math.min(history.length, cursor + 1);
-                  setCursor(next);
-                  setInput(history[next] || '');
-                }
-                if (e.key === 'Tab') {
-                  e.preventDefault();
-                  const options = commands.filter((c) => c.startsWith(input));
-                  if (options.length === 1) setInput(options[0]);
-                }
-                if (e.ctrlKey && e.key === 'l') {
-                  e.preventDefault();
-                  setCleared(lab.engine.events.length);
-                }
-              }}
-            />
-            {lab.busy && <span className="dim">Executing…</span>}
-          </label>
-        </form>
+          Previous command
+        </button>
+        <button
+          type="button"
+          disabled={cursor >= history.length || lab.busy || lab.readOnly}
+          onClick={() => {
+            const next = Math.min(history.length, cursor + 1);
+            setCursor(next);
+            setInput(history[next] || '');
+            field.current?.focus();
+          }}
+        >
+          Next command
+        </button>
+        {['git ', 'status', ' -m ', '"', '/', '-', '>'].map((symbol) => (
+          <button
+            type="button"
+            key={symbol}
+            aria-label={'Insert ' + symbol}
+            disabled={lab.busy || lab.readOnly}
+            onClick={() => {
+              const start = field.current?.selectionStart ?? input.length,
+                end = field.current?.selectionEnd ?? start;
+              setInput(input.slice(0, start) + symbol + input.slice(end));
+              requestAnimationFrame(() => {
+                field.current?.focus();
+                field.current?.setSelectionRange(start + symbol.length, start + symbol.length);
+              });
+            }}
+          >
+            {symbol}
+          </button>
+        ))}
       </div>
     </section>
   );
