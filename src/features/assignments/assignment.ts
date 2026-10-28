@@ -134,6 +134,7 @@ function legacyEvaluation(
   identity: StudentIdentity,
   working: Record<string, string> = {},
   revision: 1 | 2 = 1,
+  independent = false,
 ): { outcomes: Outcome[]; requirements: Record<string, RequirementCheck[]> } {
   const commits = view.commits;
   const {
@@ -680,6 +681,46 @@ function legacyEvaluation(
         'Commit the course notes as one focused change with a descriptive message.',
       ),
     ];
+    if (independent) {
+      // New scoring versions separate content, focus and messages. Historical
+      // versions keep the original four composite checks above.
+      requirements.separate = [
+        ...(['about.txt', 'goals.txt', 'notes.txt'] as const).flatMap((file) => {
+          const birth = intro(file),
+            valid = file === 'about.txt' ? personal : file === 'goals.txt' ? goalsOK : notesOK;
+          const checks = [
+            check(
+              file + '-focused',
+              file + ' introduced in its own focused commit',
+              separate(birth, file),
+              'Introduce each starting file in a separate commit.',
+            ),
+            check(
+              file + '-original-content',
+              file + ' introductory commit has the required content',
+              file === 'about.txt' && !requiredIdentity ? null : valid(birth?.files[file]),
+              'Check the content in the commit that first introduced this file.',
+            ),
+          ];
+          if (file !== 'about.txt')
+            checks.push(
+              check(
+                file + '-message',
+                file + ' introductory commit has a descriptive message',
+                !!birth && descriptive(birth),
+                'Each introductory message needs at least two words. Later commits cannot replace that original message.',
+              ),
+            );
+          return checks;
+        }),
+        check(
+          'personal-message',
+          'Personal information commit uses the requested message',
+          about?.message === 'Add personal information',
+          'Use the published personal-information message.',
+        ),
+      ];
+    }
     const staged = view.status.some(
       ([file, head, work, index]) =>
         file === 'goals.txt' && head !== 0 && head !== index && work === index,
@@ -783,8 +824,9 @@ export function legacyRequirementChecks(
   identity: StudentIdentity,
   working: Record<string, string>,
   revision: 1 | 2 = 1,
+  independent = false,
 ) {
-  return legacyEvaluation(view, identity, working, revision).requirements;
+  return legacyEvaluation(view, identity, working, revision, independent).requirements;
 }
 export function practicalScore(outcomes: Outcome[]) {
   return outcomes.filter((o) => o.passed).reduce((sum, o) => sum + o.points, 0);

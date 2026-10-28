@@ -9,7 +9,7 @@ const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   E = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const theory = (title: string, type: 'assignment' | 'exam' = 'assignment'): Definition => ({
-  ...blankDefinition(type),
+  ...blankDefinition(type, 'legacy'),
   title,
   format: 'theory',
   questions: [
@@ -1193,6 +1193,11 @@ test('instructor builds a task with plain forms, verifies real Git in preview an
   await page.getByLabel('Branch / snapshot', { exact: true }).fill('working');
   await page.getByRole('combobox', { name: 'Content rule', exact: true }).selectOption('contains');
   await page.getByLabel('Expected text', { exact: true }).fill('Hello Git');
+  await expect(page.getByLabel('Scoring policy', { exact: true })).toHaveValue('requirements-v1');
+  await page.getByLabel('Points: greeting.txt exists in working files', { exact: true }).fill('3');
+  await page
+    .getByLabel('Points: greeting.txt matches the required text in working files', { exact: true })
+    .fill('7');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'test-results/redesigned-instructor-mobile.png', fullPage: true });

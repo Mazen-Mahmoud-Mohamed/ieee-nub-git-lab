@@ -1,3 +1,4 @@
+import { requirementCatalog } from '../assessments/requirements';
 import { RecordActions } from './RecordManagement';
 import { AssessmentCourse } from './LearningContent';
 import { taskGuide } from '../assessments/presentation';
@@ -9,6 +10,7 @@ import {
   assertDefinition,
   blankDefinition,
   totals,
+  sumPoints,
   type Definition,
   type Task,
   type Rule,
@@ -268,7 +270,25 @@ export function AssessmentEditor() {
   const setTask = (sectionIndex: number, index: number, task: Task) =>
     update({
       sections: sections.map((s, i) =>
-        i === sectionIndex ? { ...s, tasks: s.tasks.map((t, j) => (j === index ? task : t)) } : s,
+        i === sectionIndex
+          ? {
+              ...s,
+              tasks: s.tasks.map((t, j) =>
+                j === index
+                  ? {
+                      ...task,
+                      requirementWeights: task.requirementWeights
+                        ? Object.fromEntries(
+                            requirementCatalog(task)
+                              .filter((c) => Object.hasOwn(task.requirementWeights!, c.id))
+                              .map((c) => [c.id, task.requirementWeights![c.id]]),
+                          )
+                        : undefined,
+                    }
+                  : t,
+              ),
+            }
+          : s,
       ),
     });
   const save = async (publish: boolean) => {
@@ -314,8 +334,8 @@ export function AssessmentEditor() {
         <div>
           <h2>{creating ? 'Create assessment' : 'Edit assessment draft'}</h2>
           <p>
-            Total marks: {points.practical + points.theory} · {points.bonus} bonus. Set marks on
-            each task and question below.
+            Total marks: {sumPoints([points.practical, points.theory])} · {points.bonus} bonus. Set
+            marks on each task and question below.
           </p>
         </div>
         <div className="editor-actions">
@@ -484,6 +504,31 @@ export function AssessmentEditor() {
             onChange={(e) => update({ instructions: e.target.value })}
           />
         </label>
+        <label>
+          Scoring policy for the next published version
+          <select
+            aria-label="Scoring policy"
+            value={definition.gradingPolicy || 'legacy'}
+            onChange={(e) => {
+              if (
+                !window.confirm(
+                  'Change this draft scoring policy? Existing published versions, attempts and grades are unchanged. Publishing creates a new version. Configure every requirement weight before saving.',
+                )
+              )
+                return;
+              update(
+                e.target.value === 'requirements-v1'
+                  ? { gradingPolicy: 'requirements-v1', gateTheory: false, requireComplete: false }
+                  : { gradingPolicy: undefined },
+              );
+            }}
+          >
+            <option value="legacy">Legacy: all checks required for each task</option>
+            <option value="requirements-v1">
+              Independent requirement points + partial submission
+            </option>
+          </select>
+        </label>
         <div className="field-grid">
           {(
             [
@@ -497,6 +542,9 @@ export function AssessmentEditor() {
               <input
                 type="checkbox"
                 checked={definition[key]}
+                disabled={
+                  !!definition.gradingPolicy && (key === 'gateTheory' || key === 'requireComplete')
+                }
                 onChange={(e) => update({ [key]: e.target.checked })}
               />
               {label}
@@ -759,10 +807,51 @@ export function AssessmentEditor() {
                       />
                       Optional bonus task
                     </label>
+                    {definition.gradingPolicy && (
+                      <div className="requirement-weights">
+                        <h5>Requirement points (must total {task.points})</h5>
+                        {task.points === 0 && (
+                          <p>Informational task: no requirement points are awarded.</p>
+                        )}
+                        {requirementCatalog(task).map((c) => (
+                          <label key={c.id}>
+                            {c.label}
+                            <input
+                              aria-label={'Points: ' + c.label}
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              max="1000"
+                              value={task.requirementWeights?.[c.id] ?? ''}
+                              onChange={(e) =>
+                                setTask(si, ti, {
+                                  ...task,
+                                  requirementWeights: {
+                                    ...task.requirementWeights,
+                                    [c.id]: Number(e.target.value),
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
+                        <p>
+                          Assigned:{' '}
+                          {Math.round(
+                            Object.values(task.requirementWeights || {}).reduce(
+                              (sum, n) => sum + n,
+                              0,
+                            ) * 100,
+                          ) / 100}{' '}
+                          / {task.points}. Set explicit weights; no automatic division.
+                        </p>
+                      </div>
+                    )}
                     <h5>What earns the points</h5>
                     <p className="muted">
-                      Describe the required result, then choose how to check it. All checks must
-                      pass for this task’s points.
+                      {definition.gradingPolicy
+                        ? 'Each scored check independently earns its configured points. Preparation checks are unscored.'
+                        : 'All checks must pass for this task’s points in this legacy scoring policy.'}
                     </p>
                     {task.rules.map((rule, ri) => (
                       <RuleEditor
@@ -1035,8 +1124,8 @@ function RuleEditor({
         }
       </p>
       <small>
-        Rules in one task must all pass to earn its points. Add a separate scored task for each
-        requirement that should earn partial credit.
+        Scoring follows the published policy: legacy tasks require all checks; requirement-scoring
+        versions award the explicitly configured points for each check.
       </small>
       {(r.type === 'repository' || r.type === 'branch') && (
         <label>

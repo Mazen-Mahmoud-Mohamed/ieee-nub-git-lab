@@ -209,6 +209,21 @@ export function taskFeedback(
         history: true,
       };
   }
+  const isolation = state.task.rules.find((r) => r.type === 'isolation');
+  if (
+    isolation &&
+    state.requirements.some((r) => r.id.endsWith('-introduction') && r.status === 'incomplete')
+  ) {
+    const birth = gitHistory(view.commits).introduction(
+      view.branches[isolation.source || ''] || '',
+      isolation.path || '',
+    );
+    if (birth)
+      return {
+        text: `${isolation.path} was already introduced in the shared history without the required parent commit. Later commits cannot replace that introduction. Other requirements can still earn points.`,
+        history: true,
+      };
+  }
   const first = state.requirements.find((r) => r.status !== 'completed' && !r.preparation);
   return {
     text: first?.hint || state.next,

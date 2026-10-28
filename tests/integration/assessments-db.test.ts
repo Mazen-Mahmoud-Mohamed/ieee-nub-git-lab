@@ -26,7 +26,7 @@ async function root(sql: string) {
   return db.query<any>(sql);
 }
 const def = (type: 'assignment' | 'exam' = 'assignment'): Definition => ({
-  ...blankDefinition(type),
+  ...blankDefinition(type, 'legacy'),
   title: 'Git concepts',
   format: 'theory',
   questions: [
@@ -131,6 +131,16 @@ beforeAll(async () => {
   );
   await db.exec(readFileSync('supabase/migrations/20261028020000_learning_sessions.sql', 'utf8'));
   expect(await snapshot(managedTables)).toEqual(managedBefore);
+  const scoringBefore = await snapshot(managedTables);
+  await db.exec(readFileSync('supabase/migrations/20261028030000_requirement_scoring.sql', 'utf8'));
+  const scoringAfter = await snapshot(managedTables);
+  const taskRows = (scoringAfter['public.task_results'] as { rows: Array<Record<string, unknown>> })
+    .rows;
+  for (const row of taskRows) {
+    expect(row.requirement_results).toBeNull();
+    delete row.requirement_results;
+  }
+  expect(scoringAfter).toEqual(scoringBefore);
 }, 30000);
 afterAll(async () => {
   await db?.close();

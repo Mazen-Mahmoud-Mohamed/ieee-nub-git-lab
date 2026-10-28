@@ -75,6 +75,15 @@ describe('shared course assessment definitions', () => {
           steps: [],
           tasks: [
             {
+              requirementWeights: {
+                'login:rule-0-exists': 2,
+                'login:rule-0-content': 4,
+                'login:rule-1-exists': 2,
+                'login:rule-2-count': 3,
+                'login:rule-3-source': 2,
+                'login:rule-3-target': 2,
+                'login:rule-3-merged': 5,
+              },
               id: 'login',
               title: 'Merge login',
               instructions: 'Create feature/login, add login.txt, commit it, merge into main.',

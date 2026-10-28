@@ -1,3 +1,4 @@
+import { sumPoints } from '../assessments/model';
 import { requireBackend } from '../../services/supabase';
 import { facultyLabel, type Faculty } from '../auth/faculty';
 export type Attempt = {
@@ -91,7 +92,7 @@ export function resultsCSV(rows: Attempt[]) {
         r.practical_score,
         r.theory_score,
         r.practical_score !== null && r.theory_score !== null
-          ? r.practical_score + r.theory_score
+          ? sumPoints([Number(r.practical_score), Number(r.theory_score)])
           : null,
         r.status === 'graded' ? 'Finalized' : 'Pending review',
         r.released,

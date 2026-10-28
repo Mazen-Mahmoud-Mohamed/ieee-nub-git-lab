@@ -846,3 +846,112 @@ select {
   background-repeat: no-repeat;
   padding-inline-end: 36px;
 }
+
+/* A terminal-first desktop; phone helpers follow the same 900px tab breakpoint. */
+@media (min-width: 901px) {
+  .student-workspace-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  }
+  .terminal-helpers {
+    display: none;
+  }
+  .student-editor.editor-closed {
+    display: none;
+  }
+  .workspace-files-panel:has(.editor-closed) {
+    flex: 0 0 auto;
+  }
+  .workspace-files-panel:has(.editor-closed) ~ .terminal {
+    flex: 1 1 var(--terminal-height);
+    min-height: var(--terminal-height);
+    max-height: none;
+  }
+  .workspace-files-panel:not(:has(.editor-closed)) {
+    max-height: 45vh;
+  }
+  .student-workarea > .terminal {
+    min-height: 300px;
+  }
+
+  .terminal-prompt {
+    flex: 1;
+    min-width: 0;
+  }
+}
+.task-work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.task-work-actions button {
+  min-height: 44px;
+}
+.presentation-drop {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+.presentation-drop[data-dragging='true'] {
+  border-color: var(--blue);
+  background: var(--hover);
+}
+.presentation-drop input {
+  max-width: 100%;
+}
+.presentation-drop p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.session-options {
+  margin: 20px 0;
+}
+.requirement-weights {
+  display: grid;
+  gap: 10px;
+}
+.requirement-weights label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-command-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.terminal-location {
+  grid-column: 1 / -1;
+  font:
+    12px/1.5 ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.terminal-prompt {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.terminal-prompt input {
+  width: 0;
+}
+.terminal-body,
+.terminal-body pre {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.presentation-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}

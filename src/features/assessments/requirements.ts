@@ -1,15 +1,20 @@
-import type { RepoView } from '../git-engine/engine';
+import type { RepoView } from '../git-engine/engine.ts';
 import {
   legacyRequirementChecks,
   type RequirementCheck,
   type StudentIdentity,
-} from '../assignments/assignment';
-import { outcomesFor, type Definition, type Rule, type Task } from './model';
+} from '../assignments/assignment.ts';
+import { rawOutcomesFor, type Definition, type Rule, type Task } from './model.ts';
 export type RequirementState = 'completed' | 'incomplete' | 'checking' | 'unverifiable';
-export type Requirement = RequirementCheck & { status: RequirementState };
+export type Requirement = RequirementCheck & {
+  status: RequirementState;
+  points?: number;
+  earned?: number;
+};
 export type TaskProgress = {
   task: Task;
   passed: boolean;
+  earned: number;
   requirements: Requirement[];
   next: string;
 };
@@ -22,8 +27,14 @@ export function requirementProgress(
   unavailable = '',
 ): TaskProgress[] {
   const legacy = (revision: 1 | 2 = 1) =>
-    legacyRequirementChecks(view, identity, working, revision);
-  const outcomes = outcomesFor(d, view, identity, working);
+    legacyRequirementChecks(
+      view,
+      identity,
+      working,
+      revision,
+      d.gradingPolicy === 'requirements-v1',
+    );
+  const outcomes = rawOutcomesFor(d, view, identity, working);
   const at = (ref = 'main') =>
     ref === 'working'
       ? working
@@ -39,7 +50,7 @@ export function requirementProgress(
     .flatMap((s) => s.tasks)
     .map((task) => {
       const passes = (rule: Rule) =>
-        outcomesFor(
+        rawOutcomesFor(
           {
             ...d,
             sections: [
@@ -236,6 +247,19 @@ export function requirementProgress(
         (c) =>
           ({
             ...c,
+            preparation: c.preparation || (!!d.gradingPolicy && task.points === 0),
+            points:
+              d.gradingPolicy && task.points > 0 && !c.preparation
+                ? task.requirementWeights?.[task.id + ':' + c.id] || 0
+                : undefined,
+            earned:
+              d.gradingPolicy &&
+              task.points > 0 &&
+              !c.preparation &&
+              !unavailable &&
+              c.passed === true
+                ? task.requirementWeights?.[task.id + ':' + c.id] || 0
+                : 0,
             id: task.id + ':' + c.id,
             status: unavailable
               ? 'unverifiable'
@@ -248,12 +272,20 @@ export function requirementProgress(
                     : 'incomplete',
           }) as Requirement,
       );
+      const passed =
+        !unavailable &&
+        (d.gradingPolicy && task.points > 0
+          ? requirements.filter((c) => !c.preparation).every((c) => c.passed === true)
+          : !requirements.some((c) => c.passed === null) &&
+            (outcomes.find((o) => o.id === task.id)?.passed || false));
       return {
         task,
-        passed:
-          !unavailable &&
-          !requirements.some((c) => c.passed === null) &&
-          (outcomes.find((o) => o.id === task.id)?.passed || false),
+        earned: d.gradingPolicy
+          ? Math.round(requirements.reduce((sum, c) => sum + (c.earned || 0), 0) * 100) / 100
+          : passed
+            ? task.points
+            : 0,
+        passed,
         requirements,
         next:
           unavailable ||
@@ -261,4 +293,16 @@ export function requirementProgress(
           'This scored task is complete. Continue to the next task.',
       };
     });
+}
+
+// Stable check IDs are part of each published document's scoring contract.
+export function requirementCatalog(task: Task) {
+  if (task.points === 0) return [];
+  const d = { gradingPolicy: 'requirements-v1', sections: [{ tasks: [task] }] } as Definition;
+  return requirementProgress(
+    d,
+    { initialized: false, branch: 'main', branches: {}, commits: [], status: [], config: {} },
+    { full_name: '', department: '' },
+    {},
+  )[0].requirements.filter((c) => !c.preparation);
 }

@@ -61,7 +61,7 @@ export function Workspace({
   const focusEditor = useRef(false);
   const currentKey = useRef(lab.key);
   currentKey.current = lab.key;
-  const [terminalHeight, setTerminalHeight] = useState(260);
+  const [terminalHeight, setTerminalHeight] = useState(420);
   const [feedback, setFeedback] = useState('');
   const previous = useRef<{ key: string; done: Set<string> } | undefined>(undefined);
   const lastReset = useRef({ key: lab.key, generation: lab.resetGeneration });
@@ -402,9 +402,9 @@ export function Workspace({
                 <GitGraph view={lab.view} />
               </div>
             )}
-            <div className="student-editor">
+            <div className={'student-editor' + (!selected ? ' editor-closed' : '')}>
               <div className="student-editor-label">
-                {selected ? selected.split('/').pop() : 'Text editor'}
+                {selected ? selected.split('/').pop() : 'Files'}
                 <small role="status">
                   {fileSave ||
                     (lab.saving === 'Saved on this device' ? 'File saved locally' : lab.saving)}
@@ -456,8 +456,8 @@ export function Workspace({
             <input
               aria-label="Terminal height"
               type="range"
-              min="180"
-              max="480"
+              min="300"
+              max="680"
               step="20"
               value={terminalHeight}
               onChange={(e) => setTerminalHeight(Number(e.target.value))}
@@ -479,6 +479,21 @@ export function Workspace({
           onTask={(id) => {
             setTaskId(id);
             sessionStorage.setItem('task-focus:' + lab.key, id);
+          }}
+          onWork={(view) => {
+            switchView(view);
+            requestAnimationFrame(() =>
+              document
+                .querySelector<HTMLInputElement>(
+                  view === 'terminal'
+                    ? '[aria-label="Terminal command"]'
+                    : '[aria-label="Text file editor"]',
+                )
+                ?.focus(),
+            );
+          }}
+          onRecheck={() => {
+            void lab.refresh().catch((e) => setLocalError(String(e)));
           }}
           identity={identity}
           checking={lab.busy}

@@ -1,3 +1,4 @@
+import { sumPoints } from '../assessments/model';
 import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -574,7 +575,7 @@ export function Attempts({
                       <td>{r.theory_score ?? 'Pending'}</td>
                       <td>
                         {r.practical_score !== null && r.theory_score !== null
-                          ? r.practical_score + r.theory_score
+                          ? sumPoints([Number(r.practical_score), Number(r.theory_score)])
                           : 'Pending'}
                       </td>
                       <td>

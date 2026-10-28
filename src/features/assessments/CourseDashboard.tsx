@@ -3,13 +3,21 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Clock, GitBranch } from 'lucide-react';
 import { supabase, type Profile } from '../../services/supabase';
-import { firstAssessment, totals, type Definition, type AssessmentRecord } from './model';
+import {
+  firstAssessment,
+  sumPoints,
+  totals,
+  type Definition,
+  type AssessmentRecord,
+} from './model';
 import { facultyLabel } from '../auth/faculty';
 import { ASSIGNMENT_ID } from '../assignments/assignment';
 type Card = AssessmentRecord & { definition: Definition };
 type Attempt = {
   id: string;
   assignment_id: string;
+  assignment_version: number;
+  definition?: Definition;
   status: string;
   receipt: string;
   released?: boolean;
@@ -48,7 +56,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
         client.from('assessment_versions').select('assessment_id,version,document'),
         client
           .from('attempts')
-          .select('id,assignment_id,status,receipt')
+          .select('id,assignment_id,assignment_version,status,receipt')
           .eq('student_id', profile.id)
           .order('created_at', { ascending: false }),
         client.from('released_results').select('*'),
@@ -67,6 +75,9 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
       setAttempts(
         (work.data || []).map((a) => ({
           ...a,
+          definition: versions.data?.find(
+            (v) => v.assessment_id === a.assignment_id && v.version === a.assignment_version,
+          )?.document,
           ...results.data?.find((r) => r.attempt_id === a.id),
         })),
       );
@@ -136,6 +147,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                             ? 'Scheduled'
                             : 'Not started';
                   const points = totals(d);
+                  const attemptPoints = attempt?.definition ? totals(attempt.definition) : null;
                   return (
                     <article className="form-card assessment-card" key={a.id}>
                       <div className="assignment-label">
@@ -157,7 +169,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                           }
                         </span>
                         <span>
-                          {points.practical + points.theory} points
+                          {sumPoints([points.practical, points.theory])} points
                           {points.bonus ? ' + ' + points.bonus + ' bonus' : ''}
                         </span>
                         {type === 'exam' && (
@@ -179,10 +191,16 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
                       {attempt?.released && (
                         <p className="result-summary">
                           Score:{' '}
-                          {(Number(attempt.practical_score) || 0) +
-                            (Number(attempt.theory_score) || 0)}{' '}
-                          / {points.practical + points.theory}
-                          {points.bonus ? ' + bonus' : ''}
+                          {sumPoints([
+                            Number(attempt.practical_score) || 0,
+                            Number(attempt.theory_score) || 0,
+                          ])}{' '}
+                          /{' '}
+                          {attemptPoints
+                            ? sumPoints([attemptPoints.practical, attemptPoints.theory])
+                            : '—'}
+                          {attemptPoints?.bonus ? ' + bonus' : ''} · Version{' '}
+                          {attempt.assignment_version}
                           <br />
                           {attempt.feedback}
                         </p>
@@ -282,7 +300,7 @@ export function AssessmentDetails({
       <p className="lead">{d.description}</p>
       <div className="overview-meta">
         <span>
-          {points.practical + points.theory} points + {points.bonus} bonus
+          {sumPoints([points.practical, points.theory])} points + {points.bonus} bonus
         </span>
         <span>
           {d.attemptLimit} allowed attempt{d.attemptLimit > 1 ? 's' : ''}

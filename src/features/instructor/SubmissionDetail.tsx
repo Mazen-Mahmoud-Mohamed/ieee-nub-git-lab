@@ -1,3 +1,4 @@
+import { sumPoints } from '../assessments/model';
 import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -24,7 +25,12 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
   const questions = definition.questions;
   const points = totals(definition);
   const [taskResults, setTaskResults] = useState<
-    Array<{ task_key: string; passed: boolean; points: number }>
+    Array<{
+      task_key: string;
+      passed: boolean;
+      points: number;
+      requirement_results?: Array<{ id: string; passed: boolean; points: number; earned: number }>;
+    }>
   >([]);
   const [events, setEvents] = useState<Activity[]>([]);
   const [answers, setAnswers] = useState<Array<{ question_id: string; answer: string }>>([]);
@@ -65,7 +71,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
             client.rpc('instructor_review_context', { p_attempt: attempt.id }),
             client
               .from('task_results')
-              .select('task_key,passed,points')
+              .select('task_key,passed,points,requirement_results')
               .eq('attempt_id', attempt.id),
           ]);
         for (const r of [
@@ -88,10 +94,22 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           taskData.data?.length
             ? taskData.data
             : (contextData.data?.checkpoint_outcomes || []).map(
-                (r: { id: string; passed: boolean; points: number }) => ({
+                (r: {
+                  id: string;
+                  passed: boolean;
+                  points: number;
+                  earned?: number;
+                  requirements?: Array<{
+                    id: string;
+                    passed: boolean;
+                    points: number;
+                    earned: number;
+                  }>;
+                }) => ({
                   task_key: r.id,
                   passed: r.passed,
-                  points: r.passed ? r.points : 0,
+                  points: r.earned ?? (r.passed ? r.points : 0),
+                  requirement_results: r.requirements,
                 }),
               ),
         );
@@ -327,11 +345,19 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
             evidence; they do not replace official marks.
           </p>
           {taskResults.map((t) => (
-            <p className={t.passed ? 'passed' : 'muted'} key={t.task_key}>
+            <div className={t.passed ? 'passed' : 'muted'} key={t.task_key}>
               {definition.sections.flatMap((s) => s.tasks).find((x) => x.id === t.task_key)
                 ?.title || t.task_key}{' '}
-              · {t.passed ? 'Completed' : 'Incomplete'} · {t.points} points
-            </p>
+              · {t.passed ? 'Completed' : 'Incomplete'} · {t.points} /{' '}
+              {definition.sections.flatMap((s) => s.tasks).find((task) => task.id === t.task_key)
+                ?.points ?? '?'}{' '}
+              points
+              {t.requirement_results?.map((c) => (
+                <small key={c.id} style={{ display: 'block' }}>
+                  {c.id}: {c.earned} / {c.points} · {c.passed ? 'Completed' : 'Incomplete'}
+                </small>
+              ))}
+            </div>
           ))}
           {!taskResults.length && <p>No finalized practical results recorded.</p>}
           {checks.map((t) => (
@@ -430,7 +456,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
             />
           </label>
           <p>
-            Theory total: {Object.values(scores).reduce((s, n) => s + Number(n || 0), 0)} /{' '}
+            Theory total: {sumPoints(Object.values(scores).map((n) => Number(n || 0)))} /{' '}
             {points.theory} · Practical: {attempt.practical_score ?? 'Pending'}
           </p>
           <div className="review-actions">

@@ -6,6 +6,7 @@ import { type StudentIdentity } from '../assignments/assignment';
 import {
   firstAssessment,
   outcomesFor,
+  earnedPoints,
   totals,
   answerPresent,
   type Definition,
@@ -83,7 +84,7 @@ export function Review({
                 {o.bonus ? ' (optional)' : ''}
               </span>
               <strong>
-                {o.passed ? o.points : 0}/{o.points}
+                {earnedPoints(o)}/{o.points}
               </strong>
             </div>
           ))}
@@ -93,11 +94,27 @@ export function Review({
           <ShieldCheck size={20} />
           <span>Provisional practical points</span>
           <strong>
-            {outcomes.filter((o) => o.passed && !o.bonus).reduce((sum, o) => sum + o.points, 0)} /{' '}
-            {points.practical}
+            {outcomes
+              .filter((o) => !o.bonus)
+              .reduce(
+                (sum, o) =>
+                  definition.gradingPolicy
+                    ? Math.round((sum + earnedPoints(o)) * 100) / 100
+                    : sum + earnedPoints(o),
+                0,
+              )}{' '}
+            / {points.practical}
             {points.bonus > 0
               ? ' · Bonus ' +
-                outcomes.filter((o) => o.passed && o.bonus).reduce((s, o) => s + o.points, 0) +
+                outcomes
+                  .filter((o) => o.bonus)
+                  .reduce(
+                    (s, o) =>
+                      definition.gradingPolicy
+                        ? Math.round((s + earnedPoints(o)) * 100) / 100
+                        : s + earnedPoints(o),
+                    0,
+                  ) +
                 ' / ' +
                 points.bonus
               : ''}
@@ -172,6 +189,14 @@ export function Review({
               !!lab.receipt
             }
             onClick={async () => {
+              if (
+                definition.gradingPolicy &&
+                (outcomes.some((o) => !o.bonus && !o.passed) || missing.length) &&
+                !window.confirm(
+                  'You have unfinished requirements. You can still submit now and receive the points you earned. Select Cancel to continue working, or OK to submit.',
+                )
+              )
+                return;
               setBusy(true);
               setError('');
               try {

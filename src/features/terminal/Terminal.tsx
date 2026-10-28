@@ -167,11 +167,12 @@ export function Terminal({
           requestAnimationFrame(() => field.current?.focus());
         }}
       >
-        <label className="terminal-prompt" htmlFor="command">
+        <div className="terminal-location">
           <span className="prompt-user">student@ieee-nub</span>{' '}
           <span className="prompt-path">{lab.engine.cwd}</span>{' '}
           <span className="prompt-branch">({lab.view.branch})</span>
-          <br />
+        </div>
+        <label className="terminal-prompt" htmlFor="command">
           <span className="prompt-symbol">$</span>
           <input
             id="command"
@@ -213,14 +214,14 @@ export function Terminal({
               }
             }}
           />
-          <button
-            type="submit"
-            className="terminal-run"
-            disabled={lab.busy || lab.readOnly || !input.trim()}
-          >
-            {lab.busy ? 'Running…' : 'Run'}
-          </button>
         </label>
+        <button
+          type="submit"
+          className="terminal-run"
+          disabled={lab.busy || lab.readOnly || !input.trim()}
+        >
+          {lab.busy ? 'Running…' : 'Run'}
+        </button>
       </form>
       <div className="terminal-helpers" aria-label="Command helpers">
         <button

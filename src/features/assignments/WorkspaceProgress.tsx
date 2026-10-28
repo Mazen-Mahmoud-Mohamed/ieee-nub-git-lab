@@ -13,11 +13,22 @@ export function WorkspaceProgress({
   status: string;
   error: string;
 }) {
-  const required = progress.filter((p) => !p.task.bonus),
+  const required = progress.filter(
+      (p) => !p.task.bonus && (!definition.gradingPolicy || p.task.points > 0),
+    ),
     done = required.filter((p) => p.passed),
     points = totals(definition);
-  const earned = done.reduce((n, p) => n + p.task.points, 0),
-    bonus = progress.filter((p) => p.task.bonus && p.passed).reduce((n, p) => n + p.task.points, 0);
+  const earned = required.reduce(
+      (n, p) => (definition.gradingPolicy ? Math.round((n + p.earned) * 100) / 100 : n + p.earned),
+      0,
+    ),
+    bonus = progress
+      .filter((p) => p.task.bonus)
+      .reduce(
+        (n, p) =>
+          definition.gradingPolicy ? Math.round((n + p.earned) * 100) / 100 : n + p.earned,
+        0,
+      );
   const index = progress.findIndex((p) => p.task.id === taskId);
   return (
     <div className="student-score workspace-progress" aria-label="Task progress">

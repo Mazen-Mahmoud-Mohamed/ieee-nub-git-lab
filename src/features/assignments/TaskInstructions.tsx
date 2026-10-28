@@ -16,6 +16,8 @@ export function TaskInstructions({
   basePath,
   view,
   recovery,
+  onWork = () => {},
+  onRecheck = () => {},
 }: {
   definition: Definition;
   progress: TaskProgress[];
@@ -27,6 +29,8 @@ export function TaskInstructions({
   basePath: string;
   view: RepoView;
   recovery?: ReactNode;
+  onWork?: (view: string) => void;
+  onRecheck?: () => void;
 }) {
   const tasks = d.sections.flatMap((s) => s.tasks.map((task) => ({ task, section: s }))),
     index = Math.max(
@@ -42,6 +46,7 @@ export function TaskInstructions({
     feedback = state ? taskFeedback(state, view) : null;
   const displayRequirements = (() => {
     if (
+      d.gradingPolicy ||
       !state ||
       !current?.task.rules.some((r) => r.type === 'legacy' && r.outcomeId === 'separate')
     )
@@ -97,7 +102,11 @@ export function TaskInstructions({
             {tasks.map((t, i) => (
               <option key={t.task.id} value={t.task.id}>
                 {i + 1}. {taskGuide(t.task).title}
-                {t.task.bonus ? ' (optional)' : ''}
+                {d.gradingPolicy && t.task.points === 0
+                  ? ' (unscored)'
+                  : t.task.bonus
+                    ? ' (optional)'
+                    : ''}
                 {progress.find((p) => p.task.id === t.task.id)?.passed ? ' · Complete' : ''}
               </option>
             ))}
@@ -116,10 +125,17 @@ export function TaskInstructions({
         <>
           <div className="task-heading">
             <span className={'task-status ' + (state.passed ? 'done' : '')}>
-              {checking ? 'Checking…' : state.passed ? 'Complete' : 'In progress'}
+              {d.gradingPolicy && current.task.points === 0
+                ? 'Informational'
+                : checking
+                  ? 'Checking…'
+                  : state.passed
+                    ? 'Complete'
+                    : 'In progress'}
             </span>
             <span>
-              {current.task.points} points{current.task.bonus ? ' · Optional bonus' : ''}
+              {state.earned} / {current.task.points} points
+              {current.task.bonus ? ' · Optional bonus' : ''}
             </span>
           </div>
           <h2 dir="auto">{guide?.title}</h2>
@@ -170,10 +186,19 @@ export function TaskInstructions({
               <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
             </div>
           )}
+          <div className="task-work-actions">
+            <button className="outline-button" onClick={() => onWork('terminal')}>
+              Open Terminal
+            </button>
+            <button className="outline-button" onClick={() => onWork('files')}>
+              Open Files
+            </button>
+          </div>
           <h3>Check your work</h3>
           <small>
-            Earn all {current.task.points} points when every scored requirement passes. Checklist
-            items do not earn separate points.
+            {d.gradingPolicy
+              ? `${state.earned} / ${current.task.points} earned · ${Math.round((current.task.points - state.earned) * 100) / 100} points remaining. Each scored requirement earns its own points.`
+              : `Earn all ${current.task.points} points when every scored requirement passes. Checklist items do not earn separate points.`}
           </small>
           <ol className="requirement-list">
             {displayRequirements.map((c) => (
@@ -185,7 +210,11 @@ export function TaskInstructions({
                   {c.label}
                   <small className="requirement-state">
                     {labels[c.status]}
-                    {c.preparation ? ' · Preparation' : ''}
+                    {c.preparation
+                      ? ' · Preparation · Unscored'
+                      : c.points !== undefined
+                        ? ` · ${c.earned || 0} / ${c.points} points`
+                        : ''}
                   </small>
                 </span>
               </li>
@@ -200,6 +229,33 @@ export function TaskInstructions({
                   : 'What to do next'}
             </strong>
             <p>{checking ? 'Checking your latest changes…' : feedback?.text}</p>
+            {!state.passed && !feedback?.history && (
+              <button
+                className="text-button"
+                onClick={() =>
+                  onWork(
+                    current.task.rules.some(
+                      (r) => r.type === 'file' || (r.type === 'legacy' && r.outcomeId === 'files'),
+                    )
+                      ? 'files'
+                      : 'terminal',
+                  )
+                }
+              >
+                Fix This Step
+              </button>
+            )}
+            <button className="text-button" disabled={checking} onClick={onRecheck}>
+              Check again
+            </button>
+            {feedback?.history && (
+              <p>
+                The introductory commits share this repository with later tasks. New commits cannot
+                change those introductions. Keep working for other points, or use the
+                policy-controlled Restart Attempt to rebuild the shared history. All work in this
+                attempt is retained; a fresh attempt starts from the published starter.
+              </p>
+            )}
             {feedback?.history && recovery && (
               <button
                 className="text-button"

@@ -276,16 +276,6 @@ export function LearningContent() {
                   onChange={(e) => update({ title: e.target.value })}
                 />
               </label>
-              <label>
-                Lesson or overview text
-                <textarea
-                  dir="auto"
-                  rows={7}
-                  maxLength={20000}
-                  value={editing.document.body}
-                  onChange={(e) => update({ body: e.target.value })}
-                />
-              </label>
               {editing.kind === 'lesson' && (
                 <SessionMaterials
                   id={editing.id}
@@ -317,70 +307,83 @@ export function LearningContent() {
                   }}
                 />
               )}
-              <h4>Educational resources</h4>
-              <p>Link to HTTPS materials. This does not upload, copy or delete external files.</p>
-              {editing.document.links.map((link, i) => (
-                <div className="resource-editor" key={i}>
-                  <label>
-                    Resource {i + 1} title
-                    <input
-                      required
-                      maxLength={100}
-                      dir="auto"
-                      value={link.label}
-                      onChange={(e) =>
-                        update({
-                          links: editing.document.links.map((x, j) =>
-                            j === i ? { ...x, label: e.target.value } : x,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Resource {i + 1} URL
-                    <input
-                      type="url"
-                      required
-                      pattern="https://.*"
-                      value={link.url}
-                      onChange={(e) =>
-                        update({
-                          links: editing.document.links.map((x, j) =>
-                            j === i ? { ...x, url: e.target.value } : x,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => {
-                      if (
-                        (link.label || link.url) &&
-                        !window.confirm(
-                          `Remove resource "${link.label || link.url}" from this draft? Published versions and the external file are unchanged.`,
+              <details className="session-options">
+                <summary>Optional description and supporting resources</summary>{' '}
+                <label>
+                  Lesson or overview text
+                  <textarea
+                    dir="auto"
+                    rows={7}
+                    maxLength={20000}
+                    value={editing.document.body}
+                    onChange={(e) => update({ body: e.target.value })}
+                  />
+                </label>
+                <h4>Educational resources</h4>
+                <p>Link to HTTPS materials. This does not upload, copy or delete external files.</p>
+                {editing.document.links.map((link, i) => (
+                  <div className="resource-editor" key={i}>
+                    <label>
+                      Resource {i + 1} title
+                      <input
+                        required
+                        maxLength={100}
+                        dir="auto"
+                        value={link.label}
+                        onChange={(e) =>
+                          update({
+                            links: editing.document.links.map((x, j) =>
+                              j === i ? { ...x, label: e.target.value } : x,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Resource {i + 1} URL
+                      <input
+                        type="url"
+                        required
+                        pattern="https://.*"
+                        value={link.url}
+                        onChange={(e) =>
+                          update({
+                            links: editing.document.links.map((x, j) =>
+                              j === i ? { ...x, url: e.target.value } : x,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        if (
+                          (link.label || link.url) &&
+                          !window.confirm(
+                            `Remove resource "${link.label || link.url}" from this draft? Published versions and the external file are unchanged.`,
+                          )
                         )
-                      )
-                        return;
-                      update({ links: editing.document.links.filter((_, j) => i !== j) });
-                    }}
-                  >
-                    Remove resource {i + 1}
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="outline-button"
-                disabled={editing.document.links.length >= 20}
-                onClick={() =>
-                  update({ links: [...editing.document.links, { label: '', url: '' }] })
-                }
-              >
-                Add resource link
-              </button>
+                          return;
+                        update({ links: editing.document.links.filter((_, j) => i !== j) });
+                      }}
+                    >
+                      Remove resource {i + 1}
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="outline-button"
+                  disabled={editing.document.links.length >= 20}
+                  onClick={() =>
+                    update({ links: [...editing.document.links, { label: '', url: '' }] })
+                  }
+                >
+                  Add resource link
+                </button>
+              </details>
               <details className="draft-session-preview">
                 <summary>Preview this draft</summary>
                 <h3 dir="auto">

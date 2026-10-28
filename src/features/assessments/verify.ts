@@ -3,6 +3,8 @@ import {
   assertDefinition,
   gradeObjective,
   outcomesFor,
+  earnedPoints,
+  sumPoints,
   sanitizeAnswers,
   type Definition,
 } from './model.ts';
@@ -63,7 +65,7 @@ export async function verifyAssessment(
         .map(async (p) => [p.slice(engine.dir.length + 1), await engine.read(p)]),
     ),
   );
-  const outcomes = outcomesFor(d, view, identity, working);
+
   // Never let a forged Git index award a clean-working-tree condition.
   if (view.initialized) {
     const head = await engine.head();
@@ -72,18 +74,12 @@ export async function verifyAssessment(
       JSON.stringify(Object.entries(files).sort()) !==
       JSON.stringify(Object.entries(working).sort())
     )
-      for (const t of d.sections.flatMap((s) => s.tasks))
-        if (
-          t.rules.some(
-            (r) =>
-              (r.type === 'repository' && r.clean) ||
-              (r.type === 'legacy' && r.outcomeId === 'clean'),
-          )
-        ) {
-          const o = outcomes.find((o) => o.id === t.id);
-          if (o) o.passed = false;
-        }
+      // Keep genuine staged-file evidence and add a dirty marker only if the
+      // supplied index incorrectly claims every file matches HEAD.
+      if (view.status.every(([, h, w, s]) => h === w && h === s))
+        view.status.push(['__verified_dirty__', 1, 2, 1]);
   }
+  const outcomes = outcomesFor(d, view, identity, working);
   const grades = gradeObjective(d, answers, keys);
   const config = Object.fromEntries(
     Object.entries(payload.config || {}).filter(
@@ -107,7 +103,11 @@ export async function verifyAssessment(
     },
     outcomes,
     grades,
-    practicalScore: outcomes.filter((o) => o.passed).reduce((s, o) => s + o.points, 0),
-    objectiveScore: grades.reduce((s, g) => s + g.points, 0),
+    practicalScore: d.gradingPolicy
+      ? sumPoints(outcomes.map(earnedPoints))
+      : outcomes.reduce((s, o) => s + earnedPoints(o), 0),
+    objectiveScore: d.gradingPolicy
+      ? sumPoints(grades.map((g) => g.points))
+      : grades.reduce((s, g) => s + g.points, 0),
   };
 }

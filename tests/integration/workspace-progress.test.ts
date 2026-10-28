@@ -111,7 +111,7 @@ describe('workspace requirements from real Git state', () => {
   });
   it('uses arbitrary published paths and distinguishes draft, committed and dirty state', async () => {
     const d: Definition = {
-      ...blankDefinition(),
+      ...blankDefinition('assignment', 'legacy'),
       projectName: 'Custom-Git',
       sections: [
         {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { requireBackend } from '../../services/supabase';
 import { DriveVideo } from './SessionResources';
 import {
@@ -45,40 +45,141 @@ export function SessionMaterials({
       live = false;
     };
   }, []);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [selectedFile, setSelectedFile] = useState('');
+  const uploading = useRef(false);
+  async function upload(file: File) {
+    if (busy || uploading.current) return;
+    uploading.current = true;
+    try {
+      if (
+        document.presentation_id &&
+        !window.confirm(
+          'Replace the presentation in this draft? The current published version and its original file remain retained until you publish a new version.',
+        )
+      ) {
+        return;
+      }
+      setSelectedFile(`${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MiB`);
+      onBusy(true);
+      setError('');
+      setNotice('');
+      setProgress(0);
+      try {
+        if (file.size > MAX_PRESENTATION_BYTES) throw Error('Presentation must be at most 25 MiB.');
+        validatePresentation(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+        await prepare();
+        const material = await uploadPresentation(id, file, setProgress);
+        update({ presentation_id: material });
+        setNotice('Uploaded and validated. Save or publish this draft to attach the presentation.');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        onBusy(false);
+        setProgress(null);
+      }
+    } finally {
+      uploading.current = false;
+    }
+  }
   return (
     <section className="session-material-editor">
-      <h4>Learning session</h4>
-      <div className="session-numbers">
+      <h4>PowerPoint Presentation</h4>
+      <div
+        className="presentation-drop"
+        data-dragging={dragging}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const file = e.dataTransfer.files[0];
+          if (e.dataTransfer.files.length !== 1) {
+            setError('Choose one PPTX presentation at a time.');
+            return;
+          }
+          if (file) void upload(file);
+        }}
+      >
+        <p>Drop a .pptx presentation here (up to 25 MiB).</p>
         <label>
-          Session number
+          Upload PowerPoint (.pptx, up to 25 MiB)
           <input
-            type="number"
-            min="0"
-            max="999999"
-            value={document.session_number || 0}
-            onChange={(e) => update({ session_number: Number(e.target.value) })}
+            className="presentation-file-input"
+            type="file"
+            accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            disabled={busy}
+            ref={inputRef}
+            onChange={async (e) => {
+              const input = e.currentTarget,
+                file = input.files?.[0];
+              if (file) await upload(file);
+              input.value = '';
+            }}
           />
         </label>
-        <label>
-          Display order
-          <input
-            type="number"
-            min="0"
-            max="999999"
-            value={document.display_order || 0}
-            onChange={(e) => update({ display_order: Number(e.target.value) })}
-          />
-        </label>
+
+        <button
+          type="button"
+          className="outline-button"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          Browse Files
+        </button>
+        {selectedFile && <p role="status">{selectedFile}</p>}
       </div>
-      <label>
-        Topics (one per line)
-        <textarea
-          dir="auto"
-          rows={3}
-          value={(document.topics || []).join('\n')}
-          onChange={(e) => update({ topics: e.target.value.split('\n') })}
-        />
-      </label>
+
+      {progress !== null && (
+        <div role="status">
+          <progress max="100" value={progress} />
+          {progress}% transferred · waiting for server validation
+        </div>
+      )}
+      {document.presentation_id && (
+        <>
+          <p>PowerPoint attached to this draft. Published copies are retained.</p>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Remove this presentation from the draft? Published copies and the stored file remain retained.',
+                )
+              )
+                update({ presentation_id: null });
+            }}
+          >
+            Remove draft presentation
+          </button>
+          <button
+            className="text-button"
+            type="button"
+            onClick={async () => {
+              try {
+                const url = await presentationURL(id, false, document.presentation_id!);
+                setDraftUrl(url);
+              } catch (e) {
+                setError(String(e));
+              }
+            }}
+          >
+            Get draft presentation link
+          </button>
+          {draftUrl && (
+            <a className="outline-button" href={draftUrl} target="_blank" rel="noopener noreferrer">
+              Open draft PowerPoint ↗
+            </a>
+          )}
+        </>
+      )}
+
+      <h4>Recorded Lecture</h4>
       <label>
         Google Drive video link
         <input
@@ -117,113 +218,58 @@ export function SessionMaterials({
           <DriveVideo url={document.video_url} />
         </details>
       )}
-      <label>
-        Related assessment (optional)
-        <select
-          value={document.related_assessment_id || ''}
-          onChange={(e) => update({ related_assessment_id: e.target.value || null })}
-        >
-          <option value="">No related assessment</option>
-          {assessments.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p>
-        The practice button appears only when the published assessment is available to the student.
-        Starting still checks deadlines and attempt limits.
-      </p>
-      <label>
-        Upload PowerPoint (.pptx, up to 25 MiB)
-        <input
-          type="file"
-          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-          disabled={busy}
-          onChange={async (e) => {
-            const input = e.currentTarget;
-            const file = input.files?.[0];
-            if (!file) return;
-            if (
-              document.presentation_id &&
-              !window.confirm(
-                'Replace the presentation in this draft? The current published version and its original file remain retained until you publish a new version.',
-              )
-            ) {
-              input.value = '';
-              return;
-            }
-            onBusy(true);
-            setError('');
-            setNotice('');
-            setProgress(0);
-            try {
-              if (file.size > MAX_PRESENTATION_BYTES)
-                throw Error('Presentation must be at most 25 MiB.');
-              validatePresentation(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
-              await prepare();
-              const material = await uploadPresentation(id, file, setProgress);
-              update({ presentation_id: material });
-              setNotice(
-                'Uploaded and validated. Save or publish this draft to attach the presentation.',
-              );
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            } finally {
-              input.value = '';
-              onBusy(false);
-              setProgress(null);
-            }
-          }}
-        />
-      </label>
-      {progress !== null && (
-        <div role="status">
-          <progress max="100" value={progress} />
-          {progress}% transferred · waiting for server validation
+      <details className="session-options">
+        <summary>Session options: order, topics and related practice</summary>{' '}
+        <div className="session-numbers">
+          <label>
+            Session number
+            <input
+              type="number"
+              min="0"
+              max="999999"
+              value={document.session_number || 0}
+              onChange={(e) => update({ session_number: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Display order
+            <input
+              type="number"
+              min="0"
+              max="999999"
+              value={document.display_order || 0}
+              onChange={(e) => update({ display_order: Number(e.target.value) })}
+            />
+          </label>
         </div>
-      )}
-      {document.presentation_id && (
-        <>
-          <p>
-            Presentation attached to draft: <code>{document.presentation_id}</code>
-          </p>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => {
-              if (
-                window.confirm(
-                  'Remove this presentation from the draft? Published copies and the stored file remain retained.',
-                )
-              )
-                update({ presentation_id: null });
-            }}
+        <label>
+          Topics (one per line)
+          <textarea
+            dir="auto"
+            rows={3}
+            value={(document.topics || []).join('\n')}
+            onChange={(e) => update({ topics: e.target.value.split('\n') })}
+          />
+        </label>
+        <label>
+          Related assessment (optional)
+          <select
+            value={document.related_assessment_id || ''}
+            onChange={(e) => update({ related_assessment_id: e.target.value || null })}
           >
-            Remove draft presentation
-          </button>
-          <button
-            className="text-button"
-            type="button"
-            onClick={async () => {
-              try {
-                const url = await presentationURL(id, false, document.presentation_id!);
-                setDraftUrl(url);
-              } catch (e) {
-                setError(String(e));
-              }
-            }}
-          >
-            Get draft presentation link
-          </button>
-          {draftUrl && (
-            <a className="outline-button" href={draftUrl} target="_blank" rel="noopener noreferrer">
-              Open draft PowerPoint ↗
-            </a>
-          )}
-        </>
-      )}
+            <option value="">No related assessment</option>
+            {assessments.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p>
+          The practice button appears only when the published assessment is available to the
+          student. Starting still checks deadlines and attempt limits.
+        </p>
+      </details>
       {notice && <p role="status">{notice}</p>}
       {error && (
         <p className="error" role="alert">

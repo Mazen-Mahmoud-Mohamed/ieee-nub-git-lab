@@ -7,6 +7,304 @@ import { readFile } from 'node:fs/promises';
 import { test, expect, devices, type Page } from '@playwright/test';
 import { managementDatabase, ADMIN, TEACHER, STUDENT } from '../helpers/managementDatabase';
 import { blankDefinition } from '../../src/features/assessments/model';
+import { firstAssessment } from '../../src/features/assessments/model';
+import { requirementCatalog } from '../../src/features/assessments/requirements';
+import { weightedFundamentalsFixture } from '../helpers/weightedFundamentals';
+import { GitEngine } from '../../src/features/git-engine/engine';
+
+test('dashboard released scores retain the attempt version maximum after a differently weighted publication', async ({
+  page,
+}) => {
+  const doc = {
+    ...blankDefinition(),
+    releaseImmediately: true,
+    sections: [
+      {
+        id: 's',
+        title: 'S',
+        description: '',
+        steps: [],
+        tasks: [
+          {
+            id: 't',
+            title: 'Create file',
+            instructions: 'Create about.txt.',
+            points: 0.1,
+            bonus: false,
+            rules: [{ type: 'file' as const, path: 'about.txt', ref: 'working' }],
+            requirementWeights: { 't:rule-0-exists': 0.1 },
+          },
+        ],
+      },
+    ],
+    questions: [
+      {
+        id: 'q',
+        prompt: 'Git?',
+        kind: 'boolean',
+        manual: false,
+        required: true,
+        options: ['True', 'False'],
+        correctAnswers: ['True'],
+        points: 0.2,
+      },
+    ],
+  };
+  const id = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: doc,
+    p_publish: true,
+  });
+  const attempt = await h.rpc(STUDENT, 'start_assessment', { p_assessment: id });
+  const e = new GitEngine(undefined, '/Git-Exercise');
+  await e.execute('mkdir Git-Exercise');
+  await e.execute('cd Git-Exercise');
+  await e.write('about.txt', 'Present');
+  const v = await verifyAssessment(
+    doc as any,
+    { snapshot: e.fs.snapshot(), answers: { q: 'True' }, events: e.events },
+    { full_name: 'Student Example', department: 'Engineering' },
+    { q: { correctAnswers: ['True'] } },
+  );
+  await h.db.query('select public.accept_assessment_checkpoint($1,$2,0,$3,$4,$5,$6,$7,true,$8)', [
+    STUDENT,
+    attempt.id,
+    JSON.stringify(v.payload),
+    JSON.stringify(v.outcomes),
+    JSON.stringify(v.grades),
+    v.practicalScore,
+    v.objectiveScore,
+    crypto.randomUUID(),
+  ]);
+  const next = structuredClone(doc);
+  next.sections[0].tasks[0].points = 1;
+  next.sections[0].tasks[0].requirementWeights['t:rule-0-exists'] = 1;
+  next.questions[0].points = 2;
+  await h.rpc(TEACHER, 'save_assessment', { p_id: id, p_document: next, p_publish: true });
+  await backend(page, STUDENT);
+  await page.goto('/ieee-git-lab/#/dashboard');
+  await expect(
+    page
+      .locator('.assessment-card')
+      .filter({ hasText: 'New Git assignment' })
+      .locator('.result-summary'),
+  ).toContainText('Score: 0.3 / 0.3 · Version 1');
+  await expect(
+    page
+      .locator('.assessment-card')
+      .filter({ hasText: 'New Git assignment' })
+      .locator('.assessment-meta'),
+  ).toContainText('3 points');
+});
+
+test('instructor republishes all Git Fundamentals task weights using readable labels with no internal ID entry', async ({
+  page,
+}) => {
+  const id = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: firstAssessment,
+    p_publish: true,
+  });
+  const old = await h.rpc(STUDENT, 'start_assessment', { p_assessment: id });
+  await backend(page, TEACHER);
+  await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
+  page.once('dialog', (d) => d.accept());
+  await page.getByLabel('Scoring policy', { exact: true }).selectOption('requirements-v1');
+  await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
+  const fixture = weightedFundamentalsFixture();
+  const tasks = fixture.sections.flatMap((s) => s.tasks);
+  for (const [i, task] of tasks.entries()) {
+    const card = page.locator('.builder-task').nth(i);
+    for (const c of requirementCatalog(task))
+      await card
+        .getByLabel('Points: ' + c.label, { exact: true })
+        .fill(String(task.requirementWeights![c.id]));
+    expect(await card.locator('.requirement-weights').innerText()).not.toContain(':rule-');
+  }
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+  }
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Publish new version', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Published a new immutable version');
+  const versions = (
+    await h.db.query<any>(
+      'select version,document from public.assessment_versions where assessment_id=$1 order by version',
+      [id],
+    )
+  ).rows;
+  expect(versions).toHaveLength(2);
+  expect(versions[0].document.gradingPolicy).toBeUndefined();
+  expect(
+    versions[1].document.sections.flatMap((s: any) => s.tasks).map((t: any) => t.points),
+  ).toEqual(tasks.map((t) => t.points));
+  expect((await h.rpc(STUDENT, 'assessment_state', { p_attempt: old.id })).assignment_version).toBe(
+    1,
+  );
+});
+test('new requirement policy submits incomplete work for authoritative partial points and reloads its official breakdown', async ({
+  page,
+}) => {
+  const d = {
+    ...blankDefinition('assignment', 'legacy'),
+    gradingPolicy: 'requirements-v1' as const,
+    format: 'practical' as const,
+    releaseImmediately: true,
+    sections: [
+      {
+        id: 'work',
+        title: 'Work',
+        description: '',
+        steps: [],
+        tasks: [
+          {
+            id: 't',
+            title: 'Write a file',
+            instructions: 'Write Correct in about.txt.',
+            points: 10,
+            bonus: false,
+            rules: [
+              {
+                type: 'file' as const,
+                path: 'about.txt',
+                ref: 'working',
+                match: 'exact' as const,
+                value: 'Correct',
+              },
+            ],
+            requirementWeights: { 't:rule-0-exists': 3, 't:rule-0-content': 7 },
+          },
+        ],
+      },
+    ],
+  };
+  const id = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: d,
+    p_publish: true,
+  });
+  await backend(page, STUDENT);
+  await page.goto('/ieee-git-lab/#/assessments/' + id);
+  await page.getByRole('checkbox', { name: /Save my files/ }).check();
+  await page.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
+  const show = async (name: string) => {
+    const tab = page.getByRole('tab', { name, exact: true });
+    if ((page.viewportSize()?.width || 1440) <= 900) await tab.click();
+  };
+  await show('Terminal');
+  await expect(page.getByLabel('Terminal command')).toBeVisible();
+  for (const cmd of ['mkdir Git-Exercise', 'cd Git-Exercise', 'echo Wrong > about.txt']) {
+    await page.getByLabel('Terminal command').fill(cmd);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  }
+  await show('Task');
+  await expect(page.getByText('Provisional: 3 / 10 points', { exact: true })).toBeVisible();
+  await expect(page.getByText(/3 \/ 3 points/)).toBeVisible();
+  await page.getByRole('button', { name: 'Fix This Step', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text file editor', exact: true }).fill('Correct');
+  await show('Task');
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  await expect(page.getByText('Provisional: 10 / 10 points', { exact: true })).toBeVisible();
+  await show('Files');
+  await page.getByRole('textbox', { name: 'Text file editor', exact: true }).fill('Wrong');
+  await show('Task');
+  await expect(page.getByText('Provisional: 3 / 10 points', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('unfinished requirements');
+    void dialog.dismiss();
+  });
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review & submit', exact: true })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  const result = (
+    await h.db.query<any>(
+      'select g.practical_score,a.id from public.grading_summaries g join public.attempts a on a.id=g.attempt_id where a.assignment_id=$1',
+      [id],
+    )
+  ).rows[0];
+  expect(Number(result.practical_score)).toBe(3);
+  expect(
+    (
+      await h.asUser(
+        STUDENT,
+        'select requirement_results from public.task_results where attempt_id=$1',
+        [result.id],
+      )
+    ).rows[0].requirement_results,
+  ).toHaveLength(2);
+  await page.reload();
+  await page.getByText('Official requirement points', { exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Write a file: 3 / 10', exact: true }),
+  ).toBeVisible();
+});
+test('instructor explicitly configures requirement weights before publishing a new immutable scoring version', async ({
+  page,
+}) => {
+  const doc = {
+    ...blankDefinition('assignment', 'legacy'),
+    format: 'practical',
+    sections: [
+      {
+        id: 'section',
+        title: 'One file',
+        description: '',
+        steps: [],
+        tasks: [
+          {
+            id: 't',
+            title: 'Write about',
+            instructions: 'Write Hello.',
+            points: 10,
+            bonus: false,
+            rules: [
+              { type: 'file', path: 'about.txt', ref: 'working', match: 'exact', value: 'Hello' },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const id = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: doc,
+    p_publish: true,
+  });
+  await backend(page, TEACHER);
+  await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
+  page.once('dialog', (d) => d.accept());
+  await page.getByLabel('Scoring policy', { exact: true }).selectOption('requirements-v1');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('weight');
+  await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
+  await page.getByLabel('Points: about.txt exists in working files', { exact: true }).fill('3');
+  await page
+    .getByLabel('Points: about.txt matches the required content in working files', { exact: true })
+    .fill('7');
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Publish new version', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Published a new immutable version');
+  const versions = (
+    await h.db.query<any>(
+      'select version,document from public.assessment_versions where assessment_id=$1 order by version',
+      [id],
+    )
+  ).rows;
+  expect(versions).toHaveLength(2);
+  expect(versions[0].document.gradingPolicy).toBeUndefined();
+  expect(versions[1].document.gradingPolicy).toBe('requirements-v1');
+  expect(versions.map((v) => v.document.sections[0].tasks[0].points)).toEqual([10, 10]);
+});
 let h: Awaited<ReturnType<typeof managementDatabase>>;
 let uploadServer: Server;
 let uploadedObjects: Map<string, Uint8Array>;
@@ -244,8 +542,23 @@ async function backend(page: Page, actor = ADMIN) {
           result = (
             await h.asUser(actor, 'select * from public.attempts where student_id=$1', [actor])
           ).rows;
-        else if (u.pathname === '/rest/v1/released_results')
-          result = (await h.asUser(actor, 'select * from public.released_results')).rows;
+        else if (u.pathname === '/rest/v1/released_results') {
+          const rows = (
+            await h.asUser(
+              actor,
+              'select * from public.released_results where ($1::uuid is null or attempt_id=$1)',
+              [u.searchParams.get('attempt_id')?.slice(3)],
+            )
+          ).rows;
+          result = req.headers().accept?.includes('application/vnd.pgrst.object+json')
+            ? rows[0] || null
+            : rows;
+        } else if (u.pathname === '/rest/v1/task_results')
+          result = (
+            await h.asUser(actor, 'select * from public.task_results where attempt_id=$1', [
+              u.searchParams.get('attempt_id')?.slice(3),
+            ])
+          ).rows;
         else if (u.pathname === '/rest/v1/assignments') {
           const id = u.searchParams.get('id')?.slice(3);
           const rows = (
@@ -278,7 +591,7 @@ async function backend(page: Page, actor = ADMIN) {
 async function draft(title: string) {
   return h.rpc(TEACHER, 'save_assessment', {
     p_id: null,
-    p_document: { ...blankDefinition(), title },
+    p_document: { ...blankDefinition('assignment', 'legacy'), title },
     p_publish: false,
   });
 }
@@ -344,6 +657,7 @@ test('an instructor publishes a real course, section and lesson and students rea
   ]) {
     await page.getByRole('button', { name: 'New ' + kind, exact: true }).click();
     await page.getByLabel('Content title', { exact: true }).fill(title);
+    await page.getByText('Optional description and supporting resources', { exact: true }).click();
     await page
       .getByLabel('Lesson or overview text', { exact: true })
       .fill('Clear learning material.');
@@ -390,7 +704,7 @@ test('only an explicit data administrator can invalidate; an open student worksp
   browser,
 }) => {
   const definition = {
-    ...blankDefinition(),
+    ...blankDefinition('assignment', 'legacy'),
     title: 'Managed student assignment',
     questions: [
       {
@@ -460,7 +774,10 @@ test('a concurrent admin edit makes a confirmation stale and the UI reports the 
   ).toBeFocused();
   await h.rpc(TEACHER, 'save_assessment', {
     p_id: id,
-    p_document: { ...blankDefinition(), title: 'Changed by another instructor' },
+    p_document: {
+      ...blankDefinition('assignment', 'legacy'),
+      title: 'Changed by another instructor',
+    },
     p_publish: false,
   });
   await page.getByRole('button', { name: 'Confirm Archive', exact: true }).click();
@@ -480,7 +797,7 @@ test('draft task deletion identifies its scope, supports cancellation and keeps 
   page,
 }) => {
   const doc = {
-    ...blankDefinition(),
+    ...blankDefinition('assignment', 'legacy'),
     title: 'Protected task history',
     format: 'practical',
     sections: [
@@ -549,7 +866,7 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await page.setViewportSize({ width: 390, height: 844 });
   await backend(page, TEACHER);
   const definition = {
-    ...blankDefinition(),
+    ...blankDefinition('assignment', 'legacy'),
     title:
       'Session mobile practice — A long assessment title with Arabic محتوى الدورة and Git history requirements for smartphone students',
     gateTheory: true,
@@ -604,9 +921,13 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await page.goto('/ieee-git-lab/#/instructor/content?parent=70000000-0000-4000-8000-000000000002');
   await page.getByRole('button', { name: 'New lesson', exact: true }).click();
   await page.getByLabel('Content title', { exact: true }).fill('Mobile session with slides');
+  await page.getByText('Optional description and supporting resources', { exact: true }).click();
   await page
     .getByLabel('Lesson or overview text')
     .fill('Study the slides and practice on your phone.');
+  await page
+    .getByText('Session options: order, topics and related practice', { exact: true })
+    .click();
   await page.getByLabel('Session number', { exact: true }).fill('3');
   await page.getByLabel('Display order', { exact: true }).fill('30');
   await page
@@ -736,8 +1057,10 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
     );
   };
   await open();
+  await page.getByText('Optional description and supporting resources', { exact: true }).click();
   await page.getByLabel('Lesson or overview text').fill('Draft survived reload');
   await page.reload();
+  await page.getByText('Optional description and supporting resources', { exact: true }).click();
   await expect(page.getByLabel('Lesson or overview text')).toHaveValue('Draft survived reload');
   const upload = page.getByLabel(/Upload PowerPoint/);
   await upload.setInputFiles({
@@ -749,21 +1072,34 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   expect(
     (await h.db.query('select id from public.learning_materials where item_id=$1', [id])).rows,
   ).toHaveLength(0);
-  await page.route('**/functions/v1/learning-material', (r) =>
-    r.fulfill({ status: 503, json: { error: 'Storage temporarily unavailable' } }),
-  );
+  let finishUpload!: () => void;
+  const uploadGate = new Promise<void>((resolve) => {
+    finishUpload = resolve;
+  });
+  await page.route('**/functions/v1/learning-material', async (r) => {
+    await uploadGate;
+    await r.fulfill({ status: 503, json: { error: 'Storage temporarily unavailable' } });
+  });
   await upload.setInputFiles({
     name: 'Slides.pptx',
     mimeType: PPTX_MIME,
     buffer: Buffer.from(pptxBytes()),
   });
+  await expect(page.getByRole('progressbar')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Browse Files', exact: true })).toBeDisabled();
+  finishUpload();
   await expect(page.getByRole('alert')).toContainText('Storage temporarily unavailable');
   await page.unroute('**/functions/v1/learning-material');
-  await upload.setInputFiles({
-    name: 'Original.pptx',
-    mimeType: PPTX_MIME,
-    buffer: Buffer.from(pptxBytes()),
-  });
+  const drop = await page.evaluateHandle(
+    ({ bytes, mime }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], 'Original.pptx', { type: mime }));
+      return transfer;
+    },
+    { bytes: Array.from(pptxBytes()), mime: PPTX_MIME },
+  );
+  await page.locator('.presentation-drop').dispatchEvent('drop', { dataTransfer: drop });
+  await expect(page.getByText(/Original.pptx · .* MiB/)).toBeVisible();
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
   await page.getByRole('button', { name: 'Publish content version', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Published. Students' })).toBeVisible();
@@ -784,7 +1120,12 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
     (await h.db.query('select id from public.learning_materials where item_id=$1', [id])).rows,
   ).toHaveLength(1);
   page.once('dialog', (d) => d.accept());
-  await upload.setInputFiles({
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Browse Files', exact: true }).focus();
+  await page.getByRole('button', { name: 'Browse Files', exact: true }).press('Enter');
+  await (
+    await chooser
+  ).setFiles({
     name: 'Replacement.pptx',
     mimeType: PPTX_MIME,
     buffer: Buffer.from(pptxBytes()),

@@ -1,3 +1,4 @@
+import { requirementProgress, requirementCatalog } from './requirements.ts';
 import { gitHistory } from './gitHistory.ts';
 import type { RepoView } from '../git-engine/engine.ts';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS.ts';
@@ -33,6 +34,7 @@ export type Task = {
   points: number;
   bonus: boolean;
   rules: Rule[];
+  requirementWeights?: Record<string, number>;
 };
 export type AssessmentQuestion = {
   id: string;
@@ -47,6 +49,7 @@ export type AssessmentQuestion = {
 };
 export type Definition = {
   schemaVersion: 1;
+  gradingPolicy?: 'requirements-v1';
   title: string;
   description: string;
   instructions: string;
@@ -110,9 +113,13 @@ export type AttemptState = {
   };
   released?: boolean;
 };
-export function blankDefinition(type: 'assignment' | 'exam' = 'assignment'): Definition {
+export function blankDefinition(
+  type: 'assignment' | 'exam' = 'assignment',
+  policy: 'requirements-v1' | 'legacy' = 'requirements-v1',
+): Definition {
   return {
     schemaVersion: 1,
+    ...(policy === 'requirements-v1' ? { gradingPolicy: 'requirements-v1' as const } : {}),
     title: type === 'exam' ? 'New Git exam' : 'New Git assignment',
     description: '',
     instructions: '',
@@ -153,7 +160,7 @@ const legacyOutcomes: Record<string, Array<[string, string, number]>> = {
   bonus: [['bonus', 'Diverged hobbies and completion histories joined by a merge commit', 10]],
 };
 export const firstAssessment: Definition = {
-  ...blankDefinition(),
+  ...blankDefinition('assignment', 'legacy'),
   title: assignment.title,
   description: assignment.description,
   instructions:
@@ -183,15 +190,40 @@ export const firstAssessment: Definition = {
   })),
 };
 export const taskList = (d: Definition) => d.sections.flatMap((s) => s.tasks);
-export const totals = (d: Definition) => ({
-  practical: taskList(d)
-    .filter((t) => !t.bonus)
-    .reduce((s, t) => s + t.points, 0),
-  theory: d.questions.reduce((s, q) => s + q.points, 0),
-  bonus: taskList(d)
-    .filter((t) => t.bonus)
-    .reduce((s, t) => s + t.points, 0),
-});
+// Decimal point arithmetic for new policies; historical floating-point behavior
+// remains unchanged. This also retains existing question precision (not just cents).
+export function sumPoints(values: number[]) {
+  if (values.some((value) => !Number.isFinite(value))) return values.reduce((sum, n) => sum + n, 0);
+  const parts = values.map((value) => {
+    const [mantissa, exponent = '0'] = value.toString().split('e');
+    const fraction = mantissa.split('.')[1] || '';
+    return { units: BigInt(mantissa.replace('.', '')), scale: fraction.length - Number(exponent) };
+  });
+  const scale = Math.max(0, ...parts.map((p) => p.scale));
+  const total = parts.reduce((sum, p) => sum + p.units * 10n ** BigInt(scale - p.scale), 0n);
+  const digits = (total < 0 ? -total : total).toString().padStart(scale + 1, '0');
+  return Number(
+    (total < 0 ? '-' : '') +
+      (scale ? digits.slice(0, -scale) + '.' + digits.slice(-scale) : digits),
+  );
+}
+export const totals = (d: Definition) => {
+  const sum = (values: number[]) =>
+    d.gradingPolicy ? sumPoints(values) : values.reduce((sum, n) => sum + n, 0);
+  return {
+    practical: sum(
+      taskList(d)
+        .filter((t) => !t.bonus)
+        .map((t) => t.points),
+    ),
+    theory: sum(d.questions.map((q) => q.points)),
+    bonus: sum(
+      taskList(d)
+        .filter((t) => t.bonus)
+        .map((t) => t.points),
+    ),
+  };
+};
 const bounded = (x: unknown, n = 8000) => typeof x === 'string' && x.length <= n;
 const identifier = (x: unknown) => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
 export function validFile(path: unknown): path is string {
@@ -373,8 +405,42 @@ export function assertDefinition(value: unknown): asserts value is Definition {
     )
       throw new Error('Answer key must use the configured options');
   }
+  if (d.gradingPolicy !== undefined) {
+    if (d.gradingPolicy !== 'requirements-v1' || d.gateTheory || d.requireComplete)
+      throw new Error(
+        'Requirement scoring allows partial submission and unrestricted task navigation',
+      );
+    for (const task of taskList(d)) {
+      const checks = requirementCatalog(task);
+      const weights = task.requirementWeights || {};
+      if (
+        Number(task.points.toFixed(2)) !== task.points ||
+        (task.requirementWeights !== undefined &&
+          (!task.requirementWeights ||
+            typeof task.requirementWeights !== 'object' ||
+            Array.isArray(task.requirementWeights))) ||
+        Object.keys(weights).length !== checks.length ||
+        checks.some(
+          (c) =>
+            !Object.hasOwn(weights, c.id) ||
+            !Number.isFinite(weights[c.id]) ||
+            Number(weights[c.id].toFixed(2)) !== weights[c.id] ||
+            weights[c.id] <= 0,
+        ) ||
+        Object.values(weights).reduce((sum, n) => sum + Math.round(n * 100), 0) !==
+          Math.round(task.points * 100)
+      )
+        throw new Error(
+          `${task.title}: assign a positive weight (up to two decimal places) to every scored requirement; weights must total the task points`,
+        );
+    }
+  }
   const sum = totals(d);
-  if (sum.practical + sum.theory + sum.bonus > 10000)
+  if (
+    (d.gradingPolicy
+      ? sumPoints([sum.practical, sum.theory, sum.bonus])
+      : sum.practical + sum.theory + sum.bonus) > 10000
+  )
     throw new Error('Assessment points exceed limit');
   if (
     (d.format === 'theory' && taskList(d).length) ||
@@ -382,7 +448,7 @@ export function assertDefinition(value: unknown): asserts value is Definition {
   )
     throw new Error('Format does not match content');
 }
-export function outcomesFor(
+export function rawOutcomesFor(
   d: Definition,
   view: RepoView,
   identity: StudentIdentity,
@@ -545,4 +611,26 @@ export function gradeObjective(
         automatic: true,
       };
     });
+}
+
+export const earnedPoints = (o: Outcome & { earned?: number }) =>
+  o.earned ?? (o.passed ? o.points : 0);
+export function outcomesFor(
+  d: Definition,
+  view: RepoView,
+  identity: StudentIdentity,
+  working: Record<string, string> = {},
+) {
+  const raw = rawOutcomesFor(d, view, identity, working);
+  if (!d.gradingPolicy) return raw.map((o) => ({ ...o, earned: earnedPoints(o) }));
+  const progress = requirementProgress(d, view, identity, working);
+  return raw.map((o) => ({
+    ...o,
+    passed: progress.find((p) => p.task.id === o.id)!.passed,
+    earned: progress.find((p) => p.task.id === o.id)!.earned,
+    requirements: progress
+      .find((p) => p.task.id === o.id)!
+      .requirements.filter((c) => !c.preparation)
+      .map((c) => ({ id: c.id, passed: c.passed === true, points: c.points, earned: c.earned })),
+  }));
 }

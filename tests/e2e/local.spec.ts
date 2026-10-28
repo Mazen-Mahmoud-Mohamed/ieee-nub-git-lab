@@ -1,4 +1,46 @@
 import { test, expect } from '@playwright/test';
+test('terminal-first desktop and simple phone tabs keep working state across layout changes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/#/workspace');
+  await expect(page.getByLabel('Terminal command')).toBeVisible();
+  await expect(page.getByLabel('Command helpers')).toBeHidden();
+  await expect(page.locator('.student-editor')).toBeHidden();
+  const terminal = await page.locator('.terminal').boundingBox();
+  const work = await page.getByLabel('Work area').boundingBox();
+  const task = await page.locator('.student-task').boundingBox();
+  expect(terminal!.height).toBeGreaterThanOrEqual(420);
+  expect(work!.width / (work!.width + task!.width)).toBeGreaterThanOrEqual(0.64);
+  expect(work!.width / (work!.width + task!.width)).toBeLessThanOrEqual(0.7);
+  await page.getByLabel('Terminal command').fill('git status');
+  await page.screenshot({ path: 'test-results/terminal-first-desktop.png', fullPage: true });
+  for (const [width, height] of [
+    [320, 640],
+    [360, 800],
+    [375, 812],
+    [390, 844],
+    [414, 896],
+    [430, 932],
+    [768, 1024],
+    [844, 390],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await page.getByRole('tab', { name: 'Task', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toBeHidden();
+    await page.getByRole('button', { name: 'Open Terminal', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toHaveValue('git status');
+    await expect(page.getByLabel('Command helpers')).toBeVisible();
+    await expect(page.locator('.student-task')).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+    await page.getByRole('tab', { name: 'Files', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toBeHidden();
+    await page.getByRole('tab', { name: 'Task', exact: true }).click();
+    await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  }
+});
 test('dashboard keeps assignments and exams separate', async ({ page }) => {
   await page.goto('/#/dashboard');
   await expect(page.getByRole('heading', { name: 'Assignments', exact: true })).toBeVisible();
