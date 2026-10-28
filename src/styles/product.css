@@ -504,9 +504,22 @@ details > form {
   min-height: 0;
 }
 .session-resources {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   display: grid;
   gap: 24px;
   margin-block: 24px;
+}
+/* Course cards must fit a phone even when an assessment has a long title. */
+.published-course.page {
+  width: 100%;
+}
+.session-resources > .primary {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  justify-content: center;
 }
 .session-resources section,
 .session-material-editor {

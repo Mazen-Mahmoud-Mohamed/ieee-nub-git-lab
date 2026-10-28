@@ -550,7 +550,8 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await backend(page, TEACHER);
   const definition = {
     ...blankDefinition(),
-    title: 'Session mobile practice',
+    title:
+      'Session mobile practice — A long assessment title with Arabic محتوى الدورة and Git history requirements for smartphone students',
     gateTheory: true,
     requireComplete: true,
     projectName: 'Mobile-Git',
@@ -633,6 +634,13 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await expect(
     student.getByRole('heading', { name: 'Mobile session with slides', exact: true }),
   ).toBeVisible();
+  for (const width of [320, 390]) {
+    await student.setViewportSize({ width, height: 844 });
+    expect(
+      await student.evaluate(() => document.documentElement.scrollWidth),
+      'Published session with a long related assessment title at ' + width + 'px',
+    ).toBeLessThanOrEqual(width);
+  }
   await expect(student.locator('iframe')).toHaveCount(0);
   await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toHaveAttribute(
     'href',
