@@ -862,8 +862,8 @@ select {
     flex: 0 0 auto;
   }
   .workspace-files-panel:has(.editor-closed) ~ .terminal {
-    flex: 1 1 var(--terminal-height);
-    min-height: var(--terminal-height);
+    flex: 1 1 420px;
+    min-height: 420px;
     max-height: none;
   }
   .workspace-files-panel:not(:has(.editor-closed)) {
@@ -954,4 +954,106 @@ select {
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
+}
+.presentation-input-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.session-material-editor h4 {
+  margin: 0;
+}
+.presentation-options,
+.video-options,
+.session-material-editor .session-options {
+  margin: 0;
+}
+.presentation-options > button {
+  margin: 6px 10px 0 0;
+}
+
+/* Keep the command surface spacious and the next action easy to find. */
+.student-next > .text-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 4px 8px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.student-task .task-actions li {
+  margin-block: 6px;
+}
+.student-task .requirement-list li {
+  padding-block: 7px;
+}
+.student-editor-label .text-button {
+  margin-inline-start: auto;
+}
+.instructor .editor-fields label,
+.instructor .rule-editor p,
+.instructor .rule-editor small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.instructor .editor-fields select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-event .command-result {
+  display: none;
+}
+@media (min-width: 901px) {
+  .student-task {
+    padding: 18px 22px;
+  }
+  .student-workspace-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  }
+  .student-task h2 {
+    font-size: 21px;
+    margin-block: 10px;
+  }
+}
+@media (max-width: 900px) {
+  .student-workspace-header {
+    padding-block: 10px;
+    gap: 8px;
+  }
+  .student-workspace-header h1 {
+    font-size: 14px;
+    margin: 0;
+  }
+  .student-workspace-header .student-score {
+    margin: 0;
+    padding: 0;
+  }
+  .student-workspace-header .student-score small {
+    display: none;
+  }
+  .student-task {
+    padding: 16px;
+  }
+  .student-task h2 {
+    font-size: 21px;
+  }
+  .student-workspace[data-mobile='terminal'] .terminal {
+    min-height: 0;
+  }
+  .student-workspace[data-mobile='terminal'] .terminal-body {
+    height: clamp(100px, calc(var(--visible-viewport-height, 100dvh) - 300px), 420px);
+    flex: 0 1 auto;
+  }
+  .terminal-helpers {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .terminal-helpers button {
+    flex-shrink: 0;
+  }
 }

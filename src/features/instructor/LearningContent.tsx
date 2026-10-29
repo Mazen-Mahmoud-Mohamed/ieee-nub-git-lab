@@ -206,9 +206,9 @@ export function LearningContent() {
         <div>
           <h2>{parent ? parent.document.title : 'Courses & lessons'}</h2>
           <p>
-            Create a course, add its sections, then add learning sessions as lessons with videos,
-            slides and resources. Publishing creates a retained version. Archive hides content; it
-            never erases assessment history.
+            {kind === 'lesson'
+              ? 'Add a session name, upload your PowerPoint, add a video link, then publish.'
+              : 'Organize courses and sections. Open a section to add learning sessions.'}
           </p>
         </div>
         <button
@@ -227,7 +227,7 @@ export function LearningContent() {
             })
           }
         >
-          New {kind}
+          New {kind === 'lesson' ? 'session' : kind}
         </button>
       </div>
       {parent && (
@@ -254,7 +254,8 @@ export function LearningContent() {
       {editing && (
         <section className="form-card editor-fields">
           <h3>
-            {editing.revision ? 'Edit' : 'Create'} {editing.kind}
+            {editing.revision ? 'Edit' : 'Create'}{' '}
+            {editing.kind === 'lesson' ? 'session' : editing.kind}
           </h3>
           {(editing.archived_at || editing.deleted_at) && (
             <p>Restore this content before editing it.</p>
@@ -267,7 +268,7 @@ export function LearningContent() {
           >
             <fieldset disabled={busy || !!editing.archived_at || !!editing.deleted_at}>
               <label>
-                Content title
+                {editing.kind === 'lesson' ? 'Session name' : 'Content title'}
                 <input
                   dir="auto"
                   required
@@ -432,7 +433,7 @@ export function LearningContent() {
                     if (e.currentTarget.form?.reportValidity()) void save(true);
                   }}
                 >
-                  Publish content version
+                  {editing.kind === 'lesson' ? 'Publish session' : 'Publish content version'}
                 </button>
               </div>
             </fieldset>

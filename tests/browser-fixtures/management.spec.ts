@@ -1,3 +1,5 @@
+import { prepareFundamentalsScoring } from '../../src/features/assessments/fundamentalsScoring';
+import { correctedAssignment } from '../../src/features/assessments/correctedAssignment';
 import { createServer, type Server } from 'node:http';
 import { handleMaterial } from '../../supabase/functions/learning-material/handler';
 import { verifyAssessment } from '../../src/features/assessments/verify';
@@ -11,6 +13,95 @@ import { firstAssessment } from '../../src/features/assessments/model';
 import { requirementCatalog } from '../../src/features/assessments/requirements';
 import { weightedFundamentalsFixture } from '../helpers/weightedFundamentals';
 import { GitEngine } from '../../src/features/git-engine/engine';
+
+test('Git Fundamentals combined introduction retains independent points, permits other tasks and incomplete submission', async ({
+  page,
+}) => {
+  const definition = prepareFundamentalsScoring(correctedAssignment());
+  const id = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: definition,
+    p_publish: true,
+  });
+  await backend(page, STUDENT);
+  await page.goto('/ieee-git-lab/#/assessments/' + id);
+  await page.getByRole('checkbox', { name: /Save my files/ }).check();
+  await page.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
+  const show = async (name: string) => {
+    if ((page.viewportSize()?.width || 1440) <= 900)
+      await page.getByRole('tab', { name, exact: true }).click();
+  };
+  await show('Terminal');
+  const command = async (text: string) => {
+    await page.getByLabel('Terminal command').fill(text);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  };
+  for (const cmd of [
+    'mkdir IEEE-Git-Task',
+    'cd IEEE-Git-Task',
+    'git init',
+    'git config --global user.name "Student Example"',
+    'git config --global user.email student@example.test',
+    'echo "Name: Student Example\nUniversity: Nahda University\nDepartment: Engineering" > about.txt',
+    'echo "My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects" > goals.txt',
+    'echo "Git Course - Session 1\nIEEE NUB Student Branch" > notes.txt',
+    'git add .',
+  ])
+    await command(cmd);
+  await show('Files');
+  await page.getByRole('button', { name: /about.txt/ }).click();
+  await page
+    .getByRole('textbox', { name: 'Text file editor', exact: true })
+    .fill('Name: Student Example\nUniversity: Nahda University\nDepartment: Engineering');
+  await show('Terminal');
+  await command('git add .');
+  await expect(
+    page.getByRole('alert').filter({ hasText: /together|multiple|separate/i }),
+  ).toBeVisible();
+  await command('git commit -m "Add personal information"');
+  await show('Task');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
+  await expect(page.getByText('A mistake in the first commit', { exact: true })).toBeVisible();
+  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
+  await page.getByRole('button', { name: 'Next Task', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
+  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
+  await page.screenshot({
+    path:
+      'test-results/product-review/fundamentals-independent-points-' +
+      test.info().project.name +
+      '.png',
+    fullPage: true,
+  });
+  await page.reload();
+  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission received', exact: true }),
+  ).toBeVisible();
+  const result = (
+    await h.db.query<any>(
+      'select t.points,t.requirement_results,a.status from public.task_results t join public.attempts a on a.id=t.attempt_id where a.assignment_id=$1 and t.task_key=$2',
+      [id, 'separate'],
+    )
+  ).rows[0];
+  expect(Number(result.points)).toBe(6);
+  expect(result.requirement_results.filter((c: any) => c.passed)).toHaveLength(6);
+  expect(result.status).toBe('pending_review');
+  await page.screenshot({
+    path:
+      'test-results/product-review/fundamentals-incomplete-receipt-' +
+      test.info().project.name +
+      '.png',
+    fullPage: true,
+  });
+});
 
 test('dashboard released scores retain the attempt version maximum after a differently weighted publication', async ({
   page,
@@ -109,16 +200,26 @@ test('instructor republishes all Git Fundamentals task weights using readable la
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
   page.once('dialog', (d) => d.accept());
-  await page.getByLabel('Scoring policy', { exact: true }).selectOption('requirements-v1');
+  await page
+    .getByRole('button', { name: 'Prepare Git Fundamentals partial-credit draft', exact: true })
+    .click();
+  await expect(page.getByRole('status')).toContainText('Nothing has been saved or published');
+  expect(
+    (
+      await h.db.query('select version from public.assessment_versions where assessment_id=$1', [
+        id,
+      ])
+    ).rows,
+  ).toHaveLength(1);
   await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
   const fixture = weightedFundamentalsFixture();
   const tasks = fixture.sections.flatMap((s) => s.tasks);
   for (const [i, task] of tasks.entries()) {
     const card = page.locator('.builder-task').nth(i);
     for (const c of requirementCatalog(task))
-      await card
-        .getByLabel('Points: ' + c.label, { exact: true })
-        .fill(String(task.requirementWeights![c.id]));
+      await expect(card.getByLabel('Points: ' + c.label, { exact: true })).toHaveValue(
+        String(task.requirementWeights![c.id]),
+      );
     expect(await card.locator('.requirement-weights').innerText()).not.toContain(':rule-');
   }
   for (const width of [320, 390, 768, 1440]) {
@@ -127,6 +228,19 @@ test('instructor republishes all Git Fundamentals task weights using readable la
       width,
     );
   }
+  await page.setViewportSize({
+    width: test.info().project.name === 'connected-ui-fixtures' ? 1440 : 390,
+    height: 900,
+  });
+  await page
+    .locator('.builder-task')
+    .first()
+    .screenshot({
+      path:
+        'test-results/product-review/instructor-proposed-weights-' +
+        test.info().project.name +
+        '.png',
+    });
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Publish new version', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Published a new immutable version');
@@ -655,8 +769,10 @@ test('an instructor publishes a real course, section and lesson and students rea
     ['section', 'First steps'],
     ['lesson', 'أساسيات Git'],
   ]) {
-    await page.getByRole('button', { name: 'New ' + kind, exact: true }).click();
-    await page.getByLabel('Content title', { exact: true }).fill(title);
+    await page
+      .getByRole('button', { name: 'New ' + (kind === 'lesson' ? 'session' : kind), exact: true })
+      .click();
+    await page.getByLabel(/^(Content title|Session name)$/).fill(title);
     await page.getByText('Optional description and supporting resources', { exact: true }).click();
     await page
       .getByLabel('Lesson or overview text', { exact: true })
@@ -666,7 +782,7 @@ test('an instructor publishes a real course, section and lesson and students rea
       await page.getByLabel('Resource 1 title', { exact: true }).fill('Official Git reference');
       await page.getByLabel('Resource 1 URL', { exact: true }).fill('https://git-scm.com/docs');
     }
-    await page.getByRole('button', { name: 'Publish content version', exact: true }).click();
+    await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
     await expect(
       page.getByRole('heading', {
         name: kind === 'course' ? title : kind === 'section' ? title : title,
@@ -919,8 +1035,8 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     p_publish: true,
   });
   await page.goto('/ieee-git-lab/#/instructor/content?parent=70000000-0000-4000-8000-000000000002');
-  await page.getByRole('button', { name: 'New lesson', exact: true }).click();
-  await page.getByLabel('Content title', { exact: true }).fill('Mobile session with slides');
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByLabel(/^(Content title|Session name)$/).fill('Mobile session with slides');
   await page.getByText('Optional description and supporting resources', { exact: true }).click();
   await page
     .getByLabel('Lesson or overview text')
@@ -938,7 +1054,21 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     .getByLabel(/Upload PowerPoint/)
     .setInputFiles({ name: 'Slides.pptx', mimeType: PPTX_MIME, buffer: Buffer.from(pptxBytes()) });
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
-  await page.getByRole('button', { name: 'Publish content version', exact: true }).click();
+  await page
+    .getByText('Session options: order, topics and related practice', { exact: true })
+    .click();
+  await page.getByText('Optional description and supporting resources', { exact: true }).click();
+  await page.getByLabel('Session name', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: 'test-results/product-review/session-upload-' + test.info().project.name + '.png',
+    fullPage: false,
+  });
+  await page.getByRole('button', { name: 'Publish session', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: 'test-results/product-review/session-publish-' + test.info().project.name + '.png',
+    fullPage: false,
+  });
+  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Published. Students' })).toBeVisible();
   const lesson = (
     await h.db.query<{ id: string }>(
@@ -986,6 +1116,7 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   // External playback is deliberately not represented as verified by this localhost test.
   await student.screenshot({ path: 'test-results/mobile-learning-session.png', fullPage: true });
   await student.getByRole('button', { name: 'Get presentation links' }).click();
+  await expect(student.getByRole('link', { name: 'Download PowerPoint' })).toBeVisible();
   const download = student.waitForEvent('download');
   await student.getByRole('link', { name: 'Download PowerPoint' }).click();
   const downloaded = await download;
@@ -1052,7 +1183,7 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   });
   const open = async () => {
     await page.goto('/ieee-git-lab/#/instructor/content?open=' + id);
-    await expect(page.getByLabel('Content title', { exact: true })).toHaveValue(
+    await expect(page.getByLabel(/^(Content title|Session name)$/)).toHaveValue(
       'Slides replacement session',
     );
   };
@@ -1063,6 +1194,17 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   await page.getByText('Optional description and supporting resources', { exact: true }).click();
   await expect(page.getByLabel('Lesson or overview text')).toHaveValue('Draft survived reload');
   const upload = page.getByLabel(/Upload PowerPoint/);
+  await page.getByLabel('Session name', { exact: true }).fill('');
+  await upload.setInputFiles({
+    name: 'Unnamed.pptx',
+    mimeType: PPTX_MIME,
+    buffer: Buffer.from(pptxBytes()),
+  });
+  await expect(page.getByRole('alert')).toContainText('Enter a session name');
+  expect(
+    (await h.db.query('select id from public.learning_materials where item_id=$1', [id])).rows,
+  ).toHaveLength(0);
+  await page.getByLabel('Session name', { exact: true }).fill('Slides replacement session');
   await upload.setInputFiles({
     name: 'fake.pptx',
     mimeType: PPTX_MIME,
@@ -1101,7 +1243,7 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   await page.locator('.presentation-drop').dispatchEvent('drop', { dataTransfer: drop });
   await expect(page.getByText(/Original.pptx · .* MiB/)).toBeVisible();
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
-  await page.getByRole('button', { name: 'Publish content version', exact: true }).click();
+  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Published. Students' })).toBeVisible();
   const first = (
     await h.db.query<any>(
@@ -1131,7 +1273,7 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
     buffer: Buffer.from(pptxBytes()),
   });
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
-  await page.getByRole('button', { name: 'Publish content version', exact: true }).click();
+  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
   await expect
     .poll(
       async () =>

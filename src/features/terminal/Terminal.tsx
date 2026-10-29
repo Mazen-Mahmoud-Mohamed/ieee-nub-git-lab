@@ -1,6 +1,6 @@
 import { introductoryCommitWarning } from './commitWarning';
 import { firstAssessment, type Definition } from '../assessments/model';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronRight, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
 import { tokenize } from './parser';
@@ -70,6 +70,25 @@ export function Terminal({
   const [cleared, setCleared] = useState(0);
   const scroll = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 900px)').matches);
+  const [visibleHeight, setVisibleHeight] = useState(
+    () => window.visualViewport?.height || window.innerHeight,
+  );
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const resize = () => {
+      setMobile(media.matches);
+      setVisibleHeight(window.visualViewport?.height || window.innerHeight);
+      if (document.activeElement === field.current)
+        requestAnimationFrame(() => field.current?.scrollIntoView({ block: 'nearest' }));
+    };
+    media.addEventListener('change', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      media.removeEventListener('change', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
+  }, []);
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
   }, [lab.revision, cleared]);
@@ -82,6 +101,7 @@ export function Terminal({
       role="tabpanel"
       aria-labelledby="workspace-tab-terminal"
       dir="ltr"
+      style={{ '--visible-viewport-height': visibleHeight + 'px' } as CSSProperties}
     >
       <div className="panel-heading terminal-tabs">
         <span>
@@ -223,51 +243,53 @@ export function Terminal({
           {lab.busy ? 'Running…' : 'Run'}
         </button>
       </form>
-      <div className="terminal-helpers" aria-label="Command helpers">
-        <button
-          type="button"
-          disabled={!history.length || lab.busy || lab.readOnly}
-          onClick={() => {
-            const next = Math.max(0, cursor - 1);
-            setCursor(next);
-            setInput(history[next] || '');
-            field.current?.focus();
-          }}
-        >
-          Previous command
-        </button>
-        <button
-          type="button"
-          disabled={cursor >= history.length || lab.busy || lab.readOnly}
-          onClick={() => {
-            const next = Math.min(history.length, cursor + 1);
-            setCursor(next);
-            setInput(history[next] || '');
-            field.current?.focus();
-          }}
-        >
-          Next command
-        </button>
-        {['git ', 'status', ' -m ', '"', '/', '-', '>'].map((symbol) => (
+      {mobile && (
+        <div className="terminal-helpers" aria-label="Command helpers">
           <button
             type="button"
-            key={symbol}
-            aria-label={'Insert ' + symbol}
-            disabled={lab.busy || lab.readOnly}
+            disabled={!history.length || lab.busy || lab.readOnly}
             onClick={() => {
-              const start = field.current?.selectionStart ?? input.length,
-                end = field.current?.selectionEnd ?? start;
-              setInput(input.slice(0, start) + symbol + input.slice(end));
-              requestAnimationFrame(() => {
-                field.current?.focus();
-                field.current?.setSelectionRange(start + symbol.length, start + symbol.length);
-              });
+              const next = Math.max(0, cursor - 1);
+              setCursor(next);
+              setInput(history[next] || '');
+              field.current?.focus();
             }}
           >
-            {symbol}
+            Previous command
           </button>
-        ))}
-      </div>
+          <button
+            type="button"
+            disabled={cursor >= history.length || lab.busy || lab.readOnly}
+            onClick={() => {
+              const next = Math.min(history.length, cursor + 1);
+              setCursor(next);
+              setInput(history[next] || '');
+              field.current?.focus();
+            }}
+          >
+            Next command
+          </button>
+          {['git ', 'status', ' -m ', '"', '/', '-', '>'].map((symbol) => (
+            <button
+              type="button"
+              key={symbol}
+              aria-label={'Insert ' + symbol}
+              disabled={lab.busy || lab.readOnly}
+              onClick={() => {
+                const start = field.current?.selectionStart ?? input.length,
+                  end = field.current?.selectionEnd ?? start;
+                setInput(input.slice(0, start) + symbol + input.slice(end));
+                requestAnimationFrame(() => {
+                  field.current?.focus();
+                  field.current?.setSelectionRange(start + symbol.length, start + symbol.length);
+                });
+              }}
+            >
+              {symbol}
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

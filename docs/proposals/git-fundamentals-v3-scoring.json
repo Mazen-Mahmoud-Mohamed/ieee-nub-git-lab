@@ -1,0 +1,268 @@
+{
+  "status": "LOCAL PROPOSAL — NOT PUBLISHED",
+  "sourcePublishedVersion": 2,
+  "proposedNextVersion": 3,
+  "gradingPolicy": "requirements-v1",
+  "gateTheory": false,
+  "requireComplete": false,
+  "tasks": [
+    {
+      "id": "repo",
+      "title": "Initialize Git and configure identity",
+      "maximum": 5,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "repo:rule-0-initialized",
+          "label": "Git repository initialized",
+          "points": 2
+        },
+        {
+          "id": "repo:rule-0-name",
+          "label": "Git username configured",
+          "points": 1
+        },
+        {
+          "id": "repo:rule-0-email",
+          "label": "Valid Git email configured",
+          "points": 1
+        },
+        {
+          "id": "repo:rule-0-main",
+          "label": "Main is the project’s primary branch",
+          "points": 1
+        }
+      ]
+    },
+    {
+      "id": "files",
+      "title": "Write the required project files",
+      "maximum": 10,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "files:rule-0-about.txt-exists",
+          "label": "about.txt created in this project",
+          "points": 1
+        },
+        {
+          "id": "files:rule-0-about.txt-draft",
+          "label": "about.txt required content written",
+          "points": 3
+        },
+        {
+          "id": "files:rule-0-goals.txt-exists",
+          "label": "goals.txt created in this project",
+          "points": 1
+        },
+        {
+          "id": "files:rule-0-goals.txt-draft",
+          "label": "goals.txt required content written",
+          "points": 2
+        },
+        {
+          "id": "files:rule-0-notes.txt-exists",
+          "label": "notes.txt created in this project",
+          "points": 1
+        },
+        {
+          "id": "files:rule-0-notes.txt-draft",
+          "label": "notes.txt required content written",
+          "points": 2
+        }
+      ]
+    },
+    {
+      "id": "separate",
+      "title": "Commit each starting file separately",
+      "maximum": 10,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "separate:rule-0-about.txt-focused",
+          "label": "about.txt introduced in its own focused commit",
+          "points": 2
+        },
+        {
+          "id": "separate:rule-0-about.txt-original-content",
+          "label": "about.txt introductory commit has the required content",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-goals.txt-focused",
+          "label": "goals.txt introduced in its own focused commit",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-goals.txt-original-content",
+          "label": "goals.txt introductory commit has the required content",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-goals.txt-message",
+          "label": "goals.txt introductory commit has a descriptive message",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-notes.txt-focused",
+          "label": "notes.txt introduced in its own focused commit",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-notes.txt-original-content",
+          "label": "notes.txt introductory commit has the required content",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-notes.txt-message",
+          "label": "notes.txt introductory commit has a descriptive message",
+          "points": 1
+        },
+        {
+          "id": "separate:rule-0-personal-message",
+          "label": "Personal information commit uses the requested message",
+          "points": 1
+        }
+      ]
+    },
+    {
+      "id": "goals",
+      "title": "Update and commit your goals",
+      "maximum": 10,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "goals:rule-0-tracked",
+          "label": "Initial goals are committed",
+          "points": 3
+        },
+        {
+          "id": "goals:rule-0-committed",
+          "label": "A later commit on main saves the updated tracked file",
+          "points": 7
+        }
+      ]
+    },
+    {
+      "id": "feature",
+      "title": "Commit skills on the feature branch",
+      "maximum": 10,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "feature:rule-0-feature-branch",
+          "label": "Feature branch has committed history",
+          "points": 2
+        },
+        {
+          "id": "feature:rule-0-skills-content",
+          "label": "All three required skills committed on feature/skills",
+          "points": 4
+        },
+        {
+          "id": "feature:rule-0-skills-introduction",
+          "label": "Skills introduced by a new feature commit",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": "isolation",
+      "title": "Verify branch isolation",
+      "maximum": 10,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "isolation:rule-0-intro-parent",
+          "label": "Skills introduction has a parent commit",
+          "points": 3
+        },
+        {
+          "id": "isolation:rule-0-no-earlier-skills",
+          "label": "Parent commit does not contain skills.txt",
+          "points": 3
+        },
+        {
+          "id": "isolation:rule-0-skills-message",
+          "label": "Skills commit has a meaningful message",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": "merged",
+      "title": "Merge the skills into main",
+      "maximum": 15,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "merged:rule-0-main-history",
+          "label": "Main branch has committed history",
+          "points": 2
+        },
+        {
+          "id": "merged:rule-0-feature-history",
+          "label": "Feature branch has committed history",
+          "points": 2
+        },
+        {
+          "id": "merged:rule-0-main-skills",
+          "label": "Required skills are present in committed main",
+          "points": 5
+        },
+        {
+          "id": "merged:rule-0-ancestry",
+          "label": "Main history includes the feature branch tip",
+          "points": 6
+        }
+      ]
+    },
+    {
+      "id": "clean",
+      "title": "Finish with a clean main branch",
+      "maximum": 5,
+      "bonus": false,
+      "requirements": [
+        {
+          "id": "clean:rule-0-on-main",
+          "label": "Current branch is main",
+          "points": 1
+        },
+        {
+          "id": "clean:rule-0-main-saved",
+          "label": "Main contains a commit",
+          "points": 1
+        },
+        {
+          "id": "clean:rule-0-clean-tree",
+          "label": "No staged or unstaged changes remain",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "id": "bonus",
+      "title": "Optional: merge divergent hobbies work",
+      "maximum": 10,
+      "bonus": true,
+      "requirements": [
+        {
+          "id": "bonus:rule-0-hobbies-branch",
+          "label": "Hobbies branch has committed history",
+          "points": 2
+        },
+        {
+          "id": "bonus:rule-0-divergent-merge",
+          "label": "A merge commit joins the required hobbies and completion histories",
+          "points": 5
+        },
+        {
+          "id": "bonus:rule-0-bonus-ancestry",
+          "label": "The merge includes feature/hobbies ancestry",
+          "points": 3
+        }
+      ]
+    }
+  ],
+  "instructions": "Work in Files and Terminal. Each scored requirement earns its own points. You can move between tasks, answer questions and submit unfinished work. Only earned points count; written responses follow the instructor review policy."
+}

@@ -1,7 +1,7 @@
 import { WorkspaceProgress } from './WorkspaceProgress';
 import { useSearchParams } from 'react-router-dom';
 import { RestartAttempt } from '../assessments/RestartAttempt';
-import { useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 const DesktopTextEditor = lazy(() => import('./DesktopTextEditor'));
 import { Plus, Check } from 'lucide-react';
 import type { StudentIdentity } from './assignment';
@@ -47,6 +47,10 @@ export function Workspace({
   const switchView = (view: string) => {
     setMobile(view);
     sessionStorage.setItem('workspace-view:' + lab.key, view);
+    if (window.matchMedia('(max-width: 900px)').matches)
+      requestAnimationFrame(() =>
+        document.querySelector('.workspace-view-tabs')?.scrollIntoView({ block: 'start' }),
+      );
   };
   const [fileSave, setFileSave] = useState('');
   const pendingFiles = useRef<Record<string, string>>({});
@@ -61,7 +65,7 @@ export function Workspace({
   const focusEditor = useRef(false);
   const currentKey = useRef(lab.key);
   currentKey.current = lab.key;
-  const [terminalHeight, setTerminalHeight] = useState(420);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const previous = useRef<{ key: string; done: Set<string> } | undefined>(undefined);
   const lastReset = useRef({ key: lab.key, generation: lab.resetGeneration });
@@ -74,6 +78,7 @@ export function Workspace({
       pendingFiles.current = {};
     }
     setSelected('');
+    setEditorOpen(false);
     setText('');
     const focusKey = 'task-focus:' + lab.key;
     const reset =
@@ -229,6 +234,7 @@ export function Workspace({
       </p>
     );
   const open = (path: string) => {
+    setEditorOpen(true);
     draft.current = null;
     setFileSave('');
     setText(pendingFiles.current[path] ?? lab.working[path.slice(lab.engine.dir.length + 1)] ?? '');
@@ -240,7 +246,6 @@ export function Workspace({
     <div
       className={'workspace student-workspace ' + (expanded ? 'terminal-focused' : '')}
       data-mobile={mobile}
-      style={{ '--terminal-height': terminalHeight + 'px' } as CSSProperties}
     >
       {(!identity.full_name || !identity.department) && (
         <PracticeIdentity onSave={() => void lab.refresh()} />
@@ -352,6 +357,7 @@ export function Workspace({
                 onClick={() => setNewFile(!newFile)}
               >
                 <Plus size={16} />
+                New file
               </button>
               <button
                 className="text-button"
@@ -374,6 +380,7 @@ export function Workspace({
                     setText('');
                     focusEditor.current = true;
                     setSelected(path);
+                    setEditorOpen(true);
                     setNewFile(false);
                     setFilename('');
                     setLocalError('');
@@ -402,15 +409,25 @@ export function Workspace({
                 <GitGraph view={lab.view} />
               </div>
             )}
-            <div className={'student-editor' + (!selected ? ' editor-closed' : '')}>
+            <div
+              className={
+                'student-editor' +
+                (!selected || (!smallScreen && !editorOpen) ? ' editor-closed' : '')
+              }
+            >
               <div className="student-editor-label">
                 {selected ? selected.split('/').pop() : 'Files'}
                 <small role="status">
                   {fileSave ||
                     (lab.saving === 'Saved on this device' ? 'File saved locally' : lab.saving)}
                 </small>
+                {!smallScreen && selected && (
+                  <button className="text-button" onClick={() => setEditorOpen(false)}>
+                    Close editor
+                  </button>
+                )}
               </div>
-              {selected ? (
+              {selected && (smallScreen || editorOpen) ? (
                 <>
                   {smallScreen ? (
                     <textarea
@@ -451,18 +468,6 @@ export function Workspace({
               )}
             </div>
           </div>
-          <label className="terminal-resize">
-            Terminal size
-            <input
-              aria-label="Terminal height"
-              type="range"
-              min="300"
-              max="680"
-              step="20"
-              value={terminalHeight}
-              onChange={(e) => setTerminalHeight(Number(e.target.value))}
-            />
-          </label>
           <Terminal
             key={`${lab.key}:${lab.resetGeneration}`}
             lab={lab}
@@ -481,6 +486,10 @@ export function Workspace({
             sessionStorage.setItem('task-focus:' + lab.key, id);
           }}
           onWork={(view) => {
+            if (view === 'files') {
+              setEditorOpen(true);
+              if (!selected && files.length) open(files[0]);
+            }
             switchView(view);
             requestAnimationFrame(() =>
               document

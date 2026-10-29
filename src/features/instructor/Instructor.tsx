@@ -20,7 +20,6 @@ export function Instructor() {
         {[
           ['', 'Overview'],
           ['content', 'Courses & lessons'],
-          ['sessions', 'Learning Sessions'],
           ['students', 'Students'],
           ['submissions', 'Submissions'],
           ['assignments', 'Assignments'],

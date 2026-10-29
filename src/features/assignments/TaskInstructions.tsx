@@ -139,9 +139,7 @@ export function TaskInstructions({
             </span>
           </div>
           <h2 dir="auto">{guide?.title}</h2>
-          <p className="task-start">
-            <strong>Start here:</strong> {guide?.before}
-          </p>
+          <p className="task-start">{guide?.before}</p>
           <ol className="task-actions">
             {guide?.steps.map((step) => (
               <li key={step} dir="auto">
@@ -156,9 +154,6 @@ export function TaskInstructions({
             </div>
           )}
           {guide?.warning && !state.passed && <p className="task-caution">{guide.warning}</p>}
-          <p className="expected-result">
-            <strong>You’re done when:</strong> {guide?.result}
-          </p>
           {current.task.rules
             .filter((r) => (r.type === 'file' && r.value) || (r.type === 'message' && r.value))
             .map((r, i) => (
@@ -197,7 +192,7 @@ export function TaskInstructions({
           <h3>Check your work</h3>
           <small>
             {d.gradingPolicy
-              ? `${state.earned} / ${current.task.points} earned · ${Math.round((current.task.points - state.earned) * 100) / 100} points remaining. Each scored requirement earns its own points.`
+              ? 'Each scored requirement earns its own points. You can continue with unfinished work.'
               : `Earn all ${current.task.points} points when every scored requirement passes. Checklist items do not earn separate points.`}
           </small>
           <ol className="requirement-list">
@@ -272,15 +267,9 @@ export function TaskInstructions({
               </button>
             )}
           </div>
-          <details className="task-hint">
-            <summary>Hint</summary>
-            <p>
-              {guide?.before} Work in Files to edit text and Terminal to run Git commands. Check the
-              expected result before moving on.
-            </p>
-          </details>
           <details className="check-evidence">
             <summary>Technical check details</summary>
+            <p>{guide?.result}</p>
             <p>
               {done} completed · {state.requirements.length - done} remaining
             </p>

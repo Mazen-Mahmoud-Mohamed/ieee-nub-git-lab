@@ -1,4 +1,50 @@
 import { test, expect } from '@playwright/test';
+test('terminal file creation stays compact; explicit editing can be closed without losing work', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/#/workspace');
+  for (const value of ['mkdir IEEE-Git-Task', 'cd IEEE-Git-Task', 'echo Draft > about.txt']) {
+    await page.getByLabel('Terminal command').fill(value);
+    await page.getByLabel('Terminal command').press('Enter');
+    await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  }
+  await expect(page.locator('.student-editor')).toBeHidden();
+  await expect(page.getByLabel('Command helpers')).toHaveCount(0);
+  await page.getByRole('button', { name: /about.txt/ }).click();
+  await page
+    .getByRole('textbox', { name: 'Text file editor', exact: true })
+    .fill('Preserved draft');
+  await page.getByRole('button', { name: 'Close editor', exact: true }).click();
+  await page.screenshot({
+    path: 'test-results/product-review/local-desktop-terminal.png',
+    fullPage: true,
+  });
+  await expect(page.locator('.student-editor')).toBeHidden();
+  await page.getByRole('button', { name: /about.txt/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Text file editor', exact: true })).toHaveText(
+    'Preserved draft',
+  );
+  await page.screenshot({
+    path: 'test-results/product-review/local-desktop-editor.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Text file editor', exact: true })).toHaveValue(
+    'Preserved draft',
+  );
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
+  await page.getByLabel('Terminal command').fill('git status');
+  await page.getByRole('tab', { name: 'Task', exact: true }).click();
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
+  await expect(page.getByLabel('Terminal command')).toHaveValue('git status');
+  await expect(page.getByLabel('Terminal command')).toBeInViewport();
+  await page.screenshot({
+    path: 'test-results/product-review/local-mobile-terminal.png',
+    fullPage: false,
+  });
+});
 test('terminal-first desktop and simple phone tabs keep working state across layout changes', async ({
   page,
 }) => {

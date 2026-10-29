@@ -1,4 +1,5 @@
 import { requirementCatalog } from '../assessments/requirements';
+import { prepareFundamentalsScoring } from '../assessments/fundamentalsScoring';
 import { RecordActions } from './RecordManagement';
 import { AssessmentCourse } from './LearningContent';
 import { taskGuide } from '../assessments/presentation';
@@ -529,6 +530,40 @@ export function AssessmentEditor() {
             </option>
           </select>
         </label>
+        {!definition.gradingPolicy &&
+          definition.sections
+            .flatMap((s) => s.tasks)
+            .some((t) => t.id === 'separate' && t.rules.some((r) => r.type === 'legacy')) && (
+            <div className="scoring-proposal">
+              <button
+                type="button"
+                className="outline-button"
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      'Prepare independent requirement weights in this editor only? Review every weight before saving or publishing. Existing published versions, active attempts and grades stay unchanged.',
+                    )
+                  )
+                    return;
+                  try {
+                    setDefinition(prepareFundamentalsScoring(definition));
+                    setEditorTab('tasks');
+                    setNotice(
+                      'Prepared proposed Git Fundamentals weights. Review each requirement below. Nothing has been saved or published.',
+                    );
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Unable to prepare this rubric.');
+                  }
+                }}
+              >
+                Prepare Git Fundamentals partial-credit draft
+              </button>
+              <p>
+                Fills a proposed points breakdown for the original tasks. You approve it by
+                reviewing and explicitly publishing a new version.
+              </p>
+            </div>
+          )}
         <div className="field-grid">
           {(
             [

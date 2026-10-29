@@ -53,6 +53,10 @@ export function SessionMaterials({
     if (busy || uploading.current) return;
     uploading.current = true;
     try {
+      if (!document.title.trim()) {
+        setError('Enter a session name before uploading your presentation.');
+        return;
+      }
       if (
         document.presentation_id &&
         !window.confirm(
@@ -72,7 +76,7 @@ export function SessionMaterials({
         await prepare();
         const material = await uploadPresentation(id, file, setProgress);
         update({ presentation_id: material });
-        setNotice('Uploaded and validated. Save or publish this draft to attach the presentation.');
+        setNotice('Uploaded and validated. Ready to publish.');
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -106,7 +110,7 @@ export function SessionMaterials({
         }}
       >
         <p>Drop a .pptx presentation here (up to 25 MiB).</p>
-        <label>
+        <label className="presentation-input-label">
           Upload PowerPoint (.pptx, up to 25 MiB)
           <input
             className="presentation-file-input"
@@ -140,9 +144,16 @@ export function SessionMaterials({
           {progress}% transferred · waiting for server validation
         </div>
       )}
+      {notice && <p role="status">{notice}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
       {document.presentation_id && (
-        <>
-          <p>PowerPoint attached to this draft. Published copies are retained.</p>
+        <details className="presentation-options">
+          <summary>Presentation options</summary>
+          <p>Published presentations and their files are retained.</p>
           <button
             type="button"
             className="text-button"
@@ -176,7 +187,7 @@ export function SessionMaterials({
               Open draft PowerPoint ↗
             </a>
           )}
-        </>
+        </details>
       )}
 
       <h4>Recorded Lecture</h4>
@@ -188,36 +199,36 @@ export function SessionMaterials({
           onChange={(e) => update({ video_url: e.target.value })}
         />
       </label>
-      <p>
-        Share the video with your intended students in Google Drive. Playback depends on Drive
-        access; no Google credentials are needed here.
-      </p>
-      <button
-        className="outline-button"
-        type="button"
-        onClick={() => {
-          try {
-            const video = driveVideo(document.video_url || '');
-            if (video) {
-              update({ video_url: video.open });
-              setNotice(
-                'Supported Drive file link. Check playback and sharing in the student preview.',
-              );
-              setError('');
-            } else setNotice('No video attached.');
-          } catch (e) {
-            setError(String(e));
-          }
-        }}
-      >
-        Check video link
-      </button>
-      {document.video_url && (
-        <details>
-          <summary>Preview video for students</summary>
-          <DriveVideo url={document.video_url} />
-        </details>
-      )}
+      <details className="video-options">
+        <summary>Video preview and sharing</summary>
+        <p>Share the video with your students in Google Drive. Playback depends on Drive access.</p>
+        <button
+          className="outline-button"
+          type="button"
+          onClick={() => {
+            try {
+              const video = driveVideo(document.video_url || '');
+              if (video) {
+                update({ video_url: video.open });
+                setNotice(
+                  'Supported Drive file link. Check playback and sharing in the student preview.',
+                );
+                setError('');
+              } else setNotice('No video attached.');
+            } catch (e) {
+              setError(String(e));
+            }
+          }}
+        >
+          Check video link
+        </button>
+        {document.video_url && (
+          <details>
+            <summary>Preview video for students</summary>
+            <DriveVideo url={document.video_url} />
+          </details>
+        )}
+      </details>
       <details className="session-options">
         <summary>Session options: order, topics and related practice</summary>{' '}
         <div className="session-numbers">
@@ -270,12 +281,6 @@ export function SessionMaterials({
           student. Starting still checks deadlines and attempt limits.
         </p>
       </details>
-      {notice && <p role="status">{notice}</p>}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
     </section>
   );
 }
