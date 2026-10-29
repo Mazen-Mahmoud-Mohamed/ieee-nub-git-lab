@@ -72,6 +72,9 @@ export function Overview() {
     <section>
       <h2>Overview</h2>
       <div className="admin-shortcuts">
+        <Link className="primary" to="/instructor/sessions">
+          Add a Learning Session
+        </Link>
         <Link className="primary" to="/instructor/submissions">
           Review submissions
         </Link>

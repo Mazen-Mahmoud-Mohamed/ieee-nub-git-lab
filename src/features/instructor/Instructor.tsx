@@ -1,5 +1,6 @@
 import { RecordManager, AdminActivity } from './RecordManagement';
 import { LearningContent } from './LearningContent';
+import { LearningSessions } from './LearningSessions';
 import { HelpRequests } from './HelpRequests';
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
@@ -19,6 +20,7 @@ export function Instructor() {
       <nav className="instructor-nav" aria-label="Instructor navigation">
         {[
           ['', 'Overview'],
+          ['sessions', 'Learning Sessions'],
           ['content', 'Courses & lessons'],
           ['students', 'Students'],
           ['submissions', 'Submissions'],
@@ -39,7 +41,7 @@ export function Instructor() {
       <Routes>
         <Route index element={<Overview />} />
         <Route path="content" element={<LearningContent />} />
-        <Route path="sessions" element={<LearningContent />} />
+        <Route path="sessions" element={<LearningSessions />} />
         <Route path="records" element={<RecordManager />} />
         <Route path="activity" element={<AdminActivity />} />
         <Route path="students" element={<Students />} />

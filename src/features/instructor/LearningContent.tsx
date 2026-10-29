@@ -230,6 +230,21 @@ export function LearningContent() {
           New {kind === 'lesson' ? 'session' : kind}
         </button>
       </div>
+      <p className="session-entry-link">
+        <Link
+          className="outline-button"
+          to={
+            '/instructor/sessions' +
+            (parent?.kind === 'course'
+              ? '?course=' + parent.id
+              : parent?.kind === 'section'
+                ? '?course=' + parent.parent_id
+                : '')
+          }
+        >
+          Learning Sessions · Add a PowerPoint and recorded lecture
+        </Link>
+      </p>
       {parent && (
         <>
           <button className="outline-button" disabled={busy} onClick={() => setEditing(parent)}>

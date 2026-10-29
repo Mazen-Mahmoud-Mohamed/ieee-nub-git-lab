@@ -4,6 +4,50 @@
   --content: 1180px;
   --muted: #a4b2c5;
 }
+.session-course {
+  max-width: 620px;
+  margin-block: 20px;
+}
+.session-form {
+  max-width: 850px;
+  margin-block: 24px;
+}
+.session-form fieldset {
+  min-width: 0;
+}
+.session-form .session-material-editor {
+  padding-block: 18px;
+}
+.session-form .review-actions {
+  margin-block: 20px;
+}
+.session-list .managed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.session-list h3,
+.learning-sessions p {
+  overflow-wrap: anywhere;
+}
+.session-entry-link {
+  margin-block: 16px;
+}
+@media (max-width: 600px) {
+  .session-list .managed-row {
+    display: block;
+  }
+  .session-list .review-actions {
+    margin-top: 12px;
+  }
+  .session-form {
+    padding: 16px;
+  }
+  .session-course {
+    max-width: 100%;
+  }
+}
 :root[data-theme='light'] {
   --muted: #52647a;
   --green: #08735b;

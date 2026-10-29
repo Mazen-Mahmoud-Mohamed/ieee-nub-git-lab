@@ -7,7 +7,7 @@ export default defineConfig({
   timeout: fixture.timeout,
   fullyParallel: false,
   testMatch: 'management.spec.ts',
-  grep: /mobile learning journey|session editor rejects|new requirement policy|instructor explicitly|Git Fundamentals combined|instructor republishes/,
+  grep: /mobile learning journey|session editor rejects|new requirement policy|instructor explicitly|Git Fundamentals combined|instructor republishes|direct Learning Sessions/,
   workers: 1,
   outputDir: 'test-results/mobile-connected',
   projects: [
