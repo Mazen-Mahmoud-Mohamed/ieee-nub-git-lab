@@ -13,6 +13,7 @@ The instructor `/sessions` route was an alias for the generic course/section/les
 - Description, supplementary resources, order, topics and related assessments remain optional and collapsed. No blank resource-link rows are created by default.
 - A suitable published section is selected automatically. If a published course has none, the instructor must confirm creating an empty published Learning Sessions section. Existing draft sections are never silently published.
 - Draft recovery, loading indicators, disabled actions during requests, errors and retry are supported. Publishing is disabled when the parent hierarchy is unpublished.
+- Hosted acceptance exposed a misleading stale success notice during a subsequent save. Save/publish now replaces it immediately with an in-progress status and clears it on failure. A delayed-save browser check verifies that the old success message disappears and actions stay disabled until the new revision is saved.
 - Student Course Content lists published sessions directly, with each session's video and presentation together. Optional section navigation preserves access to existing section descriptions and supplementary resources.
 
 ## Architecture and preservation

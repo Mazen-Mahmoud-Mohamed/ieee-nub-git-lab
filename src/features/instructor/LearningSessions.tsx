@@ -186,7 +186,7 @@ export function LearningSessions() {
     return adminRPC<Session>('manage_learning_edit', { p_id: editing.id });
   };
   const save = async (publish: boolean) => {
-    if (!editing) return;
+    if (!editing || busy) return;
     if (
       publish &&
       (!course?.published_version ||
@@ -197,6 +197,7 @@ export function LearningSessions() {
     }
     setBusy(true);
     setError('');
+    setNotice(publish ? 'Publishing session…' : 'Saving session draft…');
     try {
       const saved = await persist(publish);
       if (publish) {
@@ -216,6 +217,7 @@ export function LearningSessions() {
         await load();
       }
     } catch (e) {
+      setNotice('');
       setError(adminError(e));
     } finally {
       setBusy(false);

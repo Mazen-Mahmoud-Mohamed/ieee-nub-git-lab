@@ -77,8 +77,21 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
     fullPage: false,
   });
   if (originalViewport) await page.setViewportSize(originalViewport);
+  let releaseSave!: () => void;
+  const pendingSave = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route('**/rest/v1/rpc/manage_learning_save', async (route) => {
+    await pendingSave;
+    await route.fallback();
+  });
   await page.getByRole('button', { name: 'Save Draft', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saving session draft…' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Session draft saved.' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save Draft', exact: true })).toBeDisabled();
+  releaseSave();
   await expect(page.getByRole('status').filter({ hasText: 'Session draft saved.' })).toBeVisible();
+  await page.unroute('**/rest/v1/rpc/manage_learning_save');
   await expect(page.getByLabel('Session Title', { exact: true })).toHaveValue(
     'Session 1 — Git Basics',
   );
