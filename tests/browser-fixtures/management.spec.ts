@@ -16,6 +16,258 @@ import { requirementCatalog } from '../../src/features/assessments/requirements'
 import { weightedFundamentalsFixture } from '../helpers/weightedFundamentals';
 import { GitEngine } from '../../src/features/git-engine/engine';
 
+test('direct Learning Sessions shows only published teaching cards and preserves legacy files and assessment history', async ({
+  page,
+  browser,
+}) => {
+  const course = '70000000-0000-4000-8000-000000000001',
+    section = '70000000-0000-4000-8000-000000000002',
+    legacy = '70000000-0000-4000-8000-000000000011';
+  // Reproduce the actual live condition: a legacy tutorial already has media.
+  const file = new FormData();
+  file.set('itemId', legacy);
+  file.set('file', new File([pptxBytes()], 'Retained legacy.pptx', { type: PPTX_MIME }));
+  const uploaded = await handleMaterial(
+    new Request('http://localhost/upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer isolated-local' },
+      body: file,
+    }),
+    'http://127.0.0.1:5174',
+    materialServices(TEACHER),
+  );
+  expect(uploaded.status).toBe(201);
+  const material = (await uploaded.json()).id;
+  const old = await h.rpc(TEACHER, 'manage_learning_edit', { p_id: legacy });
+  await h.rpc(TEACHER, 'manage_learning_save', {
+    p_id: legacy,
+    p_kind: 'lesson',
+    p_parent: section,
+    p_revision: old.revision,
+    p_document: {
+      ...old.document,
+      presentation_id: material,
+      video_url: 'https://drive.google.com/file/d/legacyvideo123/view',
+    },
+    p_publish: true,
+  });
+  const fingerprint = async () =>
+    (
+      await h.db.query<any>(
+        "select md5(jsonb_agg(to_jsonb(v) order by v.item_id,v.version)::text) as digest from public.learning_versions v join public.learning_items i on i.id=v.item_id where i.id::text like '70000000-0000-4000-8000-%' ",
+      )
+    ).rows[0].digest;
+  const before = await fingerprint();
+  const protectedCounts = await h.db.query(
+    'select (select count(*) from public.attempts) as attempts,(select count(*) from public.grading_summaries) as grades,(select count(*) from public.assessment_versions) as versions',
+  );
+  const student = await browser.newPage({ baseURL: 'http://127.0.0.1:5174' });
+  await backend(student, STUDENT);
+  await student.goto('/ieee-git-lab/#/learn');
+  await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
+  await expect(student.locator('.teaching-session-card')).toHaveCount(0);
+  await expect(student.getByText('Files and the editor', { exact: true })).toHaveCount(0);
+  await student.goto('/ieee-git-lab/#/learn/' + legacy);
+  await expect(
+    student.getByRole('heading', { name: 'Files and the editor', exact: true }),
+  ).toBeVisible();
+  await student.goto('/ieee-git-lab/#/learn');
+  await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
+  await student.screenshot({
+    path: 'test-results/two-sessions/local-empty-' + test.info().project.name + '.png',
+    fullPage: false,
+  });
+  await backend(page, TEACHER);
+  await page.goto('/ieee-git-lab/#/instructor/sessions');
+  await expect(
+    page.getByRole('heading', { name: 'Actual Teaching Sessions', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.session-list > .managed-row')).toHaveCount(0);
+  await page.getByText('Legacy Learning Content · 6', { exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Files and the editor', exact: true }),
+  ).toBeVisible();
+  const lessons: string[] = [];
+  const presentations = [
+    Buffer.from(pptxBytes()),
+    execFileSync('git', ['show', 'HEAD:Git Course IEEE.pptx'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 5000000,
+    }),
+  ];
+  for (const [index, title] of [
+    'Git foundations — isolated test',
+    'Branches and merges — isolated test',
+  ].entries()) {
+    await page.getByRole('button', { name: 'Add Session', exact: true }).click();
+    await page.getByLabel('Session Title', { exact: true }).fill(title);
+    await page.getByLabel(/Upload PowerPoint/).setInputFiles({
+      name: 'Teaching ' + (index + 1) + '.pptx',
+      mimeType: PPTX_MIME,
+      buffer: presentations[index],
+    });
+    await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
+    await page
+      .getByLabel('Google Drive video link')
+      .fill(
+        'https://drive.google.com/file/d/' + (index ? 'secondvideo123' : 'firstvideo123') + '/view',
+      );
+    if (!index) {
+      await page.getByRole('button', { name: 'Save Draft', exact: true }).click();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Session draft saved.' }),
+      ).toBeVisible();
+      await student.reload();
+      await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
+    lessons.push(
+      (await h.db.query<any>('select id from public.learning_items where title=$1', [title]))
+        .rows[0].id,
+    );
+  }
+  await student.reload();
+  const cards = student.locator('.teaching-session-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.locator('h3')).toHaveText([
+    'Git foundations — isolated test',
+    'Branches and merges — isolated test',
+  ]);
+  await expect(student.getByRole('link', { name: 'Open session', exact: true })).toHaveCount(0);
+  await expect(student.locator('.published-course .written-answer')).toHaveCount(0);
+  for (const [index, id] of lessons.entries()) {
+    await expect(
+      cards.nth(index).getByText('Session ' + (index + 1), { exact: true }),
+    ).toBeVisible();
+    await expect(
+      cards.nth(index).getByRole('link', { name: 'Watch Recording', exact: true }),
+    ).toHaveAttribute('href', '#/learn/' + id);
+    const doc = (await h.rpc(STUDENT, 'learning_catalog', { p_parent: id })).parent.document;
+    const m = await h.rpc(STUDENT, 'learning_presentation', { p_item: id });
+    expect(m.name).toBe('Teaching ' + (index + 1) + '.pptx');
+    expect(doc.video_url).toContain(index ? 'secondvideo123' : 'firstvideo123');
+  }
+  await student.route('**/storage/v1/object/sign/learning-presentations/**', (route) =>
+    route.fulfill({ status: 503, json: { message: 'Isolated temporary failure' } }),
+  );
+  await cards.first().getByRole('button', { name: 'Download PowerPoint', exact: true }).click();
+  await expect(student.getByRole('alert')).toContainText('PowerPoint could not be opened');
+  await student.unroute('**/storage/v1/object/sign/learning-presentations/**');
+  for (const index of [0, 1]) {
+    const downloading = student.waitForEvent('download');
+    await cards
+      .nth(index)
+      .getByRole('button', { name: 'Download PowerPoint', exact: true })
+      .click();
+    const downloaded = await downloading;
+    expect(
+      createHash('sha256')
+        .update(await readFile((await downloaded.path())!))
+        .digest('hex'),
+    ).toBe(createHash('sha256').update(presentations[index]).digest('hex'));
+  }
+  for (const width of [1440, 768, 390, 320]) {
+    await student.setViewportSize({ width, height: 900 });
+    expect(await student.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+    if ([1440, 390].includes(width))
+      await student.screenshot({
+        path:
+          'test-results/two-sessions/local-after-' +
+          width +
+          '-' +
+          test.info().project.name +
+          '.png',
+        fullPage: false,
+      });
+  }
+  await cards.first().getByRole('link', { name: 'Watch Recording', exact: true }).click();
+  await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveAttribute(
+    'src',
+    'https://drive.google.com/file/d/firstvideo123/preview',
+  );
+  await expect(student.getByRole('alert')).toHaveCount(0);
+  await student.getByRole('button', { name: 'Video won’t play?', exact: true }).click();
+  await expect(student.getByRole('alert')).toContainText('share it with you');
+  await expect(
+    student.getByRole('link', { name: '← Back to Course Content', exact: true }),
+  ).toHaveAttribute('href', '#/learn/' + course);
+  await student.getByRole('link', { name: '← Back to Course Content', exact: true }).click();
+  // Reorder creates a new version only for this isolated teaching session.
+  const row = page
+    .locator('.session-list > .managed-row')
+    .filter({ hasText: 'Branches and merges — isolated test' });
+  await row.getByRole('button', { name: 'Edit Session', exact: true }).click();
+  await page
+    .getByText('Session options: order, topics and related practice', { exact: true })
+    .click();
+  await page.getByLabel('Display order', { exact: true }).fill('5');
+  await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
+  await student.reload();
+  await expect(student.locator('.teaching-session-card h3')).toHaveText([
+    'Branches and merges — isolated test',
+    'Git foundations — isolated test',
+  ]);
+  await expect(
+    h.rpc(STUDENT, 'manage_learning_unpublish', { p_id: lessons[0], p_revision: 1 }),
+  ).rejects.toThrow(/Instructor authorization/);
+  page.once('dialog', (d) => d.accept());
+  await row.getByRole('button', { name: 'Unpublish Session', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Session unpublished.' })).toBeVisible();
+  await student.reload();
+  await expect(student.locator('.teaching-session-card')).toHaveCount(1);
+  const remaining = page
+    .locator('.session-list > .managed-row')
+    .filter({ hasText: 'Git foundations — isolated test' });
+  page.once('dialog', (d) => d.dismiss());
+  await remaining.getByRole('button', { name: 'Archive Session', exact: true }).click();
+  await expect(remaining).toBeVisible();
+  page.once('dialog', (d) => d.accept());
+  await remaining.getByRole('button', { name: 'Archive Session', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Session archived.' })).toBeVisible();
+  await student.reload();
+  await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
+  const third = await h.rpc(TEACHER, 'manage_learning_save', {
+    p_id: null,
+    p_kind: 'lesson',
+    p_parent: section,
+    p_revision: null,
+    p_document: {
+      title: 'Future session — isolated test',
+      body: '',
+      links: [],
+      session_number: 3,
+      display_order: 30,
+    },
+    p_publish: true,
+  });
+  await student.reload();
+  await expect(student.locator('.teaching-session-card')).toHaveCount(1);
+  await expect(student.getByText('Session 3', { exact: true })).toBeVisible();
+  await expect(student.getByText('Recording coming soon.', { exact: true })).toBeVisible();
+  await expect(student.getByText('PowerPoint coming soon.', { exact: true })).toBeVisible();
+  expect(third).toBeTruthy();
+  expect(await fingerprint()).toBe(before);
+  expect(
+    (
+      await h.db.query(
+        'select (select count(*) from public.attempts) as attempts,(select count(*) from public.grading_summaries) as grades,(select count(*) from public.assessment_versions) as versions',
+      )
+    ).rows,
+  ).toEqual(protectedCounts.rows);
+  expect(
+    (
+      await h.db.query<any>('select count(*)::int n from public.learning_materials where id=$1', [
+        material,
+      ])
+    ).rows[0].n,
+  ).toBe(1);
+  await student.close();
+});
+
 test('direct Learning Sessions accepts a real PPTX and lecture in one form and shows both on the student course', async ({
   page,
   browser,
@@ -115,22 +367,16 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
     page.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }),
   ).toBeVisible();
   await student.reload();
-  await student.getByText('Course sections and supplementary content', { exact: true }).click();
-  await expect(student.locator('.session-options a').first()).toBeVisible();
-  const row = student
-    .locator('.managed-row')
-    .filter({ has: student.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }) });
-  await expect(row.getByRole('heading', { name: 'Recorded lecture', exact: true })).toBeVisible();
   await expect(
-    row.getByRole('heading', { name: 'PowerPoint presentation', exact: true }),
-  ).toBeVisible();
-  await expect(row.getByRole('link', { name: /^Open in Google Drive/ })).toHaveAttribute(
-    'href',
-    'https://drive.google.com/file/d/abcdefghij123/view',
-  );
-  await row.getByRole('button', { name: 'Get presentation links', exact: true }).click();
+    student.getByText('Course sections and supplementary content', { exact: true }),
+  ).toHaveCount(0);
+  const row = student
+    .locator('.teaching-session-card')
+    .filter({ has: student.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }) });
+  await expect(row.getByRole('link', { name: 'Watch Recording', exact: true })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Open PowerPoint', exact: true })).toBeVisible();
   const download = student.waitForEvent('download');
-  await row.getByRole('link', { name: 'Download PowerPoint', exact: true }).click();
+  await row.getByRole('button', { name: 'Download PowerPoint', exact: true }).click();
   const saved = await download;
   const downloaded = await readFile((await saved.path())!);
   expect(createHash('sha256').update(downloaded).digest('hex')).toBe(
@@ -162,25 +408,15 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
   await page.getByRole('button', { name: 'Save Draft', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session draft saved.' })).toBeVisible();
   await student.reload();
-  await expect(
-    student
-      .locator('.managed-row')
-      .filter({
-        has: student.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }),
-      })
-      .getByRole('link', { name: /^Open in Google Drive/ }),
-  ).toHaveAttribute('href', 'https://drive.google.com/file/d/abcdefghij123/view');
+  expect(
+    (await h.rpc(STUDENT, 'learning_catalog', { p_parent: lesson })).parent.document.video_url,
+  ).toBe('https://drive.google.com/file/d/abcdefghij123/view');
   await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
   await student.reload();
-  await expect(
-    student
-      .locator('.managed-row')
-      .filter({
-        has: student.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }),
-      })
-      .getByRole('link', { name: /^Open in Google Drive/ }),
-  ).toHaveAttribute('href', 'https://drive.google.com/file/d/newrecording123/view');
+  expect(
+    (await h.rpc(STUDENT, 'learning_catalog', { p_parent: lesson })).parent.document.video_url,
+  ).toBe('https://drive.google.com/file/d/newrecording123/view');
   expect(
     (
       await h.db.query<any>(
@@ -1112,9 +1348,12 @@ test('an instructor publishes a real course, section and lesson and students rea
     'dir',
     'auto',
   );
+  expect(
+    (await h.rpc(STUDENT, 'learning_catalog', { p_parent: lesson })).parent.document.links,
+  ).toContainEqual({ label: 'Official Git reference', url: 'https://git-scm.com/docs' });
   await expect(
     student.getByRole('link', { name: 'Official Git reference ↗', exact: true }),
-  ).toHaveAttribute('href', 'https://git-scm.com/docs');
+  ).toHaveCount(0);
   await student.screenshot({ path: 'test-results/published-course-student.png', fullPage: true });
   await context.close();
 });
@@ -1395,7 +1634,7 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
       'Published session with a long related assessment title at ' + width + 'px',
     ).toBeLessThanOrEqual(width);
   }
-  await expect(student.locator('iframe')).toHaveCount(0);
+  await expect(student.locator('iframe')).toHaveCount(1);
   await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toHaveAttribute(
     'href',
     'https://drive.google.com/file/d/abcdefghij123/view',
@@ -1408,7 +1647,6 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
       body: '<p>Request access in Google Drive</p>',
     }),
   );
-  await student.getByRole('button', { name: 'Load recorded lecture', exact: true }).click();
   await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveAttribute(
     'src',
     'https://drive.google.com/file/d/abcdefghij123/preview',
@@ -1418,13 +1656,13 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toBeVisible();
   // External playback is deliberately not represented as verified by this localhost test.
   await student.screenshot({ path: 'test-results/mobile-learning-session.png', fullPage: true });
-  await student.getByRole('button', { name: 'Get presentation links' }).click();
-  await expect(student.getByRole('link', { name: 'Download PowerPoint' })).toBeVisible();
+  await expect(student.getByRole('button', { name: 'Download PowerPoint' })).toBeVisible();
   const download = student.waitForEvent('download');
-  await student.getByRole('link', { name: 'Download PowerPoint' }).click();
+  await student.getByRole('button', { name: 'Download PowerPoint' }).click();
   const downloaded = await download;
   expect(await readFile((await downloaded.path())!)).toEqual(Buffer.from(pptxBytes()));
-  await student.getByRole('link', { name: /Practice What You Learned/ }).click();
+  await expect(student.getByRole('link', { name: /Practice What You Learned/ })).toHaveCount(0);
+  await student.goto('/ieee-git-lab/#/assessments/' + assessment);
   await student
     .getByRole('checkbox', { name: /Save my files, answers and command activity/ })
     .check();

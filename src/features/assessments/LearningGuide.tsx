@@ -3,6 +3,13 @@ import { PublishedCourses } from './PublishedCourses';
 import { Link } from 'react-router-dom';
 import { courseLessons } from './presentation';
 export function LearningGuide() {
+  if (supabase)
+    return (
+      <div className="page narrow learning-guide">
+        <h1>Course Content</h1>
+        <PublishedCourses />
+      </div>
+    );
   return (
     <div className="page learning-guide">
       <Link to="/dashboard" className="breadcrumb">

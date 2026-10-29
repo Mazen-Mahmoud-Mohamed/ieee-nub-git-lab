@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { requireBackend } from '../../services/supabase';
 import { SessionMaterials } from '../learning/SessionMaterials';
+import { isLegacyTutorial, orderedTeachingSessions } from '../learning/teachingSessions';
 import { driveVideo, type LearningDocument } from '../learning/materials';
 import { adminError, adminRPC } from './adminData';
 import {
@@ -40,14 +41,32 @@ export function LearningSessions() {
     [notice, setNotice] = useState('');
   const generation = useRef(0);
   const recoveredCourse = useRef('');
+  const selectedCourse = useRef(query.get('course') || '');
+  const [documents, setDocuments] = useState<Record<string, Session>>({});
   const load = useCallback(async () => {
     const token = ++generation.current;
     setLoading(true);
     try {
       const rows = await hierarchy();
+      const destination = defaultSessionCourse(
+        rows,
+        selectedCourse.current || query.get('course') || '',
+      );
+      const lessons = courseSessions(rows, destination).filter((s) => !isLegacyTutorial(s.id));
+      const saved: Session[] = [];
+      for (let i = 0; i < lessons.length; i += 20)
+        saved.push(
+          ...(await Promise.all(
+            lessons
+              .slice(i, i + 20)
+              .map((s) => adminRPC<Session>('manage_learning_edit', { p_id: s.id })),
+          )),
+        );
       if (generation.current !== token) return;
       setItems(rows);
-      setCourseId((current) => defaultSessionCourse(rows, current || query.get('course') || ''));
+      selectedCourse.current = destination;
+      setCourseId(destination);
+      setDocuments(Object.fromEntries(saved.map((s) => [s.id, s])));
       setError('');
     } catch (e) {
       if (generation.current === token) setError(adminError(e));
@@ -70,6 +89,7 @@ export function LearningSessions() {
       if (
         saved?.kind === 'lesson' &&
         typeof saved.id === 'string' &&
+        !isLegacyTutorial(saved.id) &&
         typeof saved.document?.title === 'string' &&
         Array.isArray(saved.document.links) &&
         courseSections(items, courseId).some((s) => s.id === saved.parent_id)
@@ -93,7 +113,11 @@ export function LearningSessions() {
   }, [editing, cache]);
   const course = sessionCourses(items).find((c) => c.id === courseId),
     sections = courseSections(items, courseId),
-    sessions = courseSessions(items, courseId);
+    allLessons = courseSessions(items, courseId),
+    legacy = allLessons.filter((s) => isLegacyTutorial(s.id)),
+    sessions = orderedTeachingSessions(
+      allLessons.map((s) => ({ ...s, document: documents[s.id]?.document })),
+    );
   const canPublish =
     !!course?.published_version &&
     sections.some((s) => s.id === editing?.parent_id && s.published_version > 0);
@@ -146,7 +170,14 @@ export function LearningSessions() {
         published_version: 0,
         archived_at: null,
         deleted_at: null,
-        document: { title: '', body: '', links: [], video_url: '' },
+        document: {
+          title: '',
+          body: '',
+          links: [],
+          video_url: '',
+          session_number: Math.max(0, ...sessions.map((s) => s.document?.session_number || 0)) + 1,
+          display_order: Math.max(0, ...sessions.map((s) => s.document?.display_order || 0)) + 10,
+        },
       });
     } catch (e) {
       setError(adminError(e));
@@ -245,6 +276,7 @@ export function LearningSessions() {
           value={courseId}
           disabled={loading || busy || !!editing}
           onChange={(e) => {
+            selectedCourse.current = e.target.value;
             setCourseId(e.target.value);
             setQuery(e.target.value ? { course: e.target.value } : {});
             setNotice('');
@@ -434,6 +466,11 @@ export function LearningSessions() {
       )}
       {!loading && course && !editing && (
         <div className="session-list" aria-label="Learning session list">
+          <h3>Actual Teaching Sessions</h3>
+          <p>
+            Edit a session to replace materials or change its number and display order. Publish to
+            apply draft changes.
+          </p>
           {sessions.length ? (
             sessions.map((s) => (
               <article className="managed-row" key={s.id}>
@@ -452,6 +489,76 @@ export function LearningSessions() {
                   >
                     Edit Session
                   </button>
+                  <button
+                    className="outline-button"
+                    disabled={busy}
+                    onClick={async () => {
+                      if (
+                        !window.confirm(
+                          'Archive this session? It will be hidden from students. Published versions and files are retained.',
+                        )
+                      )
+                        return;
+                      setBusy(true);
+                      setError('');
+                      setNotice('');
+                      try {
+                        const record = await adminRPC<{ revision: number }>('manage_preview', {
+                          p_kind: 'learning',
+                          p_id: s.id,
+                        });
+                        await adminRPC('manage_records', {
+                          p_kind: 'learning',
+                          p_records: [{ id: s.id, revision: record.revision }],
+                          p_action: 'archive',
+                          p_reason: 'Instructor archived a teaching session',
+                          p_confirmation: 'ARCHIVE 1',
+                        });
+                        await load();
+                        setNotice('Session archived. Files and versions retained.');
+                      } catch (e) {
+                        setError(adminError(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Archive Session
+                  </button>
+                  {s.published_version > 0 && (
+                    <button
+                      className="outline-button"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            'Unpublish this session? Students will no longer see it. Files and published history are retained.',
+                          )
+                        )
+                          return;
+                        setBusy(true);
+                        setError('');
+                        setNotice('');
+                        try {
+                          const record = await adminRPC<Session>('manage_learning_edit', {
+                            p_id: s.id,
+                          });
+                          await adminRPC('manage_learning_unpublish', {
+                            p_id: s.id,
+                            p_revision: record.revision,
+                          });
+                          await load();
+                          setNotice('Session unpublished. Files and versions retained.');
+                        } catch (e) {
+                          setError(adminError(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Unpublish Session
+                    </button>
+                  )}
                   {s.published_version > 0 && (
                     <Link className="outline-button" to={'/learn/' + s.id}>
                       View student session
@@ -461,9 +568,24 @@ export function LearningSessions() {
               </article>
             ))
           ) : (
-            <p>
-              No sessions in this course yet. Choose Add Session to upload your first presentation.
-            </p>
+            <p>No teaching sessions yet. Choose Add Session to upload your first presentation.</p>
+          )}
+          {!!legacy.length && (
+            <details className="legacy-learning-content">
+              <summary>Legacy Learning Content · {legacy.length}</summary>
+              <p>
+                Hidden from the student session list. Original files, lesson routes and published
+                versions are retained.
+              </p>
+              {legacy.map((s) => (
+                <article className="managed-row" key={s.id}>
+                  <h4>{s.title}</h4>
+                  <Link className="text-button" to={'/instructor/content?parent=' + s.parent_id}>
+                    Manage legacy content
+                  </Link>
+                </article>
+              ))}
+            </details>
           )}
         </div>
       )}

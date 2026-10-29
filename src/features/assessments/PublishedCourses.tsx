@@ -1,4 +1,6 @@
 import { SessionResources } from '../learning/SessionResources';
+import { TeachingResources } from '../learning/TeachingResources';
+import { isLegacyTutorial, orderedTeachingSessions } from '../learning/teachingSessions';
 import type { LearningDocument } from '../learning/materials';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -6,7 +8,7 @@ import { supabase } from '../../services/supabase';
 type Catalog = {
   parent: { id: string; parent_id: string | null; kind?: string; document: Content } | null;
   flattened?: boolean;
-  sections?: Array<{ id: string; kind: string; document: Content }>;
+  courseId?: string;
   total: number;
   rows: Array<{ id: string; kind: string; document: Content }>;
 };
@@ -45,7 +47,16 @@ export function PublishedCourses({ standalone = false }: { standalone?: boolean 
       }
     };
     void (async () => {
-      let next = await catalog(contentId || null, page * 25);
+      let next = await catalog(contentId || null, contentId ? page * 25 : 0);
+      if (!contentId) {
+        if (next.total === 1 && next.rows[0]?.kind === 'course')
+          next = await catalog(next.rows[0].id);
+        else if (page) next = await catalog(null, page * 25);
+      }
+      if (next.parent?.kind === 'lesson') {
+        const section = await catalog(next.parent.parent_id!);
+        next.courseId = section.parent?.parent_id || undefined;
+      }
       if (next.parent?.kind === 'course') {
         const sections = await children(next.parent.id);
         const lessons = (
@@ -53,7 +64,11 @@ export function PublishedCourses({ standalone = false }: { standalone?: boolean 
         )
           .flat()
           .filter((s) => s.kind === 'lesson');
-        next = { ...next, rows: lessons, sections, total: lessons.length, flattened: true };
+        const teaching = orderedTeachingSessions(lessons);
+        next = { ...next, rows: teaching, total: teaching.length, flattened: true };
+      } else if (next.parent?.kind === 'section') {
+        const teaching = orderedTeachingSessions(await children(next.parent.id));
+        next = { ...next, rows: teaching, total: teaching.length, flattened: true };
       }
       if (live) setData(next);
     })()
@@ -75,13 +90,13 @@ export function PublishedCourses({ standalone = false }: { standalone?: boolean 
     <section className={standalone ? 'page narrow published-course' : 'published-course'}>
       {standalone ? (
         <>
-          <Link to={data?.parent?.parent_id ? '/learn/' + data.parent.parent_id : '/learn'}>
-            ← Back to learning
+          <Link to={data?.courseId ? '/learn/' + data.courseId : '/learn'}>
+            ← Back to Course Content
           </Link>
           <h1 dir="auto">{data?.parent?.document.title || 'Course Content'}</h1>
         </>
       ) : (
-        <h2>Learning Sessions · Course Content</h2>
+        <h2 dir="auto">{data?.parent?.document.title || 'Courses'}</h2>
       )}
       {loading && <p role="status">Loading courses…</p>}
       {error && (
@@ -94,7 +109,10 @@ export function PublishedCourses({ standalone = false }: { standalone?: boolean 
           Retry course materials
         </button>
       )}
-      {data?.parent && (
+      {data?.parent?.kind === 'lesson' && !isLegacyTutorial(data.parent.id) && (
+        <TeachingResources id={data.parent.id} document={data.parent.document} detail />
+      )}
+      {data?.parent?.kind === 'lesson' && isLegacyTutorial(data.parent.id) && (
         <>
           <p className="written-answer" dir="auto">
             {data.parent.document.body}
@@ -111,44 +129,41 @@ export function PublishedCourses({ standalone = false }: { standalone?: boolean 
           </ul>
         </>
       )}
-      {!loading && !error && data?.flattened && <h2>Learning Sessions</h2>}
-      {!!data?.sections?.length && (
-        <details className="session-options">
-          <summary>Course sections and supplementary content</summary>
-          <ul>
-            {data.sections.map((s) => (
-              <li key={s.id}>
-                <Link to={'/learn/' + s.id}>{s.document.title}</Link>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       {!loading &&
         !error &&
         data?.parent &&
         ['course', 'section'].includes(data.parent.kind || '') &&
-        !data.rows.length && <p>No sessions have been published here yet.</p>}
-      {!loading &&
-        !error &&
-        (data?.flattened ? data.rows.slice(page * 25, (page + 1) * 25) : data?.rows)?.map((r) => (
-          <article className="managed-row" key={r.id}>
-            <h3 dir="auto">
-              {r.document.session_number ? `Session ${r.document.session_number} — ` : ''}
-              {r.document.title}
-            </h3>
-            <p dir="auto">{r.document.body.slice(0, 180)}</p>
-            {r.kind === 'lesson' && <SessionResources id={r.id} document={r.document} />}
-            <Link className="outline-button" to={'/learn/' + r.id}>
-              Open {r.kind === 'lesson' ? 'session' : r.kind}
-            </Link>
-          </article>
-        ))}
-      {!loading && !error && !data?.rows.length && !contentId && (
-        <p>
-          No courses are published yet. Ask your instructor about learning materials; the practice
-          lab is still available.
-        </p>
+        !data.rows.length && <p>No sessions available yet.</p>}
+      <div className={data?.flattened ? 'teaching-session-grid' : ''}>
+        {!loading &&
+          !error &&
+          (data?.flattened ? data.rows.slice(page * 25, (page + 1) * 25) : data?.rows)?.map(
+            (r, index) => (
+              <article
+                className={r.kind === 'lesson' ? 'teaching-session-card' : 'managed-row'}
+                key={r.id}
+              >
+                {r.kind === 'lesson' && (
+                  <p className="session-number">
+                    Session {r.document.session_number || page * 25 + index + 1}
+                  </p>
+                )}
+                <h3 dir="auto">
+                  <Link to={'/learn/' + r.id}>{r.document.title}</Link>
+                </h3>
+                {r.kind === 'lesson' ? (
+                  <TeachingResources id={r.id} document={r.document} />
+                ) : (
+                  <Link className="outline-button" to={'/learn/' + r.id}>
+                    View sessions
+                  </Link>
+                )}
+              </article>
+            ),
+          )}
+      </div>
+      {!loading && !error && !data?.parent && !data?.rows.length && !contentId && (
+        <p>No sessions available yet.</p>
       )}
       {data && data.total > 25 && (
         <div className="review-actions">
