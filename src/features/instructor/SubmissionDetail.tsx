@@ -1,9 +1,10 @@
+import { taskOneDefinition } from '../assessments/taskOne';
 import { sumPoints } from '../assessments/model';
 import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { requireBackend } from '../../services/supabase';
-import { firstAssessment, totals, type Definition } from '../assessments/model';
+import { totals, type Definition } from '../assessments/model';
 import { GitEngine, type RepoView, type Activity } from '../git-engine/engine';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS';
 import { GitGraph } from '../../components/GitGraph';
@@ -21,7 +22,7 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
   const [working, setWorking] = useState<Record<string, string>>({});
   const [accepted, setAccepted] = useState('');
   const [view, setView] = useState<RepoView>();
-  const [definition, setDefinition] = useState<Definition>(firstAssessment);
+  const [definition, setDefinition] = useState<Definition>(taskOneDefinition);
   const questions = definition.questions;
   const points = totals(definition);
   const [taskResults, setTaskResults] = useState<
@@ -187,7 +188,10 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
     setError('');
     try {
       const manual = questions.filter(
-        (q) => (q.manual || !['single', 'multiple', 'boolean'].includes(q.kind)) && q.points > 0,
+        (q) =>
+          (q.manual ||
+            !['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(q.kind)) &&
+          q.points > 0,
       );
       if (!draft && manual.some((q) => scores[q.id] === undefined || scores[q.id] === ''))
         throw Error('Enter a mark for every manual question before finalizing.');
@@ -198,7 +202,11 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
           p_grades: questions
             .filter(
               (q) =>
-                (q.manual || !['single', 'multiple', 'boolean'].includes(q.kind)) && q.points > 0,
+                (q.manual ||
+                  !['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(
+                    q.kind,
+                  )) &&
+                q.points > 0,
             )
             .filter((q) => !draft || (scores[q.id] !== undefined && scores[q.id] !== ''))
             .map((q) => ({ question_id: q.id, points: Number(scores[q.id]) })),
@@ -372,6 +380,8 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
                         ? 'Unable to verify'
                         : 'Incomplete'}
                     : {c.label}
+                    {c.detected && <small>Evidence: {c.detected}</small>}
+                    {c.passed !== true && <small>Recovery: {c.hint}</small>}
                   </li>
                 ))}
               </ul>
@@ -429,7 +439,10 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
                   <p>{keys[q.id]?.explanation || 'No rubric or explanation was supplied.'}</p>
                 </details>
                 {q &&
-                  (q.manual || !['single', 'multiple', 'boolean'].includes(q.kind)) &&
+                  (q.manual ||
+                    !['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(
+                      q.kind,
+                    )) &&
                   q.points > 0 && (
                     <label>
                       Points (0–{q.points})

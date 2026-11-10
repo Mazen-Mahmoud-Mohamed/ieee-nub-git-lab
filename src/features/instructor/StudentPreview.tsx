@@ -61,7 +61,7 @@ export function StudentPreview({
             dark
           />
         ) : (
-          <Assessment lab={lab} definition={{ ...sanitized, gateTheory: false }} unlocked />
+          <Assessment lab={lab} definition={sanitized} />
         )}
       </div>
     </section>

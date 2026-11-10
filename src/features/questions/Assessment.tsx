@@ -1,17 +1,16 @@
+import { taskOneDefinition } from '../assessments/taskOne';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Lab } from '../../hooks/useLab';
-import { firstAssessment, totals, answerPresent, type Definition } from '../assessments/model';
+import { totals, answerPresent, type Definition } from '../assessments/model';
 import { supabase } from '../../services/supabase';
 import { StudentSteps } from '../assessments/StudentSteps';
 export function Assessment({
   lab,
-  unlocked,
-  definition = firstAssessment,
+  definition = taskOneDefinition(),
   basePath = '',
 }: {
   lab: Lab;
-  unlocked: boolean;
   definition?: Definition;
   basePath?: string;
 }) {
@@ -66,15 +65,7 @@ export function Assessment({
           {lab.saving}
         </span>
       </header>
-      {definition.gateTheory && !unlocked && !lab.receipt ? (
-        <section className="form-card">
-          <h2>Complete the required practical tasks first.</h2>
-          <p>Finish the required Git tasks to unlock these questions. The bonus is optional.</p>
-          <Link className="primary" to={basePath + '/workspace'}>
-            Return to workspace
-          </Link>
-        </section>
-      ) : !question ? (
+      {!question ? (
         <section className="form-card">
           <h2>No questions in this assessment.</h2>
           <Link className="primary" to={basePath + '/review'}>
@@ -129,7 +120,7 @@ export function Assessment({
                 block(e);
             }}
           >
-            {['single', 'multiple', 'boolean'].includes(question.kind) ? (
+            {['single', 'multiple', 'boolean', 'choice-complete'].includes(question.kind) ? (
               <fieldset className="question-choices">
                 <legend>
                   {question.kind === 'multiple' ? 'Select all that apply' : 'Choose one answer'}
@@ -170,7 +161,7 @@ export function Assessment({
             ) : (
               <label className="answer-label">
                 Your response
-                {question.kind === 'short' ? (
+                {['short', 'fill-blank'].includes(question.kind) ? (
                   <input
                     dir="auto"
                     maxLength={8000}
@@ -194,9 +185,12 @@ export function Assessment({
           </div>
           <p className="question-answer-state">
             {answerPresent(question, lab.answers[question.id]) ? 'Answered' : 'Unanswered'}
-            {question.manual || !['single', 'multiple', 'boolean'].includes(question.kind)
+            {question.manual ||
+            !['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(
+              question.kind,
+            )
               ? ' · Marked by your instructor.'
-              : ''}
+              : ' · Automatically graded on submission.'}
           </p>
           {notice && (
             <p className="notice" role="status">

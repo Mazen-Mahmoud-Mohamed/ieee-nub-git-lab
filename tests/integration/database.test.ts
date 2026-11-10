@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
-import { ASSIGNMENT_ID } from '../../src/features/assignments/assignment';
+const ASSIGNMENT_ID = 'b6f4b6d0-5fe2-4e4d-b9a5-000000000001';
 let db: PGlite;
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -19,7 +19,7 @@ beforeAll(async () => {
     `create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email_confirmed_at timestamptz);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;create function auth.role() returns text language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claim.role',true),''),'authenticated') $$;grant usage on schema auth to authenticated,service_role;grant execute on function auth.uid(),auth.role() to authenticated,service_role;`,
   );
   await db.exec(readFileSync('supabase/migrations/20261026130655_initial_git_lab.sql', 'utf8'));
-  await db.exec(readFileSync('supabase/seed.sql', 'utf8'));
+  await db.exec(readFileSync('tests/helpers/pre-task1-assessment-seed.sql', 'utf8'));
   await db.exec(
     `insert into auth.users values('${A}',now()),('${B}',now()),('${I}',now());insert into private.instructors(user_id) values('${I}');`,
   );

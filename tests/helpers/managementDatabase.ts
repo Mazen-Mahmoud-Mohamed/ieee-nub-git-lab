@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 export const ADMIN = '10000000-0000-4000-8000-000000000001';
 export const TEACHER = '10000000-0000-4000-8000-000000000002';
 export const STUDENT = '10000000-0000-4000-8000-000000000003';
-export async function managementDatabase() {
+export async function managementDatabase({ beforeCutover = false } = {}) {
   const db = new PGlite();
   await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
     create schema storage;
@@ -15,7 +15,7 @@ export async function managementDatabase() {
     create function auth.role() returns text language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claim.role',true),''),'authenticated')$$;
     grant usage on schema auth to authenticated,service_role;grant execute on function auth.uid(),auth.role() to authenticated,service_role;`);
   for (const migration of readdirSync('supabase/migrations')
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql') && (!beforeCutover || !f.startsWith('20261110000000')))
     .sort()) {
     const source = readFileSync('supabase/migrations/' + migration, 'utf8');
     try {
@@ -32,7 +32,7 @@ export async function managementDatabase() {
       );
     }
     if (migration.includes('initial_git_lab'))
-      await db.exec(readFileSync('supabase/seed.sql', 'utf8'));
+      await db.exec(readFileSync('tests/helpers/pre-task1-assessment-seed.sql', 'utf8'));
   }
   await db.exec(`insert into auth.users(id,email,email_confirmed_at) values
     ('${ADMIN}','admin@example.test',now()),('${TEACHER}','teacher@example.test',now()),('${STUDENT}','student@example.test',now());

@@ -1,9 +1,9 @@
+import { assignment as originalAssignment } from '../../src/features/assignments/assignment';
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import {
   blankDefinition,
-  firstAssessment,
   type Definition,
 } from '../../src/features/assessments/model';
 const A = '11111111-1111-4111-8111-111111111111',
@@ -26,7 +26,7 @@ async function root(sql: string) {
   return db.query<any>(sql);
 }
 const def = (type: 'assignment' | 'exam' = 'assignment'): Definition => ({
-  ...blankDefinition(type, 'legacy'),
+  ...Object.fromEntries(Object.entries(blankDefinition(type)).filter(([key]) => key !== 'gradingPolicy')) as Definition,
   title: 'Git concepts',
   format: 'theory',
   questions: [
@@ -60,7 +60,7 @@ beforeAll(async () => {
     `create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email_confirmed_at timestamptz);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;create function auth.role() returns text language sql stable as $$select 'authenticated'::text$$;grant usage on schema auth to authenticated,service_role;grant execute on function auth.uid(),auth.role() to authenticated,service_role;`,
   );
   await db.exec(readFileSync('supabase/migrations/20261026130655_initial_git_lab.sql', 'utf8'));
-  await db.exec(readFileSync('supabase/seed.sql', 'utf8'));
+  await db.exec(readFileSync('tests/helpers/pre-task1-assessment-seed.sql', 'utf8'));
   await db.exec(
     `insert into auth.users values('${A}',now()),('${B}',now()),('${I}',now());insert into private.instructors(user_id) values('${I}');insert into public.profiles values('${A}','Student A','A001','Nahda University','Engineering','2',now()),('${B}','Student B','B001','Nahda University','Science','2',now());`,
   );
@@ -168,7 +168,7 @@ describe.sequential('versioned assessment and timed exam lifecycle', () => {
   });
   it('preserves the original Assignment 01 and hides private answer keys', async () => {
     const rows = await user(A, 'select document from public.assessment_versions');
-    expect(rows.rows[0].document.title).toBe(firstAssessment.title);
+    expect(rows.rows[0].document.title).toBe(originalAssignment.title);
     expect(JSON.stringify(rows.rows)).not.toContain('correctAnswers');
     await expect(user(A, 'select * from private.assessment_keys')).rejects.toThrow();
   });

@@ -1,9 +1,7 @@
+import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import { describe, it, expect } from 'vitest';
 import { GitEngine } from '../../src/features/git-engine/engine';
-import { VirtualFS } from '../../src/features/filesystem/VirtualFS';
 import {
-  firstAssessment,
-  outcomesFor,
   blankDefinition,
   type Definition,
 } from '../../src/features/assessments/model';
@@ -32,86 +30,9 @@ async function cmd(e: GitEngine, s: string) {
 const check = (p: ReturnType<typeof requirementProgress>, label: string) =>
   p.flatMap((x) => x.requirements).find((r) => r.label === label)!;
 describe('workspace requirements from real Git state', () => {
-  it('reproduces the exact sequence and explains zero scored tasks on unborn main', async () => {
-    const e = new GitEngine();
-    await cmd(e, 'ls');
-    await cmd(e, 'git config --global user.name "mazen"');
-    await cmd(e, 'git config --global user.email "student@example.com"');
-    expect((await e.inspect()).config).toMatchObject({
-      'user.name': 'mazen',
-      'user.email': 'student@example.com',
-    });
-    for (const c of [
-      'mkdir IEEE-Git-Task',
-      'cd IEEE-Git-Task',
-      'git init',
-      'git branch',
-      'touch about.txt',
-      'touch goals.txt',
-      'touch notes.txt',
-      'git status',
-      'ls -a',
-    ])
-      await cmd(e, c);
-    const view = await e.inspect(),
-      p = requirementProgress(firstAssessment, view, identity, files(e));
-    for (const label of [
-      'Git repository initialized',
-      'Git username configured',
-      'Valid Git email configured',
-      'about.txt created in this project',
-      'goals.txt created in this project',
-      'notes.txt created in this project',
-    ])
-      expect(check(p, label).status).toBe('completed');
-    expect(check(p, 'Main branch has its first commit').status).toBe('incomplete');
-    expect(p.find((x) => x.task.id === 'repo')?.next).toContain('first commit');
-    expect(
-      outcomesFor(firstAssessment, view, identity, files(e)).filter((x) => !x.bonus && x.passed),
-    ).toHaveLength(0);
-  });
-  it('validates draft content, preserves staging, commit authorship and restored configuration', async () => {
-    const e = new GitEngine();
-    for (const c of [
-      'git config --global user.name "mazen"',
-      'git config --global user.email "student@example.com"',
-      'mkdir IEEE-Git-Task',
-      'cd IEEE-Git-Task',
-      'git init',
-    ])
-      await cmd(e, c);
-    await e.write(
-      'about.txt',
-      'Name: mazen\nUniversity: Nahda University\nDepartment: Engineering',
-    );
-    await e.write(
-      'goals.txt',
-      'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects',
-    );
-    await e.write('notes.txt', 'Git Course - Session 1\nIEEE NUB Student Branch');
-    let p = requirementProgress(firstAssessment, await e.inspect(), identity, files(e));
-    for (const f of ['about.txt', 'goals.txt', 'notes.txt'])
-      expect(check(p, f + ' required content written').status).toBe('completed');
-    expect(check(p, 'about.txt required content committed on main').status).toBe('incomplete');
-    await cmd(e, 'git add about.txt');
-    const staged = await e.inspect();
-    expect(staged.status.find((x) => x[0] === 'about.txt')?.[3]).toBe(2);
-    expect(staged.status.find((x) => x[0] === 'goals.txt')?.[3]).toBe(0);
-    await cmd(e, 'git commit -m "Add personal information"');
-    const view = await e.inspect();
-    expect(view.commits[0].author).toBe('mazen');
-    p = requirementProgress(firstAssessment, view, identity, files(e));
-    expect(p.find((x) => x.task.id === 'repo')?.passed).toBe(true);
-    const restored = new GitEngine(VirtualFS.restore(e.fs.snapshot()));
-    restored.globalConfig = { ...e.globalConfig };
-    restored.cwd = e.cwd;
-    expect(
-      requirementProgress(firstAssessment, await restored.inspect(), identity, files(restored)),
-    ).toEqual(p);
-  });
   it('uses arbitrary published paths and distinguishes draft, committed and dirty state', async () => {
     const d: Definition = {
-      ...blankDefinition('assignment', 'legacy'),
+      ...blankDefinition('assignment'),
       projectName: 'Custom-Git',
       sections: [
         {
@@ -193,8 +114,8 @@ describe('workspace requirements from real Git state', () => {
     await cmd(e, 'touch about.txt');
     expect(
       check(
-        requirementProgress(firstAssessment, await e.inspect(), identity, files(e)),
-        'about.txt created in this project',
+        requirementProgress(taskOneDefinition(), await e.inspect(), identity, files(e)),
+        'Create about.txt',
       ).passed,
     ).toBe(false);
     const result = await e.execute('nano about.txt');

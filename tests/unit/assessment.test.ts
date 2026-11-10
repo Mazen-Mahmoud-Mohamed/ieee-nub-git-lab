@@ -1,8 +1,8 @@
+import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import { describe, it, expect, vi } from 'vitest';
 import {
   assertDefinition,
   blankDefinition,
-  firstAssessment,
   gradeObjective,
   outcomesFor,
   type Definition,
@@ -13,7 +13,7 @@ import { verifyAssessment } from '../../src/features/assessments/verify';
 const identity = { full_name: 'Student Test', department: 'Engineering' };
 describe('shared course assessment definitions', () => {
   it('preserves the complete first assignment and safe validation whitelist', () => {
-    expect(() => assertDefinition(firstAssessment)).not.toThrow();
+    expect(() => assertDefinition(taskOneDefinition())).not.toThrow();
     const d = blankDefinition();
     d.sections = [
       {

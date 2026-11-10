@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { taskGuide, taskFeedback } from '../assessments/presentation';
-import type { RepoView } from '../git-engine/engine';
 import { Link } from 'react-router-dom';
 import { type Definition } from '../assessments/model';
 import type { TaskProgress } from '../assessments/requirements';
@@ -14,7 +13,6 @@ export function TaskInstructions({
   checking,
   error,
   basePath,
-  view,
   recovery,
   onWork = () => {},
   onRecheck = () => {},
@@ -27,7 +25,6 @@ export function TaskInstructions({
   checking: boolean;
   error: string;
   basePath: string;
-  view: RepoView;
   recovery?: ReactNode;
   onWork?: (view: string) => void;
   onRecheck?: () => void;
@@ -39,44 +36,11 @@ export function TaskInstructions({
     ),
     current = tasks[index],
     state = progress.find((p) => p.task.id === current?.task.id),
-    required = progress.filter((p) => !p.task.bonus),
-    complete = required.every((p) => p.passed),
     done = state?.requirements.filter((c) => c.status === 'completed').length || 0,
+    independent = current?.task.rules.some((r) => r.type === 'criterion'),
     guide = current ? taskGuide(current.task) : null,
-    feedback = state ? taskFeedback(state, view) : null;
-  const displayRequirements = (() => {
-    if (
-      d.gradingPolicy ||
-      !state ||
-      !current?.task.rules.some((r) => r.type === 'legacy' && r.outcomeId === 'separate')
-    )
-      return state?.requirements || [];
-    const groups = new Map<string, typeof state.requirements>();
-    for (const c of state.requirements) {
-      const file = /about|personal-message|message$/.test(c.id)
-        ? 'about.txt'
-        : /goals/.test(c.id)
-          ? 'goals.txt'
-          : /notes/.test(c.id)
-            ? 'notes.txt'
-            : c.id;
-      groups.set(file, [...(groups.get(file) || []), c]);
-    }
-    return [...groups].map(([key, checks]) => ({
-      ...checks[0],
-      id: key,
-      label: key.endsWith('.txt')
-        ? `First commit ${key} by itself, with the required text${key === 'about.txt' ? ' and message' : ''}`
-        : checks[0].label,
-      status: checks.every((c) => c.status === 'completed')
-        ? ('completed' as const)
-        : checks.some((c) => c.status === 'unverifiable')
-          ? ('unverifiable' as const)
-          : checking
-            ? ('checking' as const)
-            : ('incomplete' as const),
-    }));
-  })();
+    feedback = state ? taskFeedback(state) : null;
+  const displayRequirements = state?.requirements || [];
   const labels = {
     completed: 'Completed',
     incomplete: 'Not completed',
@@ -102,7 +66,7 @@ export function TaskInstructions({
             {tasks.map((t, i) => (
               <option key={t.task.id} value={t.task.id}>
                 {i + 1}. {taskGuide(t.task).title}
-                {d.gradingPolicy && t.task.points === 0
+                {t.task.points === 0
                   ? ' (unscored)'
                   : t.task.bonus
                     ? ' (optional)'
@@ -125,7 +89,7 @@ export function TaskInstructions({
         <>
           <div className="task-heading">
             <span className={'task-status ' + (state.passed ? 'done' : '')}>
-              {d.gradingPolicy && current.task.points === 0
+              {current.task.points === 0
                 ? 'Informational'
                 : checking
                   ? 'Checking…'
@@ -139,13 +103,14 @@ export function TaskInstructions({
             </span>
           </div>
           <h2 dir="auto">{guide?.title}</h2>
-          <p className="task-start">{guide?.before}</p>
+          {!independent && <p className="task-start">{guide?.before}</p>}
           <ol className="task-actions">
-            {guide?.steps.map((step) => (
-              <li key={step} dir="auto">
-                {step}
-              </li>
-            ))}
+            {!independent &&
+              guide?.steps.map((step) => (
+                <li key={step} dir="auto">
+                  {step}
+                </li>
+              ))}
           </ol>
           {guide?.message && (
             <div className="required-message">
@@ -168,19 +133,6 @@ export function TaskInstructions({
                 </pre>
               </div>
             ))}
-          {current.task.rules.some((r) => r.type === 'legacy' && r.outcomeId === 'files') && (
-            <div className="required-text">
-              <h3>Required file text</h3>
-              <strong>about.txt</strong>
-              <pre>{`Name: ${identity.full_name || 'Your full name'}\nUniversity: Nahda University\nDepartment: ${identity.department || 'Your department'}`}</pre>
-              <strong>goals.txt</strong>
-              <pre>
-                {'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects'}
-              </pre>
-              <strong>notes.txt</strong>
-              <pre>{'Git Course - Session 1\nIEEE NUB Student Branch'}</pre>
-            </div>
-          )}
           <div className="task-work-actions">
             <button className="outline-button" onClick={() => onWork('terminal')}>
               Open Terminal
@@ -191,9 +143,7 @@ export function TaskInstructions({
           </div>
           <h3>Check your work</h3>
           <small>
-            {d.gradingPolicy
-              ? 'Each scored requirement earns its own points. You can continue with unfinished work.'
-              : `Earn all ${current.task.points} points when every scored requirement passes. Checklist items do not earn separate points.`}
+            Each scored requirement earns its own points. You can continue with unfinished work.
           </small>
           <ol className="requirement-list">
             {displayRequirements.map((c) => (
@@ -203,6 +153,13 @@ export function TaskInstructions({
                 </span>
                 <span>
                   {c.label}
+                  {c.detected && (
+                    <details>
+                      <summary>Verified evidence</summary>
+                      <small>{c.detected}</small>
+                    </details>
+                  )}
+                  {c.passed !== true && displayRequirements.length > 1 && <small>{c.hint}</small>}
                   <small className="requirement-state">
                     {labels[c.status]}
                     {c.preparation
@@ -217,20 +174,16 @@ export function TaskInstructions({
           </ol>
           <div className="student-next" role="status">
             <strong>
-              {state.passed
-                ? 'Ready for the next task'
-                : feedback?.history
-                  ? 'A mistake in the first commit'
-                  : 'What to do next'}
+              {state.passed ? 'Ready for the next task' : 'What to do next'}
             </strong>
-            <p>{checking ? 'Checking your latest changes…' : feedback?.text}</p>
-            {!state.passed && !feedback?.history && (
+            <p>{checking ? 'Checking your latest changes…' : feedback}</p>
+            {!state.passed && (
               <button
                 className="text-button"
                 onClick={() =>
                   onWork(
                     current.task.rules.some(
-                      (r) => r.type === 'file' || (r.type === 'legacy' && r.outcomeId === 'files'),
+                      (r) => r.type === 'file' || (r.type === 'criterion' && /-(exists|content)$/.test(r.outcomeId || '')),
                     )
                       ? 'files'
                       : 'terminal',
@@ -243,47 +196,43 @@ export function TaskInstructions({
             <button className="text-button" disabled={checking} onClick={onRecheck}>
               Check again
             </button>
-            {feedback?.history && (
-              <p>
-                The introductory commits share this repository with later tasks. New commits cannot
-                change those introductions. Keep working for other points, or use the
-                policy-controlled Restart Attempt to rebuild the shared history. All work in this
-                attempt is retained; a fresh attempt starts from the published starter.
-              </p>
-            )}
-            {feedback?.history && recovery && (
-              <button
-                className="text-button"
-                onClick={() => {
-                  const panel = document.getElementById('attempt-recovery');
-                  if (panel instanceof HTMLDetailsElement) {
-                    panel.open = true;
-                    panel.scrollIntoView({ block: 'nearest' });
-                    panel.querySelector('summary')?.focus();
-                  }
-                }}
-              >
-                See your recovery options
-              </button>
-            )}
           </div>
-          <details className="check-evidence">
-            <summary>Technical check details</summary>
-            <p>{guide?.result}</p>
-            <p>
-              {done} completed · {state.requirements.length - done} remaining
-            </p>
-            {state.requirements.map((c) => (
-              <div key={c.id}>
-                <strong>{c.label}</strong>
-                <p>
-                  Expected: {c.expected || c.label}. Detected: {c.detected || labels[c.status]}.
-                </p>
-              </div>
-            ))}
-          </details>
+          {!independent && (
+            <details className="check-evidence">
+              <summary>Technical check details</summary>
+              <p>{guide?.result}</p>
+              <p>
+                {done} completed · {state.requirements.length - done} remaining
+              </p>
+              {state.requirements.map((c) => (
+                <div key={c.id}>
+                  <strong>{c.label}</strong>
+                  <p>
+                    Expected: {c.expected || c.label}. Detected: {c.detected || labels[c.status]}.
+                  </p>
+                </div>
+              ))}
+            </details>
+          )}
           <details className="published-instructions">
-            <summary>Full published instructions</summary>
+            <summary>
+              {independent
+                ? 'Original exercise guide (including optional extension)'
+                : 'Full published instructions'}
+            </summary>
+            {independent &&
+              d.sections
+                .filter((s) => s.steps.length)
+                .map((s) => (
+                  <section key={s.id}>
+                    <h3>{s.title}</h3>
+                    <ol>
+                      {s.steps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                  </section>
+                ))}
             <p className="written-answer" dir="auto">
               {current.task.title}
             </p>
@@ -318,24 +267,9 @@ export function TaskInstructions({
         <p>No practical tasks. Continue to Questions or Review.</p>
       )}
       {recovery}
-      <Link
-        className={
-          'primary continue-questions ' + (!complete && d.gateTheory ? 'disabled-link' : '')
-        }
-        aria-disabled={!complete && d.gateTheory}
-        to={
-          basePath +
-          (!complete && d.gateTheory ? '/workspace' : d.questions.length ? '/theory' : '/review')
-        }
-      >
+      <Link className="primary continue-questions" to={basePath + (d.questions.length ? '/theory' : '/review')}>
         {d.questions.length ? 'Continue to Questions' : 'Review submission'}
       </Link>
-      {!complete && d.gateTheory && (
-        <small>
-          This published version unlocks Questions after required scored tasks. Bonus work is
-          optional.
-        </small>
-      )}
     </aside>
   );
 }

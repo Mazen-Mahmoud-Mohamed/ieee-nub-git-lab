@@ -1,10 +1,11 @@
+import { evaluateCriterion } from './independentCriteria.ts';
 import type { RepoView } from '../git-engine/engine.ts';
 import {
-  legacyRequirementChecks,
   type RequirementCheck,
   type StudentIdentity,
 } from '../assignments/assignment.ts';
-import { rawOutcomesFor, type Definition, type Rule, type Task } from './model.ts';
+import type { Definition, Task } from './model.ts';
+import { ruleEvidence } from './ruleEvidence.ts';
 export type RequirementState = 'completed' | 'incomplete' | 'checking' | 'unverifiable';
 export type Requirement = RequirementCheck & {
   status: RequirementState;
@@ -26,15 +27,7 @@ export function requirementProgress(
   checking = false,
   unavailable = '',
 ): TaskProgress[] {
-  const legacy = (revision: 1 | 2 = 1) =>
-    legacyRequirementChecks(
-      view,
-      identity,
-      working,
-      revision,
-      d.gradingPolicy === 'requirements-v1',
-    );
-  const outcomes = rawOutcomesFor(d, view, identity, working);
+  const passes = ruleEvidence(view, identity, working);
   const at = (ref = 'main') =>
     ref === 'working'
       ? working
@@ -49,38 +42,21 @@ export function requirementProgress(
   return d.sections
     .flatMap((s) => s.tasks)
     .map((task) => {
-      const passes = (rule: Rule) =>
-        rawOutcomesFor(
-          {
-            ...d,
-            sections: [
-              {
-                id: 'check',
-                title: '',
-                description: '',
-                steps: [],
-                tasks: [{ ...task, rules: [rule] }],
-              },
-            ],
-          },
-          view,
-          identity,
-          working,
-        )[0]?.passed || false;
       const checks = task.rules.flatMap((r, i): RequirementCheck[] => {
         const prefix = 'rule-' + i + '-';
         let rows: RequirementCheck[];
         switch (r.type) {
-          case 'legacy':
-            rows = legacy(r.revision)[r.outcomeId || ''] || [
-              check(
-                'unsupported',
-                'Published requirement is supported',
-                null,
-                'This requirement needs an instructor or application update before it can be checked.',
-              ),
+          case 'criterion': {
+            const result = evaluateCriterion(r.outcomeId || '', view, identity, working);
+            rows = [
+              {
+                ...check('criterion', task.title, result.passed, task.instructions),
+                detected: result.evidence,
+                expected: task.title,
+              },
             ];
             break;
+          }
           case 'repository':
             rows = [
               check(
@@ -247,13 +223,12 @@ export function requirementProgress(
         (c) =>
           ({
             ...c,
-            preparation: c.preparation || (!!d.gradingPolicy && task.points === 0),
+            preparation: c.preparation || task.points === 0,
             points:
-              d.gradingPolicy && task.points > 0 && !c.preparation
+              task.points > 0 && !c.preparation
                 ? task.requirementWeights?.[task.id + ':' + c.id] || 0
                 : undefined,
             earned:
-              d.gradingPolicy &&
               task.points > 0 &&
               !c.preparation &&
               !unavailable &&
@@ -272,19 +247,11 @@ export function requirementProgress(
                     : 'incomplete',
           }) as Requirement,
       );
-      const passed =
-        !unavailable &&
-        (d.gradingPolicy && task.points > 0
-          ? requirements.filter((c) => !c.preparation).every((c) => c.passed === true)
-          : !requirements.some((c) => c.passed === null) &&
-            (outcomes.find((o) => o.id === task.id)?.passed || false));
+      const passed = !unavailable &&
+        requirements.filter((c) => task.points === 0 || !c.preparation).every((c) => c.passed === true);
       return {
         task,
-        earned: d.gradingPolicy
-          ? Math.round(requirements.reduce((sum, c) => sum + (c.earned || 0), 0) * 100) / 100
-          : passed
-            ? task.points
-            : 0,
+        earned: Math.round(requirements.reduce((sum, c) => sum + (c.earned || 0), 0) * 100) / 100,
         passed,
         requirements,
         next:
@@ -298,7 +265,7 @@ export function requirementProgress(
 // Stable check IDs are part of each published document's scoring contract.
 export function requirementCatalog(task: Task) {
   if (task.points === 0) return [];
-  const d = { gradingPolicy: 'requirements-v1', sections: [{ tasks: [task] }] } as Definition;
+  const d = { gradingPolicy: 'independent-v2', sections: [{ tasks: [task] }] } as Definition;
   return requirementProgress(
     d,
     { initialized: false, branch: 'main', branches: {}, commits: [], status: [], config: {} },

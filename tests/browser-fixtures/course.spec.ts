@@ -9,7 +9,7 @@ const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   E = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const theory = (title: string, type: 'assignment' | 'exam' = 'assignment'): Definition => ({
-  ...blankDefinition(type, 'legacy'),
+  ...blankDefinition(type),
   title,
   format: 'theory',
   questions: [
@@ -918,7 +918,6 @@ test('all published question types are answerable, restore after refresh and sub
     required: true,
     manual: !['single', 'multiple', 'boolean'].includes(kind),
   }));
-  api.definitions[A].requireComplete = true;
   await api.login();
   await api.start(A);
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
@@ -963,7 +962,6 @@ test('a definite rejected submission can be corrected and retried with fresh ans
   page,
 }) => {
   const api = await fixture(page);
-  api.definitions[A].requireComplete = true;
   let reject = true;
   let submitted: any;
   await page.route('**/functions/v1/assessment-attempt', async (route) => {
@@ -971,7 +969,10 @@ test('a definite rejected submission can be corrected and retried with fresh ans
     if (body.action === 'submit') {
       submitted = body;
       if (reject) {
-        await route.fulfill({ status: 400, json: { error: 'Required work is incomplete' } });
+        await route.fulfill({
+          status: 400,
+          json: { error: 'Assessment request could not be verified' },
+        });
         return;
       }
     }
@@ -984,7 +985,9 @@ test('a definite rejected submission can be corrected and retried with fresh ans
   await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
   await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
   await page.getByRole('button', { name: 'Submit assignment', exact: true }).click();
-  await expect(page.getByRole('alert').first()).toContainText('Required work is incomplete');
+  await expect(page.getByRole('alert').first()).toContainText(
+    'Assessment request could not be verified',
+  );
   reject = false;
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByLabel('Your response').fill('Corrected response after rejection');
@@ -1193,7 +1196,6 @@ test('instructor builds a task with plain forms, verifies real Git in preview an
   await page.getByLabel('Branch / snapshot', { exact: true }).fill('working');
   await page.getByRole('combobox', { name: 'Content rule', exact: true }).selectOption('contains');
   await page.getByLabel('Expected text', { exact: true }).fill('Hello Git');
-  await expect(page.getByLabel('Scoring policy', { exact: true })).toHaveValue('requirements-v1');
   await page.getByLabel('Points: greeting.txt exists in working files', { exact: true }).fill('3');
   await page
     .getByLabel('Points: greeting.txt matches the required text in working files', { exact: true })
@@ -1228,4 +1230,20 @@ test('instructor builds a task with plain forms, verifies real Git in preview an
     value: 'Hello Git',
   });
   expect(api.saved[0].p_publish).toBe(true);
+});
+
+test('instructor prepares recoverable Task 1 and reviews its 150-point configuration', async ({
+  page,
+}) => {
+  const api = await fixture(page, true);
+  await api.login();
+  await page.goto('/ieee-git-lab/#/instructor/assessments/new');
+  await page.getByRole('button', { name: 'Prepare redesigned Task 1 · 150 points' }).click();
+  await expect(page.getByLabel('Task title', { exact: true }).first()).toHaveValue(
+    'Initialize the repository',
+  );
+  await page.screenshot({ path: 'test-results/task1-instructor-desktop.png', fullPage: false });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: 'test-results/task1-instructor-mobile.png', fullPage: false });
 });

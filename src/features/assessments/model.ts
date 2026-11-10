@@ -1,19 +1,18 @@
+import { criterionIds } from './independentCriteria.ts';
 import { requirementProgress, requirementCatalog } from './requirements.ts';
-import { gitHistory } from './gitHistory.ts';
 import type { RepoView } from '../git-engine/engine.ts';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS.ts';
-import {
-  assignment,
-  questions,
-  reflectionQuestions,
-  validateRepository,
-  legacyRequirementChecks,
-  type StudentIdentity,
-  type Outcome,
-} from '../assignments/assignment.ts';
+import type { StudentIdentity } from '../assignments/assignment.ts';
 export type Rule = {
   type:
-    'repository' | 'file' | 'branch' | 'commits' | 'message' | 'merged' | 'isolation' | 'legacy';
+    | 'repository'
+    | 'file'
+    | 'branch'
+    | 'commits'
+    | 'message'
+    | 'merged'
+    | 'isolation'
+    | 'criterion';
   branch?: string;
   clean?: boolean;
   path?: string;
@@ -25,7 +24,6 @@ export type Rule = {
   target?: string;
   mergeCommit?: boolean;
   outcomeId?: string;
-  revision?: 1 | 2;
 };
 export type Task = {
   id: string;
@@ -39,7 +37,16 @@ export type Task = {
 export type AssessmentQuestion = {
   id: string;
   prompt: string;
-  kind: 'single' | 'multiple' | 'boolean' | 'short' | 'long' | 'scenario' | 'interpretation';
+  kind:
+    | 'single'
+    | 'multiple'
+    | 'boolean'
+    | 'short'
+    | 'long'
+    | 'scenario'
+    | 'interpretation'
+    | 'choice-complete'
+    | 'fill-blank';
   points: number;
   options: string[];
   manual: boolean;
@@ -49,7 +56,8 @@ export type AssessmentQuestion = {
 };
 export type Definition = {
   schemaVersion: 1;
-  gradingPolicy?: 'requirements-v1';
+  courseSlot?: 'task1' | 'task2' | 'final';
+  gradingPolicy: 'independent-v2';
   title: string;
   description: string;
   instructions: string;
@@ -115,11 +123,10 @@ export type AttemptState = {
 };
 export function blankDefinition(
   type: 'assignment' | 'exam' = 'assignment',
-  policy: 'requirements-v1' | 'legacy' = 'requirements-v1',
 ): Definition {
   return {
     schemaVersion: 1,
-    ...(policy === 'requirements-v1' ? { gradingPolicy: 'requirements-v1' as const } : {}),
+    gradingPolicy: 'independent-v2',
     title: type === 'exam' ? 'New Git exam' : 'New Git assignment',
     description: '',
     instructions: '',
@@ -140,58 +147,8 @@ export function blankDefinition(
     questions: [],
   };
 }
-const legacyOutcomes: Record<string, Array<[string, string, number]>> = {
-  init: [
-    ['repo', 'Local repository on main with configured identity', 5],
-    ['files', 'Required project files contain your information and course content', 10],
-  ],
-  commits: [
-    ['separate', 'The first three files were introduced in separate focused commits', 10],
-    ['goals', 'Two additional goals saved in a later meaningful commit', 10],
-  ],
-  branches: [
-    ['feature', 'feature/skills contains the three committed skills', 10],
-    ['isolation', 'History shows skills introduced after the branch point', 10],
-  ],
-  merge: [
-    ['merged', 'Feature history and skills are present on main', 15],
-    ['clean', 'Finish on main with a clean working tree', 5],
-  ],
-  bonus: [['bonus', 'Diverged hobbies and completion histories joined by a merge commit', 10]],
-};
-export const firstAssessment: Definition = {
-  ...blankDefinition('assignment', 'legacy'),
-  title: assignment.title,
-  description: assignment.description,
-  instructions:
-    'Complete the local Git tasks using plain text files. Then answer the theory questions and reflections.',
-  projectName: 'IEEE-Git-Task',
-  gateTheory: true,
-  requireComplete: true,
-  sections: assignment.sections.map((s) => ({
-    id: s.id,
-    title: s.title,
-    description: s.description,
-    steps: s.steps,
-    tasks: legacyOutcomes[s.id].map(([id, title, points]) => ({
-      id,
-      title,
-      instructions: s.steps.join('\n'),
-      points,
-      bonus: s.id === 'bonus',
-      rules: [{ type: 'legacy', outcomeId: id }],
-    })),
-  })),
-  questions: [...questions, ...reflectionQuestions].map((q) => ({
-    ...q,
-    options: [],
-    manual: true,
-    required: q.id !== 'bonus',
-  })),
-};
 export const taskList = (d: Definition) => d.sections.flatMap((s) => s.tasks);
-// Decimal point arithmetic for new policies; historical floating-point behavior
-// remains unchanged. This also retains existing question precision (not just cents).
+// Sum decimal marks consistently across the browser and Edge verifier.
 export function sumPoints(values: number[]) {
   if (values.some((value) => !Number.isFinite(value))) return values.reduce((sum, n) => sum + n, 0);
   const parts = values.map((value) => {
@@ -208,8 +165,7 @@ export function sumPoints(values: number[]) {
   );
 }
 export const totals = (d: Definition) => {
-  const sum = (values: number[]) =>
-    d.gradingPolicy ? sumPoints(values) : values.reduce((sum, n) => sum + n, 0);
+  const sum = sumPoints;
   return {
     practical: sum(
       taskList(d)
@@ -237,7 +193,7 @@ export function validFile(path: unknown): path is string {
     path.endsWith('.txt')
   );
 }
-export function assertDefinition(value: unknown): asserts value is Definition {
+export function assertDefinition(value: unknown, draft = false): asserts value is Definition {
   const d = value as Definition;
   if (
     !d ||
@@ -322,8 +278,6 @@ export function assertDefinition(value: unknown): asserts value is Definition {
       )
         throw new Error('Invalid practical task');
       for (const r of t.rules) {
-        if (r.revision !== undefined && (r.type !== 'legacy' || ![1, 2].includes(r.revision)))
-          throw new Error('Unsupported compatibility revision');
         if (
           ![
             'repository',
@@ -333,10 +287,15 @@ export function assertDefinition(value: unknown): asserts value is Definition {
             'message',
             'merged',
             'isolation',
-            'legacy',
+            'criterion',
           ].includes(r.type)
         )
           throw new Error('Unsupported validation rule');
+        if (
+          r.type === 'criterion' &&
+          !criterionIds.includes(r.outcomeId as (typeof criterionIds)[number])
+        )
+          throw new Error('Unknown independent criterion');
         if (r.path !== undefined && !validFile(r.path))
           throw new Error('Rules require safe .txt paths');
         if (['file', 'isolation'].includes(r.type) && !validFile(r.path))
@@ -366,13 +325,6 @@ export function assertDefinition(value: unknown): asserts value is Definition {
           throw new Error('Invalid expected content');
         if (r.min !== undefined && (!Number.isInteger(r.min) || r.min < 0 || r.min > 150))
           throw new Error('Invalid minimum');
-        if (
-          r.type === 'legacy' &&
-          !Object.values(legacyOutcomes)
-            .flat()
-            .some(([id]) => id === r.outcomeId)
-        )
-          throw new Error('Unknown compatibility validator');
       }
     }
   }
@@ -382,9 +334,17 @@ export function assertDefinition(value: unknown): asserts value is Definition {
     if (
       !bounded(q.prompt) ||
       !q.prompt.trim() ||
-      !['single', 'multiple', 'boolean', 'short', 'long', 'scenario', 'interpretation'].includes(
-        q.kind,
-      ) ||
+      ![
+        'single',
+        'multiple',
+        'boolean',
+        'short',
+        'long',
+        'scenario',
+        'interpretation',
+        'choice-complete',
+        'fill-blank',
+      ].includes(q.kind) ||
       !Number.isFinite(q.points) ||
       q.points < 0 ||
       q.points > 1000 ||
@@ -397,19 +357,27 @@ export function assertDefinition(value: unknown): asserts value is Definition {
       new Set(q.options).size !== q.options.length
     )
       throw new Error('Invalid question');
-    if (['single', 'multiple', 'boolean'].includes(q.kind) && q.options.length < 2)
+    if (
+      ['single', 'multiple', 'boolean', 'choice-complete'].includes(q.kind) &&
+      q.options.length < 2
+    )
       throw new Error('Objective questions need at least two options');
     if (
       q.correctAnswers !== undefined &&
-      (!Array.isArray(q.correctAnswers) || q.correctAnswers.some((a) => !q.options.includes(a)))
+      (!Array.isArray(q.correctAnswers) ||
+        q.correctAnswers.some(
+          (a) =>
+            typeof a !== 'string' ||
+            !a.trim() ||
+            a.length > 500 ||
+            (q.kind !== 'fill-blank' && !q.options.includes(a)),
+        ))
     )
       throw new Error('Answer key must use the configured options');
   }
-  if (d.gradingPolicy !== undefined) {
-    if (d.gradingPolicy !== 'requirements-v1' || d.gateTheory || d.requireComplete)
-      throw new Error(
-        'Requirement scoring allows partial submission and unrestricted task navigation',
-      );
+  if (d.gradingPolicy !== 'independent-v2' || d.gateTheory || d.requireComplete)
+    throw new Error('Independent scoring requires partial submission and unrestricted navigation');
+  if (!draft) {
     for (const task of taskList(d)) {
       const checks = requirementCatalog(task);
       const weights = task.requirementWeights || {};
@@ -435,130 +403,32 @@ export function assertDefinition(value: unknown): asserts value is Definition {
         );
     }
   }
+  if (!draft && d.courseSlot === 'task1') {
+    const tasks = taskList(d);
+    const criteria = tasks.map((task) => task.rules[0]?.outcomeId);
+    if (tasks.length !== criterionIds.length || new Set(criteria).size !== criterionIds.length ||
+        tasks.some((task) => task.points <= 0 || task.rules.length !== 1 || task.rules[0].type !== 'criterion')) {
+      throw new Error('Task 1 requires one weighted task for each of its 25 independent criteria');
+    }
+  }
   const sum = totals(d);
   if (
-    (d.gradingPolicy
-      ? sumPoints([sum.practical, sum.theory, sum.bonus])
-      : sum.practical + sum.theory + sum.bonus) > 10000
+    d.courseSlot !== undefined &&
+    (!['task1', 'task2', 'final'].includes(d.courseSlot) ||
+      (!draft && (sum.bonus !== 0 ||
+        sumPoints([sum.practical, sum.theory]) !== (d.courseSlot === 'final' ? 200 : 150) ||
+        (d.courseSlot === 'task1' && (sum.practical !== 100 || sum.theory !== 50)))))
   )
+    throw new Error(
+      'Course assessments require their exact maximum, no bonus, and partial submission',
+    );
+  if (sumPoints([sum.practical, sum.theory, sum.bonus]) > 10000)
     throw new Error('Assessment points exceed limit');
   if (
     (d.format === 'theory' && taskList(d).length) ||
     (d.format === 'practical' && d.questions.length)
   )
     throw new Error('Format does not match content');
-}
-export function rawOutcomesFor(
-  d: Definition,
-  view: RepoView,
-  identity: StudentIdentity,
-  working: Record<string, string> = {},
-): Array<Outcome & { feedback: string[] }> {
-  const legacyResults = new Map<number, Outcome[]>();
-  const legacy = (revision: 1 | 2 = 1) => {
-    if (!legacyResults.has(revision))
-      legacyResults.set(revision, validateRepository(view, identity, revision, working));
-    return legacyResults.get(revision)!;
-  };
-  const commits = new Map(view.commits.map((c) => [c.oid, c]));
-  const history = gitHistory(view.commits);
-  const ancestors = (ref: string) => history.ancestors(view.branches[ref] || '');
-  const files = (ref = 'main') =>
-    ref === 'working' ? working : commits.get(view.branches[ref])?.files || {};
-  const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
-  const reaches = history.reaches;
-  const passes = (r: Rule): boolean => {
-    switch (r.type) {
-      case 'legacy':
-        return legacy(r.revision).find((o) => o.id === r.outcomeId)?.passed || false;
-      case 'repository':
-        return (
-          view.initialized &&
-          (!r.branch || view.branch === r.branch) &&
-          (!r.clean || view.status.every(([, h, w, s]) => h === w && h === s))
-        );
-      case 'branch':
-        return !!view.branches[r.branch || ''];
-      case 'file': {
-        const text = files(r.ref)[r.path || ''];
-        if (text === undefined) return false;
-        const expected = (r.value || '')
-          .replaceAll('{{name}}', identity.full_name)
-          .replaceAll('{{department}}', identity.department);
-        return r.match === 'exact'
-          ? norm(text) === norm(expected)
-          : r.match === 'contains'
-            ? norm(text).includes(norm(expected))
-            : r.match === 'lines'
-              ? text.split('\n').filter((s) => s.trim()).length >= (r.min || 1)
-              : true;
-      }
-      case 'commits':
-        return ancestors(r.ref || 'main').length >= (r.min || 1);
-      case 'message':
-        return ancestors(r.ref || 'main').some((c) => c.message.includes(r.value || ''));
-      case 'merged': {
-        const source = view.branches[r.source || ''];
-        const line = ancestors(r.target || 'main');
-        return (
-          !!source &&
-          line.some((c) => c.oid === source) &&
-          (!r.mergeCommit ||
-            line.some(
-              (c) =>
-                c.parents.length > 1 &&
-                c.parents.some(
-                  (p) =>
-                    reaches(p, source) &&
-                    c.parents.some(
-                      (other) => !reaches(other, source) && history.diverged(p, other),
-                    ),
-                ),
-            ))
-        );
-      }
-      case 'isolation': {
-        const birth = history.introduction(view.branches[r.source || ''] || '', r.path!);
-        return !!birth && birth.parents.length > 0;
-      }
-    }
-  };
-  return taskList(d).map((t) => ({
-    id: t.id,
-    label: t.title,
-    points: t.points,
-    bonus: t.bonus,
-    passed: t.rules.every(passes),
-    feedback: t.rules
-      .filter((r) => !passes(r))
-      .map((r) => {
-        switch (r.type) {
-          case 'repository':
-            return !view.initialized
-              ? 'Create a Git repository in this project first.'
-              : `Check the active branch${r.branch ? ' (' + r.branch + ')' : ''}${r.clean ? ' and save all tracked changes in commits' : ''}.`;
-          case 'file':
-            return `Check ${r.path} in ${r.ref === 'working' ? 'your working files' : 'the committed files on ' + (r.ref || 'main')}. It must ${r.match === 'lines' ? 'have at least ' + (r.min || 1) + ' non-empty lines' : r.match === 'exact' ? 'match the required content' : r.match === 'contains' ? 'contain the required text' : 'exist'}.`;
-          case 'branch':
-            return `The branch ${r.branch} is missing.`;
-          case 'commits':
-            return `At least ${r.min || 1} commits must be reachable from ${r.ref || 'main'}.`;
-          case 'message':
-            return `Check for the required commit message in ${r.ref || 'main'} history.`;
-          case 'merged':
-            return `Check that ${r.source} history is included in ${r.target || 'main'}${r.mergeCommit ? ' through a merge commit' : ''}.`;
-          case 'isolation':
-            return `Check that ${r.path} was introduced in a new commit on ${r.source}.`;
-          case 'legacy':
-            return (
-              legacyRequirementChecks(view, identity, working, r.revision || 1)[
-                r.outcomeId || ''
-              ]?.find((c) => c.passed !== true)?.hint ||
-              'Compare the saved repository with the requirements for this task.'
-            );
-        }
-      }),
-  }));
 }
 export function sanitizeAnswers(d: Definition, value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -568,7 +438,7 @@ export function sanitizeAnswers(d: Definition, value: unknown) {
     const q = d.questions.find((q) => q.id === id);
     if (!q || !bounded(answer)) throw new Error('Unknown or oversized answer');
     if (
-      ['single', 'multiple', 'boolean'].includes(q.kind) &&
+      ['single', 'multiple', 'boolean', 'choice-complete'].includes(q.kind) &&
       answer &&
       String(answer)
         .split('\n')
@@ -577,7 +447,7 @@ export function sanitizeAnswers(d: Definition, value: unknown) {
       throw new Error('Unknown option');
     if (
       q.kind !== 'multiple' &&
-      ['single', 'boolean'].includes(q.kind) &&
+      ['single', 'boolean', 'choice-complete'].includes(q.kind) &&
       String(answer).includes('\n')
     )
       throw new Error('Choose one answer');
@@ -586,7 +456,7 @@ export function sanitizeAnswers(d: Definition, value: unknown) {
   return result;
 }
 export function answerPresent(q: AssessmentQuestion, value = '') {
-  if (!['single', 'multiple', 'boolean'].includes(q.kind)) return !!value.trim();
+  if (!['single', 'multiple', 'boolean', 'choice-complete'].includes(q.kind)) return !!value.trim();
   const choices = value.split('\n').filter(Boolean);
   return (
     choices.length > 0 &&
@@ -594,43 +464,61 @@ export function answerPresent(q: AssessmentQuestion, value = '') {
     (q.kind === 'multiple' || choices.length === 1)
   );
 }
+export const normalizeAnswer = (s: string) =>
+  s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 export function gradeObjective(
   d: Definition,
   answers: Record<string, string>,
   keys: Record<string, { correctAnswers: string[]; explanation?: string }>,
 ) {
   return d.questions
-    .filter((q) => !q.manual && ['single', 'multiple', 'boolean'].includes(q.kind))
+    .filter(
+      (q) =>
+        !q.manual &&
+        ['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(q.kind),
+    )
     .map((q) => {
       const expected = keys[q.id]?.correctAnswers;
       if (!expected?.length) throw new Error('Missing private objective answer key');
       const actual = [...new Set((answers[q.id] || '').split('\n').filter(Boolean))].sort();
       return {
         question_id: q.id,
-        points: JSON.stringify(actual) === JSON.stringify([...expected].sort()) ? q.points : 0,
+        points: (
+          q.kind === 'fill-blank'
+            ? !!normalizeAnswer(answers[q.id] || '') &&
+              expected.some((a) => normalizeAnswer(a) === normalizeAnswer(answers[q.id] || ''))
+            : JSON.stringify(actual) === JSON.stringify([...expected].sort())
+        )
+          ? q.points
+          : 0,
         automatic: true,
       };
     });
 }
 
-export const earnedPoints = (o: Outcome & { earned?: number }) =>
-  o.earned ?? (o.passed ? o.points : 0);
+export const earnedPoints = (outcome: { earned: number }) => outcome.earned;
+
 export function outcomesFor(
-  d: Definition,
+  definition: Definition,
   view: RepoView,
   identity: StudentIdentity,
   working: Record<string, string> = {},
 ) {
-  const raw = rawOutcomesFor(d, view, identity, working);
-  if (!d.gradingPolicy) return raw.map((o) => ({ ...o, earned: earnedPoints(o) }));
-  const progress = requirementProgress(d, view, identity, working);
-  return raw.map((o) => ({
-    ...o,
-    passed: progress.find((p) => p.task.id === o.id)!.passed,
-    earned: progress.find((p) => p.task.id === o.id)!.earned,
-    requirements: progress
-      .find((p) => p.task.id === o.id)!
-      .requirements.filter((c) => !c.preparation)
-      .map((c) => ({ id: c.id, passed: c.passed === true, points: c.points, earned: c.earned })),
+  return requirementProgress(definition, view, identity, working).map((progress) => ({
+    id: progress.task.id,
+    label: progress.task.title,
+    points: progress.task.points,
+    bonus: progress.task.bonus,
+    passed: progress.passed,
+    earned: progress.earned,
+    requirements: progress.requirements.filter((check) => !check.preparation).map((check) => ({
+      id: check.id,
+      passed: check.passed === true,
+      points: check.points,
+      earned: check.earned,
+      reason: check.passed ? 'Requirement satisfied.' : check.hint,
+      evidence: check.detected,
+      recovery: check.hint,
+    })),
   }));
 }

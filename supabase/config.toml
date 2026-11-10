@@ -14,12 +14,9 @@ enroll_enabled = true
 verify_enabled = true
 [storage.vector]
 enabled = false
-[functions.submit-attempt]
-verify_jwt = true
-import_map = "./functions/submit-attempt/import_map.json"
 [functions.assessment-attempt]
 verify_jwt = true
-import_map = "./functions/submit-attempt/import_map.json"
+import_map = "./functions/assessment-attempt/import_map.json"
 [functions.learning-material]
 verify_jwt = true
-import_map = "./functions/submit-attempt/import_map.json"
+import_map = "./functions/assessment-attempt/import_map.json"

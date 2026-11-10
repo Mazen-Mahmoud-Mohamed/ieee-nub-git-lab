@@ -1,17 +1,13 @@
+import { CourseGrades } from './CourseGrades';
+import { taskOneDefinition } from './taskOne';
 import { taskGuide, assessmentSummary } from './presentation';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Clock, GitBranch } from 'lucide-react';
 import { supabase, type Profile } from '../../services/supabase';
-import {
-  firstAssessment,
-  sumPoints,
-  totals,
-  type Definition,
-  type AssessmentRecord,
-} from './model';
+import { sumPoints, totals, type Definition, type AssessmentRecord } from './model';
 import { facultyLabel } from '../auth/faculty';
-import { ASSIGNMENT_ID } from '../assignments/assignment';
+import { TASK_ONE_ID } from '../assignments/assignment';
 type Card = AssessmentRecord & { definition: Definition };
 type Attempt = {
   id: string;
@@ -37,14 +33,14 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
       if (!supabase || !profile) {
         setCards([
           {
-            id: ASSIGNMENT_ID,
+            id: TASK_ONE_ID,
             version: 1,
             type: 'assignment',
-            title: firstAssessment.title,
-            description: firstAssessment.description,
+            title: taskOneDefinition().title,
+            description: taskOneDefinition().description,
             visible: true,
             archived: false,
-            definition: firstAssessment,
+            definition: taskOneDefinition(),
           },
         ]);
         setAttempts([]);
@@ -70,7 +66,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
               (v) => v.assessment_id === a.id && v.version === a.published_version,
             )?.document,
           }))
-          .filter((a) => !!a.definition),
+          .filter((a) => a.definition?.gradingPolicy === 'independent-v2'),
       );
       setAttempts(
         (work.data || []).map((a) => ({
@@ -92,6 +88,7 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
   }, [profile?.id]);
   return (
     <div className="page dashboard">
+      <CourseGrades />
       <div className="page-heading">
         <div>
           <span className="eyebrow">IEEE NUB · GIT COURSE</span>

@@ -32,8 +32,11 @@ test('phone Git editing, tab state, command helpers, history and refresh preserv
   await view(page, 'Terminal');
   await page.getByLabel('Terminal command').fill('git status');
   await view(page, 'Task');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
-  await expect(page.locator('.task-caution')).toContainText('New commits cannot split');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('t1-about-focused');
+  await expect(page.locator('.student-next')).toContainText(
+    'A later focused change also qualifies',
+  );
+  await expect(page.locator('.task-caution')).toHaveCount(0);
   await view(page, 'Files');
   await expect(editor).toHaveValue('Hello mobile\nمرحبا من الهاتف');
   await view(page, 'Terminal');
@@ -54,7 +57,9 @@ test('phone Git editing, tab state, command helpers, history and refresh preserv
   await page.reload();
   await expect(editor).toHaveValue('Hello mobile\nمرحبا من الهاتف');
   await view(page, 'Task');
-  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('separate');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue(
+    't1-about-focused',
+  );
   await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toContainText(

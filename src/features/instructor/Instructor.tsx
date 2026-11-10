@@ -1,3 +1,4 @@
+import { CourseGrades } from '../assessments/CourseGrades';
 import { RecordManager, AdminActivity } from './RecordManagement';
 import { LearningContent } from './LearningContent';
 import { LearningSessions } from './LearningSessions';
@@ -28,6 +29,7 @@ export function Instructor() {
           ['exams', 'Exams'],
           ['questions', 'Question Bank'],
           ['results', 'Grades'],
+          ['course-grades', 'Course totals'],
           ['requests', 'Help requests'],
           ['records', 'Archive & Trash'],
           ['activity', 'Activity'],
@@ -40,6 +42,7 @@ export function Instructor() {
       </nav>
       <Routes>
         <Route index element={<Overview />} />
+        <Route path="course-grades" element={<CourseGrades instructor />} />
         <Route path="content" element={<LearningContent />} />
         <Route path="sessions" element={<LearningSessions />} />
         <Route path="records" element={<RecordManager />} />

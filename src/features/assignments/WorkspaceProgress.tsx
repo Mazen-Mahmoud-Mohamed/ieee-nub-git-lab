@@ -1,4 +1,4 @@
-import { totals, type Definition } from '../assessments/model';
+import { sumPoints, totals, type Definition } from '../assessments/model';
 import type { TaskProgress } from '../assessments/requirements';
 export function WorkspaceProgress({
   definition,
@@ -14,21 +14,12 @@ export function WorkspaceProgress({
   error: string;
 }) {
   const required = progress.filter(
-      (p) => !p.task.bonus && (!definition.gradingPolicy || p.task.points > 0),
+      (p) => !p.task.bonus && p.task.points > 0,
     ),
     done = required.filter((p) => p.passed),
     points = totals(definition);
-  const earned = required.reduce(
-      (n, p) => (definition.gradingPolicy ? Math.round((n + p.earned) * 100) / 100 : n + p.earned),
-      0,
-    ),
-    bonus = progress
-      .filter((p) => p.task.bonus)
-      .reduce(
-        (n, p) =>
-          definition.gradingPolicy ? Math.round((n + p.earned) * 100) / 100 : n + p.earned,
-        0,
-      );
+  const earned = sumPoints(required.map((item) => item.earned));
+  const bonus = sumPoints(progress.filter((item) => item.task.bonus).map((item) => item.earned));
   const index = progress.findIndex((p) => p.task.id === taskId);
   return (
     <div className="student-score workspace-progress" aria-label="Task progress">

@@ -142,7 +142,7 @@ test('mobile instructions remain usable and 404 helps students return', async ({
   await page.getByRole('tab', { name: 'Task', exact: true }).click();
   await expect(
     page.getByRole('heading', {
-      name: 'Set up your project',
+      name: 'Initialize the repository',
       exact: true,
     }),
   ).toBeVisible();
@@ -156,7 +156,7 @@ test('instructor route rejects unauthenticated access', async ({ page }) => {
   await page.goto('/#/instructor');
   await expect(page.getByRole('heading', { name: 'Instructor access required.' })).toBeVisible();
 });
-test('complete Assignment 01 locally, unlock theory, autosave answers, and keep submission honest', async ({
+test('complete Task 1 locally, access unrestricted theory, autosave answers, and keep submission honest', async ({
   page,
 }) => {
   await page.goto('/#/workspace');
@@ -218,7 +218,7 @@ test('complete Assignment 01 locally, unlock theory, autosave answers, and keep 
   await command('git switch main');
   await command('git merge feature/skills');
   await command('git log --oneline');
-  await expect(page.getByText('8 / 8 scored tasks')).toBeVisible();
+  await expect(page.getByText('25 / 25 scored tasks')).toBeVisible();
   await page.getByRole('button', { name: 'skills.txt', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
     'Problem Solving',
@@ -234,7 +234,10 @@ test('complete Assignment 01 locally, unlock theory, autosave answers, and keep 
   }
   await expect(page.getByText('Saved on this device')).toBeVisible();
   await page.reload();
-  await expect(page.getByText('14 of 14 required answers')).toBeVisible();
+  await expect(page.getByLabel('Your response')).toHaveValue(
+    'My own explanation of the Git concept and the changes I observed in the repository.',
+  );
+  await expect(page.getByText('0 of 0 required answers')).toBeVisible();
   await page.goto('/#/review');
   await expect(
     page.getByText('This is a local practice workspace.', { exact: false }),
@@ -272,23 +275,18 @@ test('reported sequence shows individual checks, editor progress, dirty state an
     'ls -a',
   ])
     await command(c);
-  for (const label of [
-    'Git repository initialized',
-    'Git username configured',
-    'Valid Git email configured',
-  ])
-    await expect(req(label)).toHaveAttribute('data-state', 'completed');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
-  for (const file of ['about.txt', 'goals.txt', 'notes.txt'])
-    await expect(req(file + ' created in this project')).toHaveAttribute('data-state', 'completed');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('repo');
-  await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'incomplete');
-  await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
-  await expect(
-    page
-      .locator('.student-next')
-      .getByText('The published scored check needs the first commit on main.', { exact: false }),
-  ).toBeVisible();
+  const check = async (id: string, label: string, status = 'completed') => {
+    await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('t1-' + id);
+    await expect(req(label)).toHaveAttribute('data-state', status);
+  };
+  await check('initialized', 'Initialize the repository');
+  await check('identity-name', 'Configure your name');
+  await check('identity-email', 'Configure your email');
+  for (const file of ['about', 'goals', 'notes'])
+    await check(file + '-exists', 'Create ' + file + '.txt');
+  await check('main-branch', 'Create main');
+  await check('about-focused', 'Commit about.txt separately', 'incomplete');
+  await expect(page.getByText('7 / 25 scored tasks')).toBeVisible();
   await command('nano about.txt');
   await expect(page.getByRole('log')).toContainText(
     'To edit about.txt, select it from Files above the editor.',
@@ -298,22 +296,25 @@ test('reported sequence shows individual checks, editor progress, dirty state an
     'goals.txt': 'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects',
     'notes.txt': 'Git Course - Session 1\nIEEE NUB Student Branch',
   };
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
   for (const [file, value] of Object.entries(texts)) {
     await page
       .getByRole('button', { name: new RegExp('^' + file.replace('.', '\\.') + '(?: U| M)?$') })
       .click();
     await page.getByRole('textbox', { name: 'Text file editor' }).fill(value);
-    await expect(req(file + ' required content written')).toHaveAttribute(
-      'data-state',
-      'completed',
+    await check(
+      file.split('.')[0] + '-content',
+      file === 'about.txt'
+        ? 'Complete about.txt'
+        : file === 'goals.txt'
+          ? 'Write the original goals'
+          : 'Write the course notes',
     );
   }
   await command('git add about.txt');
   await command('git commit -m "Add personal information"');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('repo');
-  await expect(req('Main branch has its first commit')).toHaveAttribute('data-state', 'completed');
-  await expect(page.getByText('1 / 8 scored tasks')).toBeVisible();
+  await check('about-focused', 'Commit about.txt separately');
+  await check('about-message', 'Use the personal information message');
+  await expect(page.getByText('12 / 25 scored tasks')).toBeVisible();
   await page.getByRole('button', { name: /^about\.txt(?: U| M)?$/ }).click();
   const editor = page.getByRole('textbox', { name: 'Text file editor' });
   await editor.fill(texts['about.txt'] + '\nAn unsaved-to-Git edit');
@@ -321,9 +322,8 @@ test('reported sequence shows individual checks, editor progress, dirty state an
   await expect(page.getByText('Saved on this device')).toBeVisible();
   await page.reload();
   await expect(input).toBeEnabled();
-  await expect(req('Git username configured')).toHaveAttribute('data-state', 'completed');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('files');
-  await expect(req('about.txt created in this project')).toHaveAttribute('data-state', 'completed');
+  await check('identity-name', 'Configure your name');
+  await check('about-exists', 'Create about.txt');
   await page.getByRole('button', { name: 'about.txt M', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
     'An unsaved-to-Git edit',
@@ -390,7 +390,7 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
     'git add .',
   ])
     await command(value);
-  await expect(page.getByRole('alert').filter({ hasText: 'History warning:' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'History warning:' })).toHaveCount(0);
   await command('git commit -m "Combined introductory files"');
   await expect(page.getByRole('log')).toContainText('Combined introductory files');
   if (!(await page.getByRole('button', { name: 'Restart Attempt', exact: true }).isVisible()))
@@ -413,7 +413,7 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm restart', exact: true }).click();
   await expect(page.getByText('Practice restarted.', { exact: false })).toBeVisible();
-  await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
+  await expect(page.getByText('0 / 25 scored tasks')).toBeVisible();
   await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
   const recovery = await page.evaluate(async () => {
     const open = indexedDB.open('ieee-nub-git-lab');
@@ -430,13 +430,17 @@ test('restart practice confirms losses, preserves a recovery copy and restores a
     return keys.map(String).filter((k) => k.includes(':restart-backup:'));
   });
   expect(recovery).toHaveLength(1);
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('goals');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('t1-goals-expanded');
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue(
+    't1-goals-expanded',
+  );
   await page.reload();
-  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
-  await expect(page.getByText('0 / 8 scored tasks')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue(
+    't1-goals-expanded',
+  );
+  await expect(page.getByText('0 / 25 scored tasks')).toBeVisible();
   await command('ls');
   await expect(page.getByRole('log')).not.toContainText('Combined introductory files');
 });
@@ -448,14 +452,15 @@ test('learning guide leads to focused tasks, exact requirements and keyboard rec
   await expect(page.getByRole('heading', { name: 'Git, one step at a time' })).toBeVisible();
   await expect(page.locator('.lesson-grid article')).toHaveCount(6);
   await page.getByRole('link', { name: 'Try it in the practice lab', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
-  await expect(page.getByText('Exact commit message', { exact: true })).toBeVisible();
-  await expect(page.locator('.required-message code')).toHaveText('Add personal information');
-  await expect(page.locator('.task-caution')).toContainText('New commits cannot split');
-  await expect(page.locator('.check-evidence')).not.toHaveAttribute('open', '');
+  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('t1-about-message');
+  await expect(page.locator('.student-next')).toContainText('Add personal information');
+  await expect(page.locator('.student-next')).toContainText('Any qualifying later commit counts');
+  await expect(page.locator('.task-caution')).toHaveCount(0);
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('separate');
+  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue(
+    't1-about-message',
+  );
   await page.getByText('Help with this attempt', { exact: true }).click();
   await page.getByRole('button', { name: 'Restart Attempt', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Start over?', exact: true })).toBeFocused();

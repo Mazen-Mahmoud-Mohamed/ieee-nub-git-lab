@@ -1,9 +1,13 @@
+import { verifyAssessment } from '../../src/features/assessments/verify';
+import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import { beforeEach, describe, it, expect } from 'vitest';
 import { GitEngine } from '../../src/features/git-engine/engine';
 import { VirtualFS } from '../../src/features/filesystem/VirtualFS';
-import { validateRepository, practicalScore } from '../../src/features/assignments/assignment';
-import { verifySnapshot } from '../../src/features/submissions/verify';
 let e: GitEngine;
+const identity = { full_name: 'Test Student', department: 'Engineering' };
+const grade = (snapshot: ReturnType<VirtualFS['snapshot']>, student = identity) =>
+  verifyAssessment(taskOneDefinition(), { snapshot, answers: {}, events: [] }, student, {});
+
 export async function run(engine: GitEngine, cmd: string) {
   const result = await engine.execute(cmd);
   expect(result.success, result.output).toBe(true);
@@ -66,15 +70,15 @@ describe('real Git repository semantics', () => {
     await e.write('a.txt', 'second');
     expect((await run(e, 'git status -s')).output).toBe('AM a.txt');
   });
-  it('rejects a dirty working file even when an attacker supplies a stale clean index', async () => {
+  it('withholds only related marks when working files disagree with a stale clean index', async () => {
     await complete(e);
     const snapshot = e.fs.snapshot();
     snapshot.entries[e.dir + '/about.txt'].data = Array.from(
       new TextEncoder().encode('forged working text'),
     );
-    await expect(
-      verifySnapshot(snapshot, { full_name: 'Test Student', department: 'Engineering' }),
-    ).rejects.toThrow('Working files');
+    const gradeResult = await grade(snapshot);
+    expect(gradeResult.outcomes.find((o) => o.id === 't1-clean')?.earned).toBe(0);
+    expect(gradeResult.practicalScore).toBe(94);
   });
   it('rejects commands without a repository and invalid pathspecs', async () => {
     expect((await e.execute('git add missing.txt')).success).toBe(false);
@@ -127,17 +131,13 @@ describe('real Git repository semantics', () => {
     await run(e, 'git add hobbies.txt');
     await run(e, 'git commit -m "Add personal hobbies"');
     await run(e, 'git switch main');
-    await run(e, 'echo "Assignment 1 completed." >> notes.txt');
+    await e.write('notes.txt', (await e.read('notes.txt')) + '\nAssignment 1 completed.');
     await run(e, 'git add notes.txt');
     await run(e, 'git commit -m "Record assignment completion"');
     expect((await run(e, 'git merge feature/hobbies')).output).toContain('Merge commit');
     const v = await e.inspect();
     expect(v.commits[0].parents).toHaveLength(2);
-    expect(
-      practicalScore(
-        validateRepository(v, { full_name: 'Test Student', department: 'Engineering' }),
-      ),
-    ).toBe(85);
+    expect((await grade(e.fs.snapshot())).practicalScore).toBe(100);
   });
   it('leaves a conflicting merge unchanged and reports failure', async () => {
     await setup(e);
@@ -172,14 +172,8 @@ describe('real Git repository semantics', () => {
   });
   it('verifies main assignment from history rather than client flags', async () => {
     await complete(e);
-    const verified = await verifySnapshot(e.fs.snapshot(), {
-      full_name: 'Test Student',
-      department: 'Engineering',
-    });
-    expect(verified.score).toBe(75);
-    await expect(
-      verifySnapshot(e.fs.snapshot(), { full_name: 'Wrong Student', department: 'Engineering' }),
-    ).rejects.toThrow('incomplete');
+    expect((await grade(e.fs.snapshot())).practicalScore).toBe(100);
+    expect((await grade(e.fs.snapshot(), { ...identity, full_name: 'Wrong Student' })).practicalScore).toBe(96);
   });
   it('rejects forged object data and unsafe metadata', async () => {
     await complete(e);
@@ -189,12 +183,12 @@ describe('real Git repository semantics', () => {
     )!;
     data.entries[object].data[5] ^= 1;
     await expect(
-      verifySnapshot(data, { full_name: 'Test Student', department: 'Engineering' }),
+      grade(data),
     ).rejects.toThrow();
     const unsafe = e.fs.snapshot();
     unsafe.entries[e.dir + '/.git/shallow'] = { kind: 'file', data: [] };
     await expect(
-      verifySnapshot(unsafe, { full_name: 'Test Student', department: 'Engineering' }),
+      grade(unsafe),
     ).rejects.toThrow('metadata');
   });
   it('supports staged deletion and preserves untracked files on switch', async () => {

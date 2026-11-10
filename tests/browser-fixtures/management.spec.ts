@@ -1,5 +1,5 @@
-import { prepareFundamentalsScoring } from '../../src/features/assessments/fundamentalsScoring';
-import { correctedAssignment } from '../../src/features/assessments/correctedAssignment';
+import { TASK_ONE_ID } from '../../src/features/assignments/assignment';
+import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -11,9 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { test, expect, devices, type Page } from '@playwright/test';
 import { managementDatabase, ADMIN, TEACHER, STUDENT } from '../helpers/managementDatabase';
 import { blankDefinition } from '../../src/features/assessments/model';
-import { firstAssessment } from '../../src/features/assessments/model';
 import { requirementCatalog } from '../../src/features/assessments/requirements';
-import { weightedFundamentalsFixture } from '../helpers/weightedFundamentals';
 import { GitEngine } from '../../src/features/git-engine/engine';
 
 test('direct Learning Sessions shows only published teaching cards and preserves legacy files and assessment history', async ({
@@ -542,15 +540,10 @@ test('direct Learning Sessions handles loading failure and retry before allowing
   await expect(page.getByRole('button', { name: 'Add Session', exact: true })).toBeEnabled();
 });
 
-test('Git Fundamentals combined introduction retains independent points, permits other tasks and incomplete submission', async ({
+test('Task 1 recovers a combined introduction and submits independent partial points', async ({
   page,
 }) => {
-  const definition = prepareFundamentalsScoring(correctedAssignment());
-  const id = await h.rpc(TEACHER, 'save_assessment', {
-    p_id: null,
-    p_document: definition,
-    p_publish: true,
-  });
+  const id = TASK_ONE_ID;
   await backend(page, STUDENT);
   await page.goto('/ieee-git-lab/#/assessments/' + id);
   await page.getByRole('checkbox', { name: /Save my files/ }).check();
@@ -584,19 +577,20 @@ test('Git Fundamentals combined introduction retains independent points, permits
     .fill('Name: Student Example\nUniversity: Nahda University\nDepartment: Engineering');
   await show('Terminal');
   await command('git add .');
-  await expect(
-    page.getByRole('alert').filter({ hasText: /together|multiple|separate/i }),
-  ).toBeVisible();
   await command('git commit -m "Add personal information"');
   await show('Task');
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
-  await expect(page.getByText('A mistake in the first commit', { exact: true })).toBeVisible();
-  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
-  await page.getByRole('button', { name: 'Next Task', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Task', exact: true })).toHaveValue('goals');
-  await page.getByRole('button', { name: 'Check again', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('separate');
-  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
+  const task = page.getByRole('combobox', { name: 'Task', exact: true });
+  await task.selectOption('t1-about-focused');
+  await expect(page.locator('.task-heading')).toContainText('0 / 6 points');
+  await task.selectOption('t1-about-message');
+  await expect(page.locator('.task-heading')).toContainText('2 / 2 points');
+  await show('Terminal');
+  await command('echo "A focused correction" >> about.txt');
+  await command('git add about.txt');
+  await command('git commit -m "Record focused correction"');
+  await show('Task');
+  await task.selectOption('t1-about-focused');
+  await expect(page.locator('.task-heading')).toContainText('6 / 6 points');
   await page.screenshot({
     path:
       'test-results/product-review/fundamentals-independent-points-' +
@@ -605,7 +599,7 @@ test('Git Fundamentals combined introduction retains independent points, permits
     fullPage: true,
   });
   await page.reload();
-  await expect(page.locator('.task-heading')).toContainText('6 / 10 points');
+  await expect(page.locator('.task-heading')).toContainText('6 / 6 points');
   await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
   await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
   page.once('dialog', (d) => d.accept());
@@ -616,11 +610,11 @@ test('Git Fundamentals combined introduction retains independent points, permits
   const result = (
     await h.db.query<any>(
       'select t.points,t.requirement_results,a.status from public.task_results t join public.attempts a on a.id=t.attempt_id where a.assignment_id=$1 and t.task_key=$2',
-      [id, 'separate'],
+      [id, 't1-about-focused'],
     )
   ).rows[0];
   expect(Number(result.points)).toBe(6);
-  expect(result.requirement_results.filter((c: any) => c.passed)).toHaveLength(6);
+  expect(result.requirement_results.filter((c: any) => c.passed)).toHaveLength(1);
   expect(result.status).toBe('pending_review');
   await page.screenshot({
     path:
@@ -716,22 +710,17 @@ test('dashboard released scores retain the attempt version maximum after a diffe
   ).toContainText('3 points');
 });
 
-test('instructor republishes all Git Fundamentals task weights using readable labels with no internal ID entry', async ({
+test('instructor publishes new Task 1 weights using readable labels with no internal ID entry', async ({
   page,
 }) => {
-  const id = await h.rpc(TEACHER, 'save_assessment', {
-    p_id: null,
-    p_document: firstAssessment,
-    p_publish: true,
-  });
+  const id = TASK_ONE_ID;
   const old = await h.rpc(STUDENT, 'start_assessment', { p_assessment: id });
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
-  page.once('dialog', (d) => d.accept());
   await page
-    .getByRole('button', { name: 'Prepare Git Fundamentals partial-credit draft', exact: true })
+    .getByRole('button', { name: 'Prepare redesigned Task 1 · 150 points', exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText('Nothing has been saved or published');
+  await expect(page.getByRole('status')).toContainText('Prepared recoverable Task 1');
   expect(
     (
       await h.db.query('select version from public.assessment_versions where assessment_id=$1', [
@@ -740,7 +729,7 @@ test('instructor republishes all Git Fundamentals task weights using readable la
     ).rows,
   ).toHaveLength(1);
   await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
-  const fixture = weightedFundamentalsFixture();
+  const fixture = taskOneDefinition();
   const tasks = fixture.sections.flatMap((s) => s.tasks);
   for (const [i, task] of tasks.entries()) {
     const card = page.locator('.builder-task').nth(i);
@@ -779,7 +768,7 @@ test('instructor republishes all Git Fundamentals task weights using readable la
     )
   ).rows;
   expect(versions).toHaveLength(2);
-  expect(versions[0].document.gradingPolicy).toBeUndefined();
+  expect(versions[0].document.gradingPolicy).toBe('independent-v2');
   expect(
     versions[1].document.sections.flatMap((s: any) => s.tasks).map((t: any) => t.points),
   ).toEqual(tasks.map((t) => t.points));
@@ -791,8 +780,8 @@ test('new requirement policy submits incomplete work for authoritative partial p
   page,
 }) => {
   const d = {
-    ...blankDefinition('assignment', 'legacy'),
-    gradingPolicy: 'requirements-v1' as const,
+    ...blankDefinition('assignment'),
+    gradingPolicy: 'independent-v2' as const,
     format: 'practical' as const,
     releaseImmediately: true,
     sections: [
@@ -894,7 +883,7 @@ test('instructor explicitly configures requirement weights before publishing a n
   page,
 }) => {
   const doc = {
-    ...blankDefinition('assignment', 'legacy'),
+    ...blankDefinition('assignment'),
     format: 'practical',
     sections: [
       {
@@ -920,13 +909,14 @@ test('instructor explicitly configures requirement weights before publishing a n
   const id = await h.rpc(TEACHER, 'save_assessment', {
     p_id: null,
     p_document: doc,
-    p_publish: true,
+    p_publish: false,
   });
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
-  page.once('dialog', (d) => d.accept());
-  await page.getByLabel('Scoring policy', { exact: true }).selectOption('requirements-v1');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'Publish new version', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('weight');
   await page.getByRole('button', { name: '2. Tasks', exact: true }).click();
   await page.getByLabel('Points: about.txt exists in working files', { exact: true }).fill('3');
@@ -942,10 +932,9 @@ test('instructor explicitly configures requirement weights before publishing a n
       [id],
     )
   ).rows;
-  expect(versions).toHaveLength(2);
-  expect(versions[0].document.gradingPolicy).toBeUndefined();
-  expect(versions[1].document.gradingPolicy).toBe('requirements-v1');
-  expect(versions.map((v) => v.document.sections[0].tasks[0].points)).toEqual([10, 10]);
+  expect(versions).toHaveLength(1);
+  expect(versions[0].document.gradingPolicy).toBe('independent-v2');
+  expect(versions.map((v) => v.document.sections[0].tasks[0].points)).toEqual([10]);
 });
 let h: Awaited<ReturnType<typeof managementDatabase>>;
 let uploadServer: Server;
@@ -1244,7 +1233,7 @@ async function backend(page: Page, actor = ADMIN) {
 async function draft(title: string) {
   return h.rpc(TEACHER, 'save_assessment', {
     p_id: null,
-    p_document: { ...blankDefinition('assignment', 'legacy'), title },
+    p_document: { ...blankDefinition('assignment'), title },
     p_publish: false,
   });
 }
@@ -1362,7 +1351,7 @@ test('only an explicit data administrator can invalidate; an open student worksp
   browser,
 }) => {
   const definition = {
-    ...blankDefinition('assignment', 'legacy'),
+    ...blankDefinition('assignment'),
     title: 'Managed student assignment',
     questions: [
       {
@@ -1433,7 +1422,7 @@ test('a concurrent admin edit makes a confirmation stale and the UI reports the 
   await h.rpc(TEACHER, 'save_assessment', {
     p_id: id,
     p_document: {
-      ...blankDefinition('assignment', 'legacy'),
+      ...blankDefinition('assignment'),
       title: 'Changed by another instructor',
     },
     p_publish: false,
@@ -1455,7 +1444,7 @@ test('draft task deletion identifies its scope, supports cancellation and keeps 
   page,
 }) => {
   const doc = {
-    ...blankDefinition('assignment', 'legacy'),
+    ...blankDefinition('assignment'),
     title: 'Protected task history',
     format: 'practical',
     sections: [
@@ -1472,6 +1461,7 @@ test('draft task deletion identifies its scope, supports cancellation and keeps 
             points: 10,
             bonus: false,
             rules: [{ type: 'repository', branch: 'main' }],
+            requirementWeights: { 'repository:rule-0-initialized': 5, 'repository:rule-0-branch': 5 },
           },
         ],
       },
@@ -1524,11 +1514,9 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   await page.setViewportSize({ width: 390, height: 844 });
   await backend(page, TEACHER);
   const definition = {
-    ...blankDefinition('assignment', 'legacy'),
+    ...blankDefinition('assignment'),
     title:
       'Session mobile practice — A long assessment title with Arabic محتوى الدورة and Git history requirements for smartphone students',
-    gateTheory: true,
-    requireComplete: true,
     projectName: 'Mobile-Git',
     starter: { files: { 'about.txt': '' }, initialize: true, commit: false },
     sections: [
@@ -1554,6 +1542,7 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
               },
               { type: 'commits', ref: 'main', min: 1 },
             ],
+            requirementWeights: { 't:rule-0-exists': 1, 't:rule-0-content': 2, 't:rule-1-count': 2 },
           },
         ],
       },

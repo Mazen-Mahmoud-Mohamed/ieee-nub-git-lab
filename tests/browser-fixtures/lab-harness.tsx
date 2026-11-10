@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { useLab } from '../../src/hooks/useLab';
 import { blankDefinition, type Definition } from '../../src/features/assessments/model';
 const make = (name: string, file: string): Definition => ({
-  ...blankDefinition('assignment', 'legacy'),
+  ...blankDefinition('assignment'),
   title: name,
   projectName: name,
   format: 'practical',

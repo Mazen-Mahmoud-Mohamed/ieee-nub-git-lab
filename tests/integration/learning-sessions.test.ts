@@ -166,7 +166,7 @@ describe.sequential('versioned learning sessions, publication and private storag
   });
   it('respects parent visibility, stale unpublish and never grants access to a restricted related activity', async () => {
     const definition = {
-      ...blankDefinition('assignment', 'legacy'),
+      ...blankDefinition('assignment'),
       title: 'Related practice',
       format: 'theory',
       questions: [

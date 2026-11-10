@@ -26,8 +26,7 @@ import { finishAuthCallback } from '../features/auth/callback';
 import { destination, rememberDestination } from '../features/auth/navigation';
 import { profileComplete } from '../features/auth/profile';
 import { Workspace } from '../features/assignments/Workspace';
-import { ASSIGNMENT_ID } from '../features/assignments/assignment';
-import { outcomesFor } from '../features/assessments/model';
+import { TASK_ONE_ID } from '../features/assignments/assignment';
 import { useAssessmentRoute } from '../hooks/useAssessmentRoute';
 import { useAssessmentSession, autosaveConsentKey } from '../hooks/useAssessmentSession';
 import { workspaceKey } from '../features/assessments/clock';
@@ -150,9 +149,6 @@ export function App() {
     full_name: localStorage.getItem('practice-name') || '',
     department: localStorage.getItem('practice-department') || '',
   };
-  const working = lab.working;
-  const outcomes = outcomesFor(course.definition, lab.view, identity, working);
-  const unlocked = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   async function start(autosave = false) {
     if (!user) {
       if (location.pathname.startsWith('/assessments/')) {
@@ -167,7 +163,7 @@ export function App() {
       return;
     }
     const { data, error } = await requireBackend().rpc('start_assessment', {
-      p_assessment: course.assessmentId || ASSIGNMENT_ID,
+      p_assessment: course.assessmentId || TASK_ONE_ID,
     });
     if (error) {
       setError(error.message);
@@ -331,7 +327,6 @@ export function App() {
               element={
                 <Assessment
                   lab={lab}
-                  unlocked={unlocked}
                   definition={course.definition}
                   basePath={course.basePath}
                 />
@@ -427,7 +422,6 @@ export function App() {
                         element={
                           <Assessment
                             lab={lab}
-                            unlocked={unlocked}
                             definition={course.definition}
                             basePath={course.basePath}
                           />

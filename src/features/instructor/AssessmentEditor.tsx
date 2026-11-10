@@ -1,8 +1,7 @@
+import { taskOneDefinition } from '../assessments/taskOne';
 import { requirementCatalog } from '../assessments/requirements';
-import { prepareFundamentalsScoring } from '../assessments/fundamentalsScoring';
 import { RecordActions } from './RecordManagement';
 import { AssessmentCourse } from './LearningContent';
-import { taskGuide } from '../assessments/presentation';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, ArrowUp, ArrowDown, Copy, Save, Trash2 } from 'lucide-react';
@@ -302,7 +301,7 @@ export function AssessmentEditor() {
     setError('');
     setNotice('');
     try {
-      assertDefinition(definition);
+      assertDefinition(definition, !publish);
       if (definition.starter.snapshot)
         await inspectVerifiedSnapshot(definition.starter.snapshot, definition.projectName);
       const { data, error } = await requireBackend().rpc('save_assessment', {
@@ -506,80 +505,45 @@ export function AssessmentEditor() {
           />
         </label>
         <label>
-          Scoring policy for the next published version
+          Course assessment slot
           <select
-            aria-label="Scoring policy"
-            value={definition.gradingPolicy || 'legacy'}
-            onChange={(e) => {
-              if (
-                !window.confirm(
-                  'Change this draft scoring policy? Existing published versions, attempts and grades are unchanged. Publishing creates a new version. Configure every requirement weight before saving.',
-                )
-              )
-                return;
-              update(
-                e.target.value === 'requirements-v1'
-                  ? { gradingPolicy: 'requirements-v1', gateTheory: false, requireComplete: false }
-                  : { gradingPolicy: undefined },
-              );
-            }}
+            value={definition.courseSlot || ''}
+            onChange={(e) =>
+              update({ courseSlot: (e.target.value || undefined) as Definition['courseSlot'] })
+            }
           >
-            <option value="legacy">Legacy: all checks required for each task</option>
-            <option value="requirements-v1">
-              Independent requirement points + partial submission
+            <option value="">Standalone assessment</option>
+            <option value="task1">Task 1 · 150 points</option>
+            <option value="task2">Task 2 · 150 points (configure content before publishing)</option>
+            <option value="final">
+              Final Exam · 200 points (configure content before publishing)
             </option>
           </select>
         </label>
-        {!definition.gradingPolicy &&
-          definition.sections
-            .flatMap((s) => s.tasks)
-            .some((t) => t.id === 'separate' && t.rules.some((r) => r.type === 'legacy')) && (
-            <div className="scoring-proposal">
-              <button
-                type="button"
-                className="outline-button"
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      'Prepare independent requirement weights in this editor only? Review every weight before saving or publishing. Existing published versions, active attempts and grades stay unchanged.',
-                    )
-                  )
-                    return;
-                  try {
-                    setDefinition(prepareFundamentalsScoring(definition));
-                    setEditorTab('tasks');
-                    setNotice(
-                      'Prepared proposed Git Fundamentals weights. Review each requirement below. Nothing has been saved or published.',
-                    );
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : 'Unable to prepare this rubric.');
-                  }
-                }}
-              >
-                Prepare Git Fundamentals partial-credit draft
-              </button>
-              <p>
-                Fills a proposed points breakdown for the original tasks. You approve it by
-                reviewing and explicitly publishing a new version.
-              </p>
-            </div>
-          )}
+        <button
+          type="button"
+          className="outline-button"
+          onClick={() => {
+            setDefinition(taskOneDefinition());
+            setEditorTab('tasks');
+            setNotice(
+              'Prepared recoverable Task 1: 100 practical + 50 theory. Review and save as a new version.',
+            );
+          }}
+        >
+          Prepare redesigned Task 1 · 150 points
+        </button>
         <div className="field-grid">
           {(
             [
               ['releaseImmediately', 'Release immediately when no manual grading remains'],
               ['reviewAnswers', 'Allow response review after submission'],
-              ['gateTheory', 'Unlock theory after practical tasks pass'],
-              ['requireComplete', 'Require all mandatory work before manual submission'],
             ] as const
           ).map(([key, label]) => (
             <label className="checkbox-label" key={key}>
               <input
                 type="checkbox"
                 checked={definition[key]}
-                disabled={
-                  !!definition.gradingPolicy && (key === 'gateTheory' || key === 'requireComplete')
-                }
                 onChange={(e) => update({ [key]: e.target.checked })}
               />
               {label}
@@ -842,7 +806,7 @@ export function AssessmentEditor() {
                       />
                       Optional bonus task
                     </label>
-                    {definition.gradingPolicy && (
+                    {(
                       <div className="requirement-weights">
                         <h5>Requirement points (must total {task.points})</h5>
                         {task.points === 0 && (
@@ -884,9 +848,7 @@ export function AssessmentEditor() {
                     )}
                     <h5>What earns the points</h5>
                     <p className="muted">
-                      {definition.gradingPolicy
-                        ? 'Each scored check independently earns its configured points. Preparation checks are unscored.'
-                        : 'All checks must pass for this task’s points in this legacy scoring policy.'}
+                      Each scored check independently earns its configured points. Preparation checks are unscored.
                     </p>
                     {task.rules.map((rule, ri) => (
                       <RuleEditor
@@ -1110,25 +1072,14 @@ function RuleEditor({
       <label>
         Check completion by
         <select value={r.type} onChange={(e) => onChange({ type: e.target.value as Rule['type'] })}>
-          {r.type === 'legacy' && (
-            <option value="legacy">
-              Course task:{' '}
-              {
-                taskGuide({
-                  id: 'guide',
-                  title: 'Course check',
-                  instructions: '',
-                  points: 0,
-                  bonus: false,
-                  rules: [r],
-                }).title
-              }
-            </option>
+          {r.type === 'criterion' && (
+            <option value="criterion">Independent criterion: {r.outcomeId}</option>
           )}
           {types.map((t) => (
             <option key={t} value={t}>
               {
                 {
+                  criterion: 'Independent recoverable requirement',
                   repository: 'Git setup and clean files',
                   file: 'File content',
                   branch: 'A saved branch',
@@ -1154,13 +1105,13 @@ function RuleEditor({
             merged:
               'Checks source history is included in the receiving branch, with an optional merge commit.',
             isolation: 'Checks that the file was introduced by a new commit on the source branch.',
-            legacy: 'Preserves the original Assignment 01 scoring rule.',
+            criterion:
+              'Checks independent, recoverable evidence in the current repository and reachable commit graph.',
           }[r.type]
         }
       </p>
       <small>
-        Scoring follows the published policy: legacy tasks require all checks; requirement-scoring
-        versions award the explicitly configured points for each check.
+        Each check earns its configured points independently.
       </small>
       {(r.type === 'repository' || r.type === 'branch') && (
         <label>
@@ -1300,7 +1251,7 @@ export function QuestionEditor({
   value: AssessmentQuestion;
   onChange: (q: AssessmentQuestion) => void;
 }) {
-  const objective = ['single', 'multiple', 'boolean'].includes(q.kind);
+  const objective = ['single', 'multiple', 'boolean', 'choice-complete'].includes(q.kind);
   return (
     <div className="question-fields">
       <label>
@@ -1322,7 +1273,13 @@ export function QuestionEditor({
               onChange({
                 ...q,
                 kind,
-                manual: !['single', 'multiple', 'boolean'].includes(kind),
+                manual: ![
+                  'single',
+                  'multiple',
+                  'boolean',
+                  'choice-complete',
+                  'fill-blank',
+                ].includes(kind),
                 options: kind === 'boolean' ? ['True', 'False'] : q.options,
                 correctAnswers: [],
               });
@@ -1332,6 +1289,8 @@ export function QuestionEditor({
               ['single', 'Multiple Choice'],
               ['multiple', 'Multiple Select'],
               ['boolean', 'True / False'],
+              ['choice-complete', 'Complete with choices'],
+              ['fill-blank', 'Fill in the blank (accepted answers)'],
               ['short', 'Short Answer'],
               ['long', 'Long Written Answer'],
               ['interpretation', 'Terminal Output Interpretation'],
@@ -1354,6 +1313,17 @@ export function QuestionEditor({
           />
         </label>
       </div>
+      {q.kind === 'fill-blank' && (
+        <label>
+          Private accepted answers (one per line)
+          <textarea
+            value={(q.correctAnswers || []).join('\n')}
+            onChange={(e) =>
+              onChange({ ...q, correctAnswers: e.target.value.split('\n'), manual: false })
+            }
+          />
+        </label>
+      )}
       {objective && (
         <>
           <label>
@@ -1522,13 +1492,21 @@ export function QuestionBank() {
           }}
         >
           <option value="">All question types</option>
-          {['single', 'multiple', 'boolean', 'short', 'long', 'scenario', 'interpretation'].map(
-            (t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ),
-          )}
+          {[
+            'single',
+            'multiple',
+            'boolean',
+            'choice-complete',
+            'fill-blank',
+            'short',
+            'long',
+            'scenario',
+            'interpretation',
+          ].map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </select>
       </div>
       {error && (

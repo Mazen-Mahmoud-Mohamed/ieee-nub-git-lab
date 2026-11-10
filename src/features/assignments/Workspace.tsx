@@ -1,3 +1,4 @@
+import { taskOneDefinition } from '../assessments/taskOne';
 import { WorkspaceProgress } from './WorkspaceProgress';
 import { useSearchParams } from 'react-router-dom';
 import { RestartAttempt } from '../assessments/RestartAttempt';
@@ -5,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 const DesktopTextEditor = lazy(() => import('./DesktopTextEditor'));
 import { Plus, Check } from 'lucide-react';
 import type { StudentIdentity } from './assignment';
-import { firstAssessment, type Definition } from '../assessments/model';
+import { type Definition } from '../assessments/model';
 import type { Lab } from '../../hooks/useLab';
 import { GitGraph } from '../../components/GitGraph';
 import { Terminal } from '../terminal/Terminal';
@@ -17,7 +18,7 @@ export function Workspace({
   lab,
   identity,
   dark,
-  definition = firstAssessment,
+  definition = taskOneDefinition(),
   basePath = '',
   onRestart,
 }: {
@@ -471,7 +472,6 @@ export function Workspace({
           <Terminal
             key={`${lab.key}:${lab.resetGeneration}`}
             lab={lab}
-            definition={definition}
             feedback={previous.current?.key === lab.key ? feedback : ''}
             expanded={expanded}
             onExpand={() => setExpanded(!expanded)}
@@ -508,7 +508,6 @@ export function Workspace({
           checking={lab.busy}
           error={lab.validationError}
           basePath={basePath}
-          view={lab.view}
           recovery={
             onRestart || (!basePath && !lab.readOnly) ? (
               <RestartAttempt

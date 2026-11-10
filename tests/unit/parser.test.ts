@@ -1,8 +1,8 @@
+import { sanitizeAnswers } from '../../src/features/assessments/model';
+import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import { describe, it, expect } from 'vitest';
 import { tokenize } from '../../src/features/terminal/parser';
 import { VirtualFS, normalize } from '../../src/features/filesystem/VirtualFS';
-import { validateAnswers } from '../../src/features/submissions/verify';
-import { questions } from '../../src/features/assignments/assignment';
 describe('safe command grammar', () => {
   it('tokenizes quoted values and explicit redirection', () => {
     expect(tokenize('git commit -m "Add my information"')).toEqual([
@@ -48,16 +48,10 @@ describe('virtual file system boundaries', () => {
   });
 });
 describe('submission answer boundary', () => {
-  it('requires known, bounded written answers and reflections', () => {
-    expect(() => validateAnswers({})).toThrow();
-    const valid = Object.fromEntries(
-      [...questions.map((q) => q.id), 'isolation', 'merge'].map((id) => [
-        id,
-        'My written response',
-      ]),
-    );
-    expect(validateAnswers(valid)).toEqual(valid);
-    expect(() => validateAnswers({ ...valid, q1: 'x'.repeat(8001) })).toThrow();
-    expect(() => validateAnswers({ ...valid, score: 100 })).toThrow();
+  it('allows partial answers and rejects unknown IDs or oversized responses', () => {
+    const definition = taskOneDefinition();
+    expect(sanitizeAnswers(definition, { q1: 'Draft answer' })).toEqual({ q1: 'Draft answer' });
+    expect(() => sanitizeAnswers(definition, { invented: 'x' })).toThrow();
+    expect(() => sanitizeAnswers(definition, { q1: 'x'.repeat(8001) })).toThrow();
   });
 });

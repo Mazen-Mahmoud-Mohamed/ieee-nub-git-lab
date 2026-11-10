@@ -103,11 +103,7 @@ export async function verifyAssessment(
     },
     outcomes,
     grades,
-    practicalScore: d.gradingPolicy
-      ? sumPoints(outcomes.map(earnedPoints))
-      : outcomes.reduce((s, o) => s + earnedPoints(o), 0),
-    objectiveScore: d.gradingPolicy
-      ? sumPoints(grades.map((g) => g.points))
-      : grades.reduce((s, g) => s + g.points, 0),
+    practicalScore: sumPoints(outcomes.map(earnedPoints)),
+    objectiveScore: sumPoints(grades.map((g) => g.points)),
   };
 }

@@ -17,9 +17,16 @@ Deno.serve(async(req:Request)=>{
   const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if(payload.version!==2||!uuid.test(payload.attemptId)||!uuid.test(payload.idempotencyKey)||!['checkpoint','submit'].includes(payload.action)||!Number.isInteger(payload.revision)||payload.revision<0)return reply(400,{error:'Invalid submission envelope'});
   const {data:context,error}=await admin.rpc('assessment_verification_context',{p_attempt:payload.attemptId,p_student:user.id});if(error)throw error;
+  if(context.definition?.gradingPolicy!=='independent-v2')return reply(409,{error:'This assessment was retired. Start the current assessment from My learning.'});
   if(context.attempt.status!=='in_progress')return context.attempt.idempotency_key===payload.idempotencyKey||context.attempt.auto_submitted?reply(200,{receipt:context.attempt.receipt,status:context.attempt.status,revision:context.attempt.checkpoint_revision}):reply(409,{error:'Attempt already finalized'});
   const verified=await verifyAssessment(context.definition,payload,context.identity,context.keys);
   const {data:result,error:saveError}=await admin.rpc('accept_assessment_checkpoint',{p_student:user.id,p_attempt:payload.attemptId,p_revision:payload.revision,p_payload:verified.payload,p_outcomes:verified.outcomes,p_grades:verified.grades,p_practical:verified.practicalScore,p_objective:verified.objectiveScore,p_finalize:payload.action==='submit',p_key:payload.idempotencyKey});if(saveError)throw saveError;
   return reply(200,result);
- }catch(e){const message=e instanceof Error?e.message:(e as {message?:string})?.message||'Assessment request could not be verified';return reply(message.includes('conflict')?409:400,{error:message});}
+ }catch(e){
+  const message=(e as {message?:string})?.message;
+  if(message==='Checkpoint conflict: another tab has saved newer work'||message==='Attempt is finalized'){
+   return reply(409,{error:message});
+  }
+  return reply(400,{error:'Assessment request could not be verified'});
+ }
 });

@@ -20,7 +20,7 @@ export function AssessmentResult({
     points: number;
     requirement_results: Array<{ id: string; earned: number; points: number }> | null;
   }>;
-  const key = `${state.id}:${definition.gradingPolicy || 'legacy'}:${definition.reviewAnswers}`;
+  const key = `${state.id}:${definition.reviewAnswers}`;
   const [loaded, setLoaded] = useState<{
     key: string;
     result: { practical_score: number; theory_score: number; feedback: string } | null;
@@ -37,7 +37,7 @@ export function AssessmentResult({
     if (client)
       void Promise.all([
         client.from('released_results').select('*').eq('attempt_id', state.id).maybeSingle(),
-        definition.gradingPolicy && definition.reviewAnswers
+        definition.reviewAnswers
           ? client
               .from('task_results')
               .select('task_key,points,requirement_results')
@@ -67,7 +67,7 @@ export function AssessmentResult({
     return () => {
       live = false;
     };
-  }, [key, definition.gradingPolicy, definition.reviewAnswers, state.id]);
+  }, [key, definition.reviewAnswers, state.id]);
   const points = totals(definition);
   return (
     <div className="page narrow">
@@ -126,20 +126,14 @@ export function AssessmentResult({
           <>
             <h3>
               Official score:{' '}
-              {definition.gradingPolicy
-                ? sumPoints([Number(result.practical_score), Number(result.theory_score)])
-                : Number(result.practical_score) + Number(result.theory_score)}{' '}
+              {sumPoints([Number(result.practical_score), Number(result.theory_score)])}{' '}
               /{' '}
-              {definition.gradingPolicy
-                ? sumPoints([points.practical, points.theory])
-                : points.practical + points.theory}
+              {sumPoints([points.practical, points.theory])}
             </h3>
             {points.bonus > 0 && (
               <p>
                 Up to {points.bonus} optional bonus points can raise this score above{' '}
-                {definition.gradingPolicy
-                  ? sumPoints([points.practical, points.theory])
-                  : points.practical + points.theory}
+                {sumPoints([points.practical, points.theory])}
                 .
               </p>
             )}

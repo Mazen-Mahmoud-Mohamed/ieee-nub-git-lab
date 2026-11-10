@@ -1,21 +1,19 @@
+import { taskOneDefinition } from '../assessments/taskOne';
 import { taskGuide } from '../assessments/presentation';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ArrowRight, ShieldCheck, Download, AlertCircle } from 'lucide-react';
 import { type StudentIdentity } from '../assignments/assignment';
 import {
-  firstAssessment,
   outcomesFor,
   earnedPoints,
+  sumPoints,
   totals,
   answerPresent,
   type Definition,
 } from '../assessments/model';
 import { StudentSteps } from '../assessments/StudentSteps';
 import type { Lab } from '../../hooks/useLab';
-import { requireBackend, withRetry } from '../../services/supabase';
-import { saveOutbox, clearOutbox, loadOutbox } from '../../services/persistence';
-import { Checkpoints } from './Checkpoints';
 export function downloadJSON(name: string, value: unknown) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }),
@@ -30,7 +28,7 @@ export function Review({
   lab,
   identity,
   authenticated,
-  definition = firstAssessment,
+  definition = taskOneDefinition(),
   basePath = '',
   submit,
 }: {
@@ -50,13 +48,7 @@ export function Review({
   const working = lab.working;
   const outcomes = outcomesFor(definition, lab.view, identity, working);
   const points = totals(definition);
-  const complete =
-    !definition.requireComplete || outcomes.filter((o) => !o.bonus).every((o) => o.passed);
-  const answered =
-    !definition.requireComplete ||
-    definition.questions
-      .filter((q) => q.required)
-      .every((q) => answerPresent(q, lab.answers[q.id]));
+  const complete = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
   const missing = definition.questions
     .map((q, i) => ({ q, number: i + 1 }))
     .filter(({ q }) => q.required && !answerPresent(q, lab.answers[q.id]));
@@ -94,27 +86,10 @@ export function Review({
           <ShieldCheck size={20} />
           <span>Provisional practical points</span>
           <strong>
-            {outcomes
-              .filter((o) => !o.bonus)
-              .reduce(
-                (sum, o) =>
-                  definition.gradingPolicy
-                    ? Math.round((sum + earnedPoints(o)) * 100) / 100
-                    : sum + earnedPoints(o),
-                0,
-              )}{' '}
-            / {points.practical}
+            {sumPoints(outcomes.filter((o) => !o.bonus).map(earnedPoints))} / {points.practical}
             {points.bonus > 0
               ? ' · Bonus ' +
-                outcomes
-                  .filter((o) => o.bonus)
-                  .reduce(
-                    (s, o) =>
-                      definition.gradingPolicy
-                        ? Math.round((s + earnedPoints(o)) * 100) / 100
-                        : s + earnedPoints(o),
-                    0,
-                  ) +
+                sumPoints(outcomes.filter((o) => o.bonus).map(earnedPoints)) +
                 ' / ' +
                 points.bonus
               : ''}
@@ -158,7 +133,6 @@ export function Review({
             uncertain network failures retain the same submission reference.
           </p>
         )}
-        {!submit && <Checkpoints lab={lab} authenticated={authenticated} />}
         <div className="review-actions">
           <button
             className="outline-button"
@@ -182,15 +156,13 @@ export function Review({
               lab.readOnly ||
               !lab.ready ||
               !agreed ||
-              !complete ||
-              !answered ||
+              !submit ||
               !authenticated ||
               !lab.attemptId ||
               !!lab.receipt
             }
             onClick={async () => {
               if (
-                definition.gradingPolicy &&
                 (outcomes.some((o) => !o.bonus && !o.passed) || missing.length) &&
                 !window.confirm(
                   'You have unfinished requirements. You can still submit now and receive the points you earned. Select Cancel to continue working, or OK to submit.',
@@ -200,37 +172,9 @@ export function Review({
               setBusy(true);
               setError('');
               try {
-                if (submit) {
-                  const receipt = await submit();
-                  if (!receipt) throw new Error('No server receipt returned');
-                  navigate(basePath + '/result');
-                  return;
-                }
-                const client = requireBackend();
-                const pending = await loadOutbox(lab.attemptId!);
-                const saved = await lab.capture();
-                const payload = pending || {
-                  version: 1,
-                  attemptId: lab.attemptId,
-                  idempotencyKey: crypto.randomUUID(),
-                  snapshot: saved.snapshot,
-                  answers: saved.answers,
-                  events: saved.events,
-                };
-                await saveOutbox(lab.attemptId!, payload);
-                await lab.persist();
-                const response = await withRetry(async () => {
-                  const { data, error } = await client.functions.invoke('submit-attempt', {
-                    body: payload,
-                  });
-                  if (error) throw error;
-                  return data;
-                });
-                if (!response?.receipt)
-                  throw new Error('The server did not return a submission receipt.');
-                lab.setReceipt(response.receipt);
-                await clearOutbox(lab.attemptId!);
-                navigate('/confirmation');
+                const receipt = await submit?.();
+                if (!receipt) throw new Error('No server receipt returned');
+                navigate(basePath + '/result');
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {
@@ -260,12 +204,10 @@ export function Review({
           <div className="notice">
             <p>Unanswered required questions: {missing.map((m) => m.number).join(', ')}.</p>
             <Link to={basePath + '/theory'}>Return to Questions</Link>
-            {!definition.requireComplete && (
-              <p>
-                This assessment permits partial submission. Unanswered questions receive no credit;
-                exam expiry still finalizes the last accepted save.
-              </p>
-            )}
+            <p>
+              This assessment permits partial submission. Unanswered questions receive no credit;
+              exam expiry still finalizes the last accepted save.
+            </p>
           </div>
         )}
       </div>

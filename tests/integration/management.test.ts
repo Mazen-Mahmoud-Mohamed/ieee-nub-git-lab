@@ -9,7 +9,7 @@ afterAll(async () => {
   await h?.db.close();
 });
 const definition = (publish = false) => ({
-  ...blankDefinition('assignment', 'legacy'),
+  ...blankDefinition('assignment'),
   title: 'Managed assessment',
   format: 'theory',
   questions: publish

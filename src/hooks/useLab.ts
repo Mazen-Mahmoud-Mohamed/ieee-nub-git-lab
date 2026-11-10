@@ -1,8 +1,9 @@
+import { taskOneDefinition } from '../features/assessments/taskOne';
 import { useEffect, useRef, useState, type SetStateAction } from 'react';
 import { GitEngine, type RepoView } from '../features/git-engine/engine';
 import { VirtualFS } from '../features/filesystem/VirtualFS';
 import { loadWorkspace, saveWorkspace, type LocalWorkspace } from '../services/persistence';
-import { firstAssessment, validFile, type Definition } from '../features/assessments/model';
+import { validFile, type Definition } from '../features/assessments/model';
 import { createStarter } from '../features/assessments/starter';
 import { SerialQueue } from '../services/SerialQueue';
 const empty: RepoView = {
@@ -30,7 +31,7 @@ type Resource = {
 };
 export function useLab(
   key: string,
-  definition: Definition = firstAssessment,
+  definition: Definition = taskOneDefinition(),
   enabled = true,
   migration?: { userId: string; attemptId: string },
 ) {

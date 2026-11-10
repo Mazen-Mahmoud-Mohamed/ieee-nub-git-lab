@@ -1,19 +1,20 @@
+import { taskOneDefinition } from '../features/assessments/taskOne';
 import { useEffect, useState } from 'react';
 import { useMatch } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import {
-  firstAssessment,
+  assertDefinition,
   type Definition,
   type AssessmentRecord,
   type AttemptState,
 } from '../features/assessments/model';
-import { ASSIGNMENT_ID } from '../features/assignments/assignment';
+import { TASK_ONE_ID } from '../features/assignments/assignment';
 export function useAssessmentRoute(userId?: string) {
   const assessmentMatch = useMatch('/assessments/:assessmentId/*');
   const attemptMatch = useMatch('/assessments/:assessmentId/attempts/:attemptId/*');
   const assessmentId = assessmentMatch?.params.assessmentId;
   const attemptId = attemptMatch?.params.attemptId;
-  const [definition, setDefinition] = useState<Definition>(firstAssessment);
+  const [definition, setDefinition] = useState<Definition>(taskOneDefinition);
   const [record, setRecord] = useState<AssessmentRecord>();
   const [state, setState] = useState<AttemptState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -21,8 +22,9 @@ export function useAssessmentRoute(userId?: string) {
   useEffect(() => {
     let live = true;
     setState(null);
+    setRecord(undefined);
     setError('');
-    setDefinition(firstAssessment);
+    setDefinition(taskOneDefinition());
     if (!assessmentId) {
       setLoading(false);
       return;
@@ -38,6 +40,7 @@ export function useAssessmentRoute(userId?: string) {
         if (error) throw error;
         if (data.assignment_id !== assessmentId)
           throw new Error('Attempt does not belong to this assessment');
+        assertDefinition(data.definition);
         if (live) {
           setState(data);
           setDefinition(data.definition);
@@ -56,6 +59,7 @@ export function useAssessmentRoute(userId?: string) {
           .eq('version', data.published_version)
           .single();
         if (versionError) throw versionError;
+        assertDefinition(version.document);
         if (live) {
           setRecord(data);
           setDefinition(version.document);
@@ -73,7 +77,7 @@ export function useAssessmentRoute(userId?: string) {
     };
   }, [assessmentId, attemptId, userId]);
   return {
-    assessmentId: assessmentId || ASSIGNMENT_ID,
+    assessmentId: assessmentId || TASK_ONE_ID,
     attemptId,
     definition,
     record,
