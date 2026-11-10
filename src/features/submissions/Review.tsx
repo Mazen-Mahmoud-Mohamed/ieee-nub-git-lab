@@ -1,8 +1,7 @@
 import { taskOneDefinition } from '../assessments/taskOne';
-import { taskGuide } from '../assessments/presentation';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckCircle2, ArrowRight, ShieldCheck, Download, AlertCircle } from 'lucide-react';
+import { CheckCircle2, ArrowRight, Download, ClipboardCheck } from 'lucide-react';
 import { type StudentIdentity } from '../assignments/assignment';
 import {
   outcomesFor,
@@ -14,6 +13,7 @@ import {
 } from '../assessments/model';
 import { StudentSteps } from '../assessments/StudentSteps';
 import type { Lab } from '../../hooks/useLab';
+
 export function downloadJSON(name: string, value: unknown) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }),
@@ -24,6 +24,7 @@ export function downloadJSON(name: string, value: unknown) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
 export function Review({
   lab,
   identity,
@@ -43,97 +44,178 @@ export function Review({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [agreed, setAgreed] = useState(false);
-  const questions = definition.questions.filter((q) => q.points > 0);
-  const reflectionQuestions = definition.questions.filter((q) => q.points === 0);
-  const working = lab.working;
-  const outcomes = outcomesFor(definition, lab.view, identity, working);
+  const outcomes = outcomesFor(definition, lab.view, identity, lab.working);
+  const scored = outcomes.filter((item) => !item.bonus && item.points > 0);
+  const complete = scored.filter((item) => item.passed);
+  const remaining = scored.filter((item) => !item.passed);
   const points = totals(definition);
-  const complete = outcomes.filter((o) => !o.bonus).every((o) => o.passed);
-  const missing = definition.questions
-    .map((q, i) => ({ q, number: i + 1 }))
-    .filter(({ q }) => q.required && !answerPresent(q, lab.answers[q.id]));
+  const questions = definition.questions.map((question, index) => ({
+    question,
+    number: index + 1,
+    answered: answerPresent(question, lab.answers[question.id]),
+  }));
+  const answered = questions.filter((item) => item.answered);
+  const unanswered = questions.filter((item) => !item.answered);
+  const missing = unanswered.filter(({ question }) => question.required);
+  const pending = !lab.ready || lab.busy || !!lab.validationError;
+  const practice = !submit || !authenticated;
+
+  const finalize = async () => {
+    if (
+      (remaining.length || missing.length) &&
+      !window.confirm(
+        'You have unfinished requirements or answers. Submit the work you have now? A submitted attempt is read only.',
+      )
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      const receipt = await submit?.();
+      if (!receipt) throw new Error('No server receipt returned');
+      navigate(basePath + '/result');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="page narrow">
+    <div className="page lab-review">
       <StudentSteps basePath={basePath} />
-      <span className="eyebrow">{definition.type.toUpperCase()} / FINAL REVIEW</span>
-      <h1>Review &amp; submit</h1>
-      <p>
-        Check the tasks and answers below. Git work is checked automatically; written answers are
-        reviewed by your instructor.
-      </p>
-      <div className="form-card">
-        <h3>Submission checklist</h3>
-        <details open={!complete}>
-          <summary>Task checklist</summary>
-          {outcomes.map((o) => (
-            <div key={o.id} className={'review-check ' + (o.passed ? 'passed' : '')}>
-              <CheckCircle2 size={18} />
-              <span>
-                {
-                  taskGuide(definition.sections.flatMap((s) => s.tasks).find((t) => t.id === o.id)!)
-                    .title
-                }
-                {o.bonus ? ' (optional)' : ''}
-              </span>
-              <strong>
-                {earnedPoints(o)}/{o.points}
-              </strong>
-            </div>
-          ))}
-        </details>
-        <hr />
-        <div className="review-check">
-          <ShieldCheck size={20} />
-          <span>Provisional practical points</span>
-          <strong>
-            {sumPoints(outcomes.filter((o) => !o.bonus).map(earnedPoints))} / {points.practical}
-            {points.bonus > 0
-              ? ' · Bonus ' +
-                sumPoints(outcomes.filter((o) => o.bonus).map(earnedPoints)) +
-                ' / ' +
-                points.bonus
-              : ''}
-          </strong>
+      <header className="lab-page-heading">
+        <div>
+          <span className="lab-kicker">Final review</span>
+          <h1>Review &amp; submit</h1>
+          <p>{definition.title}</p>
         </div>
-        <p className="muted">
-          Answered{' '}
-          {
-            definition.questions.filter((q) => q.required && answerPresent(q, lab.answers[q.id]))
-              .length
-          }{' '}
-          of {definition.questions.filter((q) => q.required).length} required questions. Written
-          answers are marked by your instructor; the final grade appears after release.
-        </p>
-        <details>
-          <summary>Review your written responses</summary>
-          {[...questions, ...reflectionQuestions].map((q) => (
-            <article key={q.id}>
-              <h4 dir="auto">{q.prompt}</h4>
-              <p className="written-answer" dir="auto">
-                {lab.answers[q.id] || 'Not answered'}
+        <span className="lab-save-label" role="status">
+          {lab.saving}
+        </span>
+      </header>
+      <div className="lab-review-grid">
+        <section className="lab-review-card" aria-labelledby="lab-review-practical">
+          <h2 id="lab-review-practical">Practical work</h2>
+          {pending ? (
+            <p>Practical progress is not available yet.</p>
+          ) : (
+            <>
+              <p className="lab-review-score">
+                <strong>
+                  {sumPoints(scored.map(earnedPoints))} / {points.practical}
+                </strong>{' '}
+                provisional points
               </p>
-            </article>
-          ))}
-        </details>
-        <hr />
-        <label className="checkbox-label">
-          <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />I
-          confirm this is my own work. I understand that a finalized attempt is read only.
-        </label>
-        {!authenticated && (
-          <div className="notice">
-            <AlertCircle size={18} />
-            This is a local practice workspace. Sign in and complete your profile to start an
-            assessed attempt. Practice is kept separately.
-          </div>
+              {points.bonus > 0 && (
+                <p>
+                  Bonus: {sumPoints(outcomes.filter((item) => item.bonus).map(earnedPoints))} /{' '}
+                  {points.bonus}
+                </p>
+              )}
+              {[
+                { items: complete, label: 'Completed' },
+                { items: remaining, label: 'Incomplete' },
+              ].map(({ items, label }) => (
+                <details key={label}>
+                  <summary>
+                    {label} <strong>{items.length}</strong>
+                  </summary>
+                  <ul>
+                    {items.map((item) => (
+                      <li key={item.id}>
+                        <span dir="auto">{item.label}</span>
+                        <strong>
+                          {earnedPoints(item)} / {item.points}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
+            </>
+          )}
+          <p>Practical points are verified on submission.</p>
+        </section>
+        <section className="lab-review-card" aria-labelledby="lab-review-theory">
+          <h2 id="lab-review-theory">Questions</h2>
+          <p className="lab-review-score">
+            <strong>
+              {answered.length} / {questions.length}
+            </strong>{' '}
+            answered
+          </p>
+          <details>
+            <summary>
+              Answered <strong>{answered.length}</strong>
+            </summary>
+            <ul>
+              {answered.map(({ question, number }) => (
+                <li key={question.id}>
+                  <div>
+                    <strong>
+                      {number}. {question.prompt}
+                    </strong>
+                    <p className="written-answer" dir="auto">
+                      {lab.answers[question.id]}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <details>
+            <summary>
+              Unanswered <strong>{unanswered.length}</strong>
+            </summary>
+            <ul>
+              {unanswered.map(({ question, number }) => (
+                <li key={question.id}>
+                  <span>
+                    {number}. {question.prompt}
+                  </span>
+                  <small>{question.required ? 'Required' : 'Optional'}</small>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <Link className="text-button" to={basePath + '/theory'}>
+            Return to Questions <ArrowRight size={14} />
+          </Link>
+        </section>
+      </div>
+      <section className="lab-review-card lab-finalize" aria-labelledby="lab-finalize-title">
+        <h2 id="lab-finalize-title">
+          <ClipboardCheck size={20} aria-hidden="true" /> Final submission
+        </h2>
+        {practice ? (
+          <p>
+            This practice workspace is saved on this device. Sign in and start an assessed attempt
+            to submit.
+          </p>
+        ) : (
+          <>
+            <p>
+              {remaining.length || missing.length
+                ? 'You can submit with unfinished work. Unanswered questions receive no credit.'
+                : 'Your work is ready for submission.'}
+            </p>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              I confirm this is my own work. I understand that a finalized attempt is read only.
+            </label>
+          </>
         )}
         {error && (
           <p className="error" role="alert">
-            {error} Your work remains saved on this device. Correct any missing work and retry;
-            uncertain network failures retain the same submission reference.
+            {error} Your work remains saved on this device.
           </p>
         )}
-        <div className="review-actions">
+        <div className="lab-review-actions">
           <button
             className="outline-button"
             disabled={!lab.ready || busy}
@@ -145,8 +227,7 @@ export function Review({
               }
             }}
           >
-            <Download size={16} />
-            Export backup
+            <Download size={16} aria-hidden="true" /> Export backup
           </button>
           <button
             className="primary"
@@ -156,90 +237,21 @@ export function Review({
               lab.readOnly ||
               !lab.ready ||
               !agreed ||
-              !submit ||
-              !authenticated ||
+              practice ||
               !lab.attemptId ||
               !!lab.receipt
             }
-            onClick={async () => {
-              if (
-                (outcomes.some((o) => !o.bonus && !o.passed) || missing.length) &&
-                !window.confirm(
-                  'You have unfinished requirements. You can still submit now and receive the points you earned. Select Cancel to continue working, or OK to submit.',
-                )
-              )
-                return;
-              setBusy(true);
-              setError('');
-              try {
-                const receipt = await submit?.();
-                if (!receipt) throw new Error('No server receipt returned');
-                navigate(basePath + '/result');
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
+            onClick={() => void finalize()}
           >
             {busy
               ? 'Verifying work…'
               : definition.type === 'exam'
                 ? 'Submit Exam'
                 : 'Submit assignment'}
-            <ArrowRight size={16} />
+            <CheckCircle2 size={16} aria-hidden="true" />
           </button>
         </div>
-        {!complete && (
-          <p className="muted">
-            Required practical tasks remaining:{' '}
-            {outcomes
-              .filter((o) => !o.bonus && !o.passed)
-              .map((o) => o.label)
-              .join('; ')}
-            .
-          </p>
-        )}
-        {missing.length > 0 && (
-          <div className="notice">
-            <p>Unanswered required questions: {missing.map((m) => m.number).join(', ')}.</p>
-            <Link to={basePath + '/theory'}>Return to Questions</Link>
-            <p>
-              This assessment permits partial submission. Unanswered questions receive no credit;
-              exam expiry still finalizes the last accepted save.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-export function Confirmation({ lab }: { lab: Lab }) {
-  return (
-    <div className="page narrow confirmation">
-      <div className="confirmation-icon">
-        <CheckCircle2 size={48} />
-      </div>
-      <span className="eyebrow">
-        {lab.receipt ? 'SUBMISSION RECEIVED' : 'NO CONFIRMED SUBMISSION'}
-      </span>
-      <h1>
-        {lab.receipt ? 'One assignment. A big step forward.' : 'Your work is still in progress.'}
-      </h1>
-      <p>
-        {lab.receipt
-          ? 'Your repository has been verified and your written responses are awaiting instructor review.'
-          : 'A confirmation appears only after the trusted server returns a receipt.'}
-      </p>
-      {lab.receipt && (
-        <div className="receipt">
-          SUBMISSION REFERENCE<code>{lab.receipt}</code>
-        </div>
-      )}
-      <Link className="primary" to="/dashboard">
-        Back to dashboard
-        <ArrowRight size={16} />
-      </Link>
+      </section>
     </div>
   );
 }

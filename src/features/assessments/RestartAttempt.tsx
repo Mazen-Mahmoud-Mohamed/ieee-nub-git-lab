@@ -72,8 +72,8 @@ export function RestartAttempt({
     >
       <summary>Help with this attempt</summary>
       <p>
-        A new commit cannot change how an earlier commit was made. Start over only if you need a
-        fresh history.
+        Check the criterion’s hint for ways to recover points. Restart only if you need a fresh
+        workspace.
       </p>
       {loading ? (
         <p role="status">Checking your options…</p>
@@ -160,7 +160,7 @@ export function RestartAttempt({
               disabled={loading || pending}
               onClick={() => void load()}
             >
-              Check again
+              Refresh recovery options
             </button>
           )}
         </>

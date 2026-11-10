@@ -1,5 +1,6 @@
 import { TASK_ONE_ID } from '../../src/features/assignments/assignment';
 import { taskOneDefinition } from '../../src/features/assessments/taskOne';
+import type { AssessmentQuestion } from '../../src/features/assessments/model';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -549,7 +550,7 @@ test('Task 1 recovers a combined introduction and submits independent partial po
   await page.getByRole('checkbox', { name: /Save my files/ }).check();
   await page.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
   const show = async (name: string) => {
-    if ((page.viewportSize()?.width || 1440) <= 900)
+    if (name !== 'Task' || (page.viewportSize()?.width || 1440) <= 900)
       await page.getByRole('tab', { name, exact: true }).click();
   };
   await show('Terminal');
@@ -571,7 +572,7 @@ test('Task 1 recovers a combined introduction and submits independent partial po
   ])
     await command(cmd);
   await show('Files');
-  await page.getByRole('button', { name: /about.txt/ }).click();
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'Text file editor', exact: true })
     .fill('Name: Student Example\nUniversity: Nahda University\nDepartment: Engineering');
@@ -581,16 +582,16 @@ test('Task 1 recovers a combined introduction and submits independent partial po
   await show('Task');
   const task = page.getByRole('combobox', { name: 'Task', exact: true });
   await task.selectOption('t1-about-focused');
-  await expect(page.locator('.task-heading')).toContainText('0 / 6 points');
+  await expect(page.locator('.lab-task-result')).toContainText('0 / 6 points');
   await task.selectOption('t1-about-message');
-  await expect(page.locator('.task-heading')).toContainText('2 / 2 points');
+  await expect(page.locator('.lab-task-result')).toContainText('2 / 2 points');
   await show('Terminal');
   await command('echo "A focused correction" >> about.txt');
   await command('git add about.txt');
   await command('git commit -m "Record focused correction"');
   await show('Task');
   await task.selectOption('t1-about-focused');
-  await expect(page.locator('.task-heading')).toContainText('6 / 6 points');
+  await expect(page.locator('.lab-task-result')).toContainText('6 / 6 points');
   await page.screenshot({
     path:
       'test-results/product-review/fundamentals-independent-points-' +
@@ -599,7 +600,7 @@ test('Task 1 recovers a combined introduction and submits independent partial po
     fullPage: true,
   });
   await page.reload();
-  await expect(page.locator('.task-heading')).toContainText('6 / 6 points');
+  await expect(page.locator('.lab-task-result')).toContainText('6 / 6 points');
   await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
   await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
   page.once('dialog', (d) => d.accept());
@@ -698,15 +699,15 @@ test('dashboard released scores retain the attempt version maximum after a diffe
   await page.goto('/ieee-git-lab/#/dashboard');
   await expect(
     page
-      .locator('.assessment-card')
+      .locator('.lab-assignment-card')
       .filter({ hasText: 'New Git assignment' })
       .locator('.result-summary'),
   ).toContainText('Score: 0.3 / 0.3 · Version 1');
   await expect(
     page
-      .locator('.assessment-card')
+      .locator('.lab-assignment-card')
       .filter({ hasText: 'New Git assignment' })
-      .locator('.assessment-meta'),
+      .locator('.lab-assignment-content'),
   ).toContainText('3 points');
 });
 
@@ -823,7 +824,7 @@ test('new requirement policy submits incomplete work for authoritative partial p
   await page.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
   const show = async (name: string) => {
     const tab = page.getByRole('tab', { name, exact: true });
-    if ((page.viewportSize()?.width || 1440) <= 900) await tab.click();
+    if (name !== 'Task' || (page.viewportSize()?.width || 1440) <= 900) await tab.click();
   };
   await show('Terminal');
   await expect(page.getByLabel('Terminal command')).toBeVisible();
@@ -833,17 +834,18 @@ test('new requirement policy submits incomplete work for authoritative partial p
     await expect(page.getByLabel('Terminal command')).toBeEnabled();
   }
   await show('Task');
-  await expect(page.getByText('Provisional: 3 / 10 points', { exact: true })).toBeVisible();
-  await expect(page.getByText(/3 \/ 3 points/)).toBeVisible();
-  await page.getByRole('button', { name: 'Fix This Step', exact: true }).click();
+  await expect(page.getByLabel('Task progress')).toContainText('3 / 10');
+  await expect(page.locator('.lab-checklist')).toContainText('3 / 3 points');
+  await show('Files');
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor', exact: true }).fill('Correct');
   await show('Task');
-  await page.getByRole('button', { name: 'Check again', exact: true }).click();
-  await expect(page.getByText('Provisional: 10 / 10 points', { exact: true })).toBeVisible();
-  await show('Files');
+  await page.getByRole('button', { name: 'Check Work', exact: true }).click();
+  await expect(page.getByLabel('Task progress')).toContainText('10 / 10');
+  await show('Code Editor');
   await page.getByRole('textbox', { name: 'Text file editor', exact: true }).fill('Wrong');
   await show('Task');
-  await expect(page.getByText('Provisional: 3 / 10 points', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Task progress')).toContainText('3 / 10');
   await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
   await page.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
   page.once('dialog', (dialog) => {
@@ -1461,7 +1463,10 @@ test('draft task deletion identifies its scope, supports cancellation and keeps 
             points: 10,
             bonus: false,
             rules: [{ type: 'repository', branch: 'main' }],
-            requirementWeights: { 'repository:rule-0-initialized': 5, 'repository:rule-0-branch': 5 },
+            requirementWeights: {
+              'repository:rule-0-initialized': 5,
+              'repository:rule-0-branch': 5,
+            },
           },
         ],
       },
@@ -1542,7 +1547,11 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
               },
               { type: 'commits', ref: 'main', min: 1 },
             ],
-            requirementWeights: { 't:rule-0-exists': 1, 't:rule-0-content': 2, 't:rule-1-count': 2 },
+            requirementWeights: {
+              't:rule-0-exists': 1,
+              't:rule-0-content': 2,
+              't:rule-1-count': 2,
+            },
           },
         ],
       },
@@ -1657,7 +1666,7 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     .check();
   await student.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
   await student.getByRole('tab', { name: 'Files', exact: true }).click();
-  await student.getByRole('button', { name: /^about.txt/ }).click();
+  await student.getByRole('button', { name: 'about.txt', exact: true }).click();
   await student.getByRole('textbox', { name: 'Text file editor' }).fill('Hello mobile');
   await expect(student.getByText('File saved locally', { exact: true })).toBeVisible();
   await student.getByRole('tab', { name: 'Terminal', exact: true }).click();
@@ -1672,8 +1681,8 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     await expect(student.getByLabel('Terminal command')).toBeEnabled();
   }
   await student.getByRole('tab', { name: 'Task', exact: true }).click();
-  await expect(student.getByText('Provisional: 5 / 5 points', { exact: true })).toBeVisible();
-  await student.getByRole('link', { name: 'Continue to Questions', exact: true }).click();
+  await expect(student.getByLabel('Task progress')).toContainText('5 / 5');
+  await student.getByRole('link', { name: 'Questions', exact: true }).click();
   await student.getByRole('radio', { name: 'True', exact: true }).check();
   await student.getByRole('link', { name: 'Review & submit', exact: true }).click();
   await student.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
@@ -1836,4 +1845,330 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   expect(
     (await h.db.query('select version from public.learning_versions where item_id=$1', [id])).rows,
   ).toHaveLength(2);
+});
+
+test('student UI review captures', async ({ page }) => {
+  const suffix = process.env.STUDENT_UI_CAPTURE || 'after';
+  test.skip(!process.env.STUDENT_UI_CAPTURE, 'Review captures are opt-in');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await backend(page, STUDENT);
+  await page.goto('/ieee-git-lab/#/dashboard');
+  await expect(page.getByText('Task 1 — Git Fundamentals', { exact: true })).toBeVisible();
+  const assignment = page
+    .locator('.lab-assignment-card')
+    .filter({ hasText: 'Task 1 — Git Fundamentals' });
+  await expect(assignment.getByRole('link', { name: 'Start assignment' })).toBeInViewport();
+  const grades = page.locator('.lab-grades');
+  await expect(grades).toHaveJSProperty('open', false);
+  await grades.locator('summary').click();
+  await expect(grades.getByRole('heading', { name: 'Course score · 500 points' })).toBeVisible();
+  await grades.locator('summary').click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-dashboard.png',
+    fullPage: true,
+  });
+  await page.goto('/ieee-git-lab/#/assessments/' + TASK_ONE_ID);
+  await page.getByRole('checkbox', { name: /Save my files/ }).check();
+  await page.getByRole('button', { name: 'Start / Continue assignment', exact: true }).click();
+  await expect(page.getByLabel('Terminal command')).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-workspace.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: 'Task', exact: true }).click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-workspace-mobile.png',
+    fullPage: true,
+  });
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-terminal-mobile.png',
+    fullPage: true,
+  });
+  for (const command of ['mkdir IEEE-Git-Task', 'cd IEEE-Git-Task', 'touch about.txt']) {
+    await page.getByLabel('Terminal command').fill(command);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByLabel('Terminal command')).toBeEnabled();
+  }
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Text file editor' })
+    .fill('Name: Student Example\nUniversity: Nahda University\nDepartment: Engineering');
+  await expect(page.getByText('File saved locally', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-editor-mobile.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(page.locator('.cm-content')).toContainText('Student Example');
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-editor-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('link', { name: 'Questions', exact: true }).click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-questions-mobile.png',
+    fullPage: true,
+  });
+  await page.getByRole('link', { name: 'Review & submit', exact: true }).click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-review-mobile.png',
+    fullPage: true,
+  });
+  await page.goto('/ieee-git-lab/#/dashboard');
+  await expect(page.getByText('Task 1 — Git Fundamentals', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-dashboard-mobile.png',
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: 'Toggle light and dark theme' }).click();
+  await page.screenshot({
+    path: 'test-results/student-ui/' + suffix + '-dashboard-mobile-light.png',
+    fullPage: true,
+  });
+});
+
+test.describe('Private Task 1 theory draft', () => {
+  test('imports, versions, previews and grades the proposed Task 1 theory', async ({
+    page,
+    browser,
+  }) => {
+    const file = process.env.TASK1_THEORY_DRAFT;
+    test.skip(!file, 'Requires the private local theory package');
+    const questions: AssessmentQuestion[] = JSON.parse(await readFile(file!, 'utf8'));
+    const id = TASK_ONE_ID;
+    const previous = await h.rpc(ADMIN, 'start_assessment', { p_assessment: id });
+    const versions = async () =>
+      (
+        await h.db.query<{ version: number; document: Record<string, unknown> }>(
+          'select version, document from public.assessment_versions where assessment_id=$1 order by version',
+          [id],
+        )
+      ).rows;
+    const original = (await versions())[0];
+    await backend(page, TEACHER);
+    await page.goto('/ieee-git-lab/#/instructor/assessments/' + id);
+    await page.getByRole('button', { name: '3. Questions', exact: true }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByLabel('Import Task 1 theory draft').setInputFiles(file!);
+    const publish = page.getByRole('button', { name: 'Publish new version' });
+    await expect(publish).toBeDisabled();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(publish).toBeEnabled();
+    expect(await versions()).toHaveLength(1);
+    await page.getByRole('button', { name: 'Preview as student' }).click();
+    await page.getByRole('button', { name: 'Question preview' }).click();
+    await expect(page.getByRole('heading', { name: questions[0].prompt })).toBeVisible();
+    await page.screenshot({
+      path: 'test-results/task1-theory/instructor-preview.png',
+      fullPage: true,
+    });
+    await page.getByRole('button', { name: 'Back to editor' }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await publish.click();
+    await expect(
+      page.getByText('Published a new immutable version.', { exact: false }),
+    ).toBeVisible();
+    const published = await versions();
+    expect(published[0]).toEqual(original);
+    expect(published[1].document.sections).toEqual(original.document.sections);
+    const publicQuestions = published[1].document.questions as AssessmentQuestion[];
+    expect(publicQuestions).toHaveLength(15);
+    expect(publicQuestions.reduce((sum, question) => sum + question.points, 0)).toBe(50);
+    expect(
+      publicQuestions.every(
+        (q) => !Object.hasOwn(q, 'correctAnswers') && !Object.hasOwn(q, 'explanation'),
+      ),
+    ).toBe(true);
+    expect(
+      (await h.rpc(ADMIN, 'assessment_state', { p_attempt: previous.id })).assignment_version,
+    ).toBe(1);
+
+    const student = await browser.newPage({ ...devices['Pixel 7'] });
+    try {
+      await backend(student, STUDENT);
+      await student.goto('/ieee-git-lab/#/assessments/' + id);
+      await student.getByRole('checkbox', { name: /Save my files/ }).check();
+      await student
+        .getByRole('button', { name: 'Start / Continue assignment', exact: true })
+        .click();
+      await student.getByRole('link', { name: 'Questions', exact: true }).click();
+      const picker = student.getByLabel('Choose question');
+      await expect(picker.locator('option')).toHaveCount(15);
+      for (const [index, question] of questions.entries()) {
+        await picker.selectOption(String(index));
+        await expect(
+          student.getByRole('heading', { name: question.prompt, exact: true }),
+        ).toBeVisible();
+      }
+      await picker.selectOption('0');
+      const phoneViewport = student.viewportSize()!;
+      await student.setViewportSize({ width: 1280, height: 960 });
+      await student.screenshot({
+        path: 'test-results/task1-theory/desktop.png',
+        fullPage: true,
+        scale: 'css',
+      });
+      await student.setViewportSize(phoneViewport);
+      await picker.selectOption('5');
+      await student.screenshot({
+        path: 'test-results/task1-theory/true-false-mobile.png',
+        fullPage: true,
+      });
+      await picker.selectOption('10');
+      await student.screenshot({ path: 'test-results/task1-theory/mobile.png', fullPage: true });
+      await picker.selectOption('14');
+      await student.screenshot({
+        path: 'test-results/task1-theory/typed-mobile.png',
+        fullPage: true,
+      });
+      const branchQuestion = questions[14];
+      const acceptedCommands = branchQuestion.correctAnswers!;
+      expect(acceptedCommands).toHaveLength(2);
+      const spacedEquivalent = '  ' + acceptedCommands[1].replaceAll(' ', '   ') + '  ';
+      await student.getByLabel('Your response').fill(spacedEquivalent);
+      for (const index of [0, 3, 5, 10]) {
+        await picker.selectOption(String(index));
+        const q = questions[index];
+        for (const answer of q.correctAnswers!) {
+          const option = student.getByRole(q.kind === 'multiple' ? 'checkbox' : 'radio', {
+            name: answer,
+            exact: true,
+          });
+          if (index === 0) {
+            await option.focus();
+            await option.press('Space');
+          } else await student.getByText(answer, { exact: true }).tap();
+          await expect(option).toBeChecked();
+        }
+      }
+      await expect(student.getByText('5 of 15 answered')).toBeVisible();
+      expect(await student.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await student.reload();
+      await expect(student.getByText('5 of 15 answered')).toBeVisible();
+      await picker.selectOption('14');
+      await expect(student.getByLabel('Your response')).toHaveValue(spacedEquivalent);
+      await student.getByLabel('Your response').fill(acceptedCommands[0]);
+      await picker.selectOption('13');
+      await expect(student.getByLabel('Your response')).toHaveValue('');
+      await expect(
+        student.getByText('Unanswered · Automatically graded on submission.'),
+      ).toBeVisible();
+      await student.getByRole('link', { name: 'Review & submit', exact: true }).click();
+      await student.getByRole('checkbox', { name: /I confirm this is my own work/ }).check();
+      student.once('dialog', (dialog) => dialog.accept());
+      await student.getByRole('button', { name: 'Submit assignment', exact: true }).click();
+      await expect(student.getByRole('heading', { name: 'Submission received' })).toBeVisible();
+      const { rows } = await h.db.query(
+        'select g.theory_score, a.assignment_version from public.grading_summaries g join public.attempts a on a.id=g.attempt_id where a.assignment_id=$1 and a.student_id=$2',
+        [id, STUDENT],
+      );
+      expect(rows).toHaveLength(1);
+      expect(Number((rows[0] as { theory_score: string }).theory_score)).toBe(18);
+      expect((rows[0] as { assignment_version: number }).assignment_version).toBe(2);
+      const attempt = (
+        await h.db.query<{ id: string }>(
+          'select id from public.attempts where assignment_id=$1 and student_id=$2',
+          [id, STUDENT],
+        )
+      ).rows[0];
+      const studentState = await h.rpc(STUDENT, 'assessment_state', { p_attempt: attempt.id });
+      expect(
+        studentState.definition.questions.every(
+          (q: AssessmentQuestion) => !Object.hasOwn(q, 'correctAnswers'),
+        ),
+      ).toBe(true);
+      expect(
+        (
+          await h.asUser(
+            STUDENT,
+            'select assessment_id from public.assessment_drafts where assessment_id=$1',
+            [id],
+          )
+        ).rows,
+      ).toHaveLength(0);
+      await expect(
+        h.asUser(STUDENT, 'select public.assessment_verification_context($1,$2)', [
+          attempt.id,
+          STUDENT,
+        ]),
+      ).rejects.toThrow();
+      const context = await h.db.transaction(async (tx) => {
+        await tx.exec('set local role service_role');
+        return (
+          await tx.query<{
+            result: {
+              definition: Parameters<typeof verifyAssessment>[0];
+              identity: Parameters<typeof verifyAssessment>[2];
+              keys: Parameters<typeof verifyAssessment>[3];
+            };
+          }>('select public.assessment_verification_context($1,$2) as result', [
+            attempt.id,
+            STUDENT,
+          ])
+        ).rows[0].result;
+      });
+      const grade = (answers: Record<string, string>) =>
+        verifyAssessment(
+          context.definition,
+          { snapshot: new GitEngine().fs.snapshot(), events: [], answers },
+          context.identity,
+          context.keys,
+        );
+      const allCorrect = Object.fromEntries(
+        questions.map((q) => [
+          q.id,
+          q.kind === 'multiple' ? q.correctAnswers!.join('\n') : q.correctAnswers![0],
+        ]),
+      );
+      expect((await grade(allCorrect)).objectiveScore).toBe(50);
+      expect((await grade({})).objectiveScore).toBe(0);
+      for (const question of questions.filter((q) => q.kind === 'fill-blank')) {
+        for (const answer of question.correctAnswers!) {
+          const spaced = '\t ' + answer.replaceAll(' ', '\t  ') + ' ';
+          expect((await grade({ [question.id]: answer })).objectiveScore).toBe(4);
+          expect((await grade({ [question.id]: spaced })).objectiveScore).toBe(4);
+        }
+      }
+      const [git, verb, branch] = acceptedCommands[0].split(' ');
+      for (const answer of [
+        [git.toUpperCase(), verb, branch].join(' '),
+        [git, verb.toUpperCase(), branch].join(' '),
+        [git, verb, branch.toUpperCase()].join(' '),
+        [git, verb, branch].join('\n'),
+        [git, verb, branch].join('\u00a0'),
+        ['ｇｉｔ', verb, branch].join(' '),
+        acceptedCommands[0] + '\n',
+      ]) {
+        expect((await grade({ [branchQuestion.id]: answer })).objectiveScore).toBe(0);
+      }
+      expect(
+        (
+          await grade({
+            [questions[3].id]: questions[3].correctAnswers![0],
+            [questions[14].id]: 'git checkout other',
+          })
+        ).objectiveScore,
+      ).toBe(0);
+      await h.rpc(TEACHER, 'grade_assessment', {
+        p_attempt: attempt.id,
+        p_grades: [],
+        p_feedback: '',
+        p_release: true,
+      });
+      const released = await h.asUser(
+        STUDENT,
+        'select theory_score from public.released_results where attempt_id=$1',
+        [attempt.id],
+      );
+      expect(Number(released.rows[0]?.theory_score)).toBe(18);
+    } finally {
+      await student.close();
+    }
+  });
 });

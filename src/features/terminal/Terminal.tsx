@@ -1,23 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ChevronRight, Maximize2, Minimize2, Trash2 } from 'lucide-react';
+import { TerminalSquare } from 'lucide-react';
 import type { Lab } from '../../hooks/useLab';
-import { tokenize } from './parser';
-function commandKind(input: string) {
-  try {
-    const [cmd, sub, ...args] = tokenize(input);
-    if (
-      ['ls', 'pwd', 'cat', 'help', 'clear'].includes(cmd) ||
-      (cmd === 'git' &&
-        (['status', 'log', 'show', 'diff', '--version'].includes(sub) ||
-          (sub === 'branch' && !args.length) ||
-          (sub === 'config' && args.filter((x) => x !== '--global').length === 1)))
-    )
-      return 'Read-only';
-    return 'State-changing';
-  } catch {
-    return 'Command';
-  }
-}
 const readableError = (value: string) =>
   value
     .replace(
@@ -49,17 +32,7 @@ const commands = [
   'help',
   'clear',
 ];
-export function Terminal({
-  lab,
-  expanded,
-  onExpand,
-  feedback = '',
-}: {
-  lab: Lab;
-  expanded: boolean;
-  onExpand: () => void;
-  feedback?: string;
-}) {
+export function Terminal({ lab }: { lab: Lab }) {
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -92,37 +65,17 @@ export function Terminal({
   return (
     <section
       className="terminal"
-      id="workspace-terminal"
-      role="tabpanel"
-      aria-labelledby="workspace-tab-terminal"
       dir="ltr"
       style={{ '--visible-viewport-height': visibleHeight + 'px' } as CSSProperties}
     >
-      <div className="panel-heading terminal-tabs">
-        <span>
-          <ChevronRight size={15} /> Git Terminal <i className="live-dot" />
-        </span>
-        <div>
-          <span className="terminal-mode">Practice Git here</span>
-          <button
-            title="Clear terminal"
-            aria-label="Clear terminal"
-            onClick={() => setCleared(lab.engine.events.length)}
-          >
-            <Trash2 size={14} />
-          </button>
-          <button
-            title={expanded ? 'Restore panels' : 'Expand terminal'}
-            aria-label="Toggle terminal focus"
-            onClick={() => {
-              onExpand();
-              field.current?.focus();
-            }}
-          >
-            {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
-        </div>
-      </div>
+      <header className="lab-terminal-header">
+        <h2>
+          <TerminalSquare size={18} aria-hidden="true" /> Git terminal
+        </h2>
+        <button className="text-button" onClick={() => setCleared(lab.engine.events.length)}>
+          Clear terminal
+        </button>
+      </header>
       <div
         className="terminal-body"
         ref={scroll}
@@ -130,20 +83,16 @@ export function Terminal({
           if (!window.getSelection()?.toString()) field.current?.focus();
         }}
       >
-        <div className="terminal-welcome">
-          <strong>IEEE NUB Git Lab</strong> <span>— your local Git sandbox</span>
-          <p>
-            Type <b>help</b> to explore supported commands. Everything stays in your virtual
-            workspace.
+        {!events.length && (
+          <p className="lab-terminal-empty">
+            Type below and press Run. Use <code>help</code> to see supported commands.
           </p>
-        </div>
+        )}
         <div role="log" aria-label="Terminal output" aria-live="polite">
           {events.map((event, i) => (
             <div className="terminal-event" key={i}>
               <div>
-                <small className="command-result">
-                  {event.success ? commandKind(event.command) + ' · Success' : 'Failed'}
-                </small>
+                {!event.success && <small className="command-result">Failed</small>}
                 <span className="prompt-user">student@ieee-nub</span>{' '}
                 <span className="prompt-path">{event.branch}</span>{' '}
                 <span className="prompt-symbol">$</span> {event.command}
@@ -156,11 +105,6 @@ export function Terminal({
             </div>
           ))}
         </div>
-        {feedback && (
-          <div className="terminal-task-feedback" role="status">
-            {feedback}
-          </div>
-        )}
       </div>
       <form
         className="terminal-command-form"
@@ -188,6 +132,7 @@ export function Terminal({
             id="command"
             ref={field}
             aria-label="Terminal command"
+            placeholder="Type a Git command…"
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
@@ -259,7 +204,7 @@ export function Terminal({
           >
             Next command
           </button>
-          {['git ', 'status', ' -m ', '"', '/', '-', '>'].map((symbol) => (
+          {['git ', ' -m ', '"', '/', '-', '>'].map((symbol) => (
             <button
               type="button"
               key={symbol}

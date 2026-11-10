@@ -1,4 +1,5 @@
 import { taskOneDefinition } from '../assessments/taskOne';
+import { importTaskOneTheory } from './taskOneTheoryImport';
 import { requirementCatalog } from '../assessments/requirements';
 import { RecordActions } from './RecordManagement';
 import { AssessmentCourse } from './LearningContent';
@@ -224,6 +225,13 @@ export function AssessmentEditor() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [savedTheoryDraft, setSavedTheoryDraft] = useState<Definition>();
+  const theoryDraftNeedsSave =
+    !creating &&
+    definition.courseSlot === 'task1' &&
+    (definition.questions.some((question) => !question.manual) ||
+      savedTheoryDraft?.questions.some((question) => !question.manual)) &&
+    savedTheoryDraft !== definition;
   const [bank, setBank] = useState<Array<{ id: string; document: AssessmentQuestion }>>([]);
   const [bankSearch, setBankSearch] = useState('');
   const navigate = useNavigate();
@@ -238,7 +246,10 @@ export function AssessmentEditor() {
         .then(({ data, error }) => {
           if (!live) return;
           if (error) setError(error.message);
-          else setDefinition(data.document);
+          else {
+            setDefinition(data.document);
+            setSavedTheoryDraft(data.document);
+          }
           setLoading(false);
         });
     return () => {
@@ -292,6 +303,10 @@ export function AssessmentEditor() {
       ),
     });
   const save = async (publish: boolean) => {
+    if (publish && theoryDraftNeedsSave) {
+      setError('Save the theory draft before publishing.');
+      return;
+    }
     if (
       publish &&
       !window.confirm('Publish a new immutable version and make it available to students?')
@@ -302,6 +317,11 @@ export function AssessmentEditor() {
     setNotice('');
     try {
       assertDefinition(definition, !publish);
+      if (
+        publish &&
+        definition.questions.some((q) => q.kind === 'boolean' && q.options.length !== 2)
+      )
+        throw new Error('True/False questions need exactly two options.');
       if (definition.starter.snapshot)
         await inspectVerifiedSnapshot(definition.starter.snapshot, definition.projectName);
       const { data, error } = await requireBackend().rpc('save_assessment', {
@@ -310,6 +330,7 @@ export function AssessmentEditor() {
         p_publish: publish,
       });
       if (error) throw error;
+      if (!publish) setSavedTheoryDraft(definition);
       setNotice(
         publish
           ? 'Published a new immutable version. Active attempts keep their previous version.'
@@ -357,7 +378,11 @@ export function AssessmentEditor() {
             <Save size={15} />
             Save draft
           </button>
-          <button className="primary" disabled={busy} onClick={() => void save(true)}>
+          <button
+            className="primary"
+            disabled={busy || theoryDraftNeedsSave}
+            onClick={() => void save(true)}
+          >
             Publish new version
           </button>
         </div>
@@ -806,7 +831,7 @@ export function AssessmentEditor() {
                       />
                       Optional bonus task
                     </label>
-                    {(
+                    {
                       <div className="requirement-weights">
                         <h5>Requirement points (must total {task.points})</h5>
                         {task.points === 0 && (
@@ -845,10 +870,11 @@ export function AssessmentEditor() {
                           / {task.points}. Set explicit weights; no automatic division.
                         </p>
                       </div>
-                    )}
+                    }
                     <h5>What earns the points</h5>
                     <p className="muted">
-                      Each scored check independently earns its configured points. Preparation checks are unscored.
+                      Each scored check independently earns its configured points. Preparation
+                      checks are unscored.
                     </p>
                     {task.rules.map((rule, ri) => (
                       <RuleEditor
@@ -926,6 +952,44 @@ export function AssessmentEditor() {
               Add question
             </button>
           </div>
+          {!creating && definition.courseSlot === 'task1' && (
+            <label>
+              Import Task 1 theory draft
+              <input
+                type="file"
+                accept=".json,application/json"
+                disabled={busy}
+                onChange={async (event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (!file) return;
+                  try {
+                    if (file.size > 128_000) throw new Error('The theory draft file is too large.');
+                    const draft = importTaskOneTheory(await file.text(), definition);
+                    if (
+                      !window.confirm(
+                        'Replace the questions in this draft with the 15 imported questions?',
+                      )
+                    )
+                      return;
+                    setDefinition((current) =>
+                      current.courseSlot === 'task1'
+                        ? { ...current, questions: draft.questions }
+                        : current,
+                    );
+                    setError('');
+                    setNotice(
+                      'Theory imported into the editor. Review the questions and save the draft before publishing.',
+                    );
+                  } catch {
+                    setError(
+                      'Could not import the Task 1 theory draft. Check the JSON file, types, points, and private answer keys.',
+                    );
+                  }
+                }}
+              />
+            </label>
+          )}
           <label>
             Search the question bank
             <input
@@ -1110,9 +1174,7 @@ function RuleEditor({
           }[r.type]
         }
       </p>
-      <small>
-        Each check earns its configured points independently.
-      </small>
+      <small>Each check earns its configured points independently.</small>
       {(r.type === 'repository' || r.type === 'branch') && (
         <label>
           Required branch
@@ -1280,7 +1342,9 @@ export function QuestionEditor({
                   'choice-complete',
                   'fill-blank',
                 ].includes(kind),
-                options: kind === 'boolean' ? ['True', 'False'] : q.options,
+                options:
+                  kind === 'boolean' ? ['True', 'False'] : kind === 'fill-blank' ? [] : q.options,
+                answerMatching: kind === 'fill-blank' ? q.answerMatching : undefined,
                 correctAnswers: [],
               });
             }}

@@ -19,7 +19,7 @@ for (const [label, width] of [
       .getByRole('combobox', { name: 'Task', exact: true })
       .selectOption('t1-goals-content');
     await expect(
-      page.getByRole('heading', { name: 'Write the original goals', exact: true }),
+      page.getByRole('heading', { name: '8. Write the original goals', exact: true }),
     ).toBeVisible();
     await page.screenshot({ path: 'test-results/task1-' + label + '.png', fullPage: true });
     await page.getByRole('button', { name: 'Theory', exact: true }).click();

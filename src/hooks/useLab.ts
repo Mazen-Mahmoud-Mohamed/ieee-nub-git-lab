@@ -253,6 +253,22 @@ export function useLab(
       await r.engine.write(p, '');
     });
   };
+  const renameTextFile = async (name: string, next: string) => {
+    if (!validFile(name) || !validFile(next))
+      throw Error('Use a text filename inside this project, such as about.txt.');
+    if (name === next) return;
+    await operate(async ({ engine }) => {
+      const from = engine.dir + '/' + name;
+      const to = engine.dir + '/' + next;
+      if (engine.fs.entries[from]?.kind !== 'file') throw Error('This file no longer exists.');
+      if (engine.fs.entries[to]) throw Error('A file with that name already exists.');
+      await engine.fs.promises.rename(from, to);
+    });
+  };
+  const deleteTextFile = async (name: string) => {
+    if (!validFile(name)) throw Error('Choose a text file in this project.');
+    await operate(({ engine }) => engine.fs.promises.unlink(engine.dir + '/' + name));
+  };
   const refresh = async () => {
     await operate(async () => {}, true);
   };
@@ -400,6 +416,8 @@ export function useLab(
     command,
     write,
     createTextFile,
+    renameTextFile,
+    deleteTextFile,
     refresh,
     snapshot: () => saved(context()),
     capture,

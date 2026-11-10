@@ -12,6 +12,7 @@ test('built phone app defers desktop editor and instructor chunks while real Git
   await page.goto('./#/workspace');
   await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
   async function command(cmd: string) {
+    await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
     await page.getByLabel('Terminal command').fill(cmd);
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await expect(page.getByLabel('Terminal command')).toBeEnabled();
@@ -26,7 +27,7 @@ test('built phone app defers desktop editor and instructor chunks while real Git
   ])
     await command(cmd);
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
-  await page.getByRole('button', { name: /^about.txt/ }).click();
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Built app mobile editing');
   await expect(page.getByText('File saved locally', { exact: true })).toBeVisible();
   expect(loaded.some((url) => /\/assets\/(editor-|DesktopTextEditor-|Instructor-)/.test(url))).toBe(

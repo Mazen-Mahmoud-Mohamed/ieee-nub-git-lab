@@ -6,7 +6,10 @@ export default defineConfig({
   outputDir: 'test-results/fixtures',
   fullyParallel: false,
   timeout: 45000,
-  use: { baseURL: 'http://127.0.0.1:5174/ieee-git-lab/', trace: 'retain-on-failure' },
+  use: {
+    baseURL: 'http://127.0.0.1:5174/ieee-git-lab/',
+    trace: process.env.TASK1_THEORY_DRAFT ? 'off' : 'retain-on-failure',
+  },
   webServer: {
     command: 'npm run dev -- --port 5174',
     url: 'http://127.0.0.1:5174/ieee-git-lab/',

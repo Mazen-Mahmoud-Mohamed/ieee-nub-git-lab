@@ -490,9 +490,11 @@ test('student sees published assignments/exams and each workspace stays isolated
   await expect(page.getByRole('heading', { name: 'Assignments', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Exams', exact: true })).toBeVisible();
   await api.start(A);
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await expect(page.getByRole('button', { name: 'a.txt', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'b.txt', exact: true })).toHaveCount(0);
   await api.start(B);
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await expect(page.getByRole('button', { name: 'b.txt', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'a.txt', exact: true })).toHaveCount(0);
   expect(api.uploads()).toBe(0);
@@ -1010,6 +1012,7 @@ test('assessed restart changes attempt keys, clears answers and keeps previous w
   await page.getByRole('link', { name: 'Questions', exact: true }).click();
   await page.getByLabel('Your response').fill('Previous attempt explanation');
   await page.getByRole('link', { name: 'Workspace', exact: true }).click();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Accepted old work');
   await expect(page.getByRole('button', { name: 'Save now', exact: true })).toBeVisible();
@@ -1026,6 +1029,7 @@ test('assessed restart changes attempt keys, clears answers and keeps previous w
   await expect(
     page.getByRole('button', { name: 'Enable server autosave for this attempt' }),
   ).toBeVisible();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
     'Only Assignment A',
@@ -1035,8 +1039,10 @@ test('assessed restart changes attempt keys, clears answers and keeps previous w
   await page.reload();
   await expect(page.getByLabel('Your response')).toHaveValue('');
   await page.goto(`/ieee-git-lab/#/assessments/${A}/attempts/${old}/workspace`);
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click();
   await expect(page.getByLabel('Terminal command')).toBeDisabled();
-  await page.getByRole('button', { name: 'a.txt M', exact: true }).click();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Text file editor' })).toContainText(
     'Old attempt local edit',
   );
@@ -1052,6 +1058,7 @@ test('limits show a real help request instead of a restart that will be denied',
   const api = await fixture(page, false, 120, { restartDenied: true });
   await api.login();
   await api.start(A);
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: 'a.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Keep this work');
   await page.getByText('Help with this attempt', { exact: true }).click();
@@ -1108,6 +1115,7 @@ for (const approve of [true, false]) {
     await api.start(A);
     const old = Object.values(api.attempts)[0].id;
     const workspace = page.url();
+    await page.getByRole('tab', { name: 'Files', exact: true }).click();
     await page.getByRole('button', { name: 'a.txt', exact: true }).click();
     await page.getByRole('textbox', { name: 'Text file editor' }).fill('Preserve my work');
     await page.getByRole('button', { name: 'Save now', exact: true }).click();
@@ -1206,17 +1214,18 @@ test('instructor builds a task with plain forms, verifies real Git in preview an
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('button', { name: 'Preview as student', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'إنشاء greeting.txt', exact: true }),
+    page.getByRole('heading', { name: '1. إنشاء greeting.txt', exact: true }),
   ).toHaveAttribute('dir', 'auto');
-  await expect(page.locator('.required-text pre')).toHaveText('Hello Git');
+  await expect(page.locator('.lab-command-hint pre')).toHaveText('Hello Git');
   for (const cmd of ['mkdir Git-Exercise', 'cd Git-Exercise', 'git init', 'touch greeting.txt']) {
     await page.getByLabel('Terminal command').fill(cmd);
     await page.getByLabel('Terminal command').press('Enter');
     await expect(page.getByLabel('Terminal command')).toBeEnabled();
   }
-  await page.getByRole('button', { name: 'greeting.txt U', exact: true }).click();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'greeting.txt', exact: true }).click();
   await page.getByRole('textbox', { name: 'Text file editor' }).fill('Hello Git');
-  await expect(page.locator('.task-status')).toHaveText('Complete');
+  await expect(page.locator('.lab-task-result .lab-state')).toHaveText('Completed');
   expect(Object.values(api.attempts)).toHaveLength(0);
   await page.screenshot({ path: 'test-results/redesigned-instructor-preview.png', fullPage: true });
   await page.getByRole('button', { name: 'Back to editor', exact: true }).click();

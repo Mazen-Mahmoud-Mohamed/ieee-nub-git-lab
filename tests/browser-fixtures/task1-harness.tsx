@@ -8,6 +8,7 @@ import { Assessment } from '../../src/features/questions/Assessment';
 import { CourseGrades } from '../../src/features/assessments/CourseGrades';
 import '../../src/styles/global.css';
 import '../../src/styles/product.css';
+import '../../src/styles/student.css';
 const d = taskOneDefinition();
 if (new URLSearchParams(location.search).has('objective')) {
   d.questions = (['single', 'boolean', 'choice-complete', 'fill-blank'] as const).map(

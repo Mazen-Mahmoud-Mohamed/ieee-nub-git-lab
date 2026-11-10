@@ -34,7 +34,7 @@ import { CourseDashboard, AssessmentDetails } from '../features/assessments/Cour
 import { SessionBar } from '../features/assessments/SessionBar';
 import { AssessmentResult } from '../features/assessments/AssessmentResult';
 import { Assessment } from '../features/questions/Assessment';
-import { Review, Confirmation } from '../features/submissions/Review';
+import { Review } from '../features/submissions/Review';
 const Instructor = lazy(() =>
   import('../features/instructor/Instructor').then((m) => ({ default: m.Instructor })),
 );
@@ -325,11 +325,7 @@ export function App() {
             <Route
               path="/theory"
               element={
-                <Assessment
-                  lab={lab}
-                  definition={course.definition}
-                  basePath={course.basePath}
-                />
+                <Assessment lab={lab} definition={course.definition} basePath={course.basePath} />
               }
             />
             <Route
@@ -345,7 +341,6 @@ export function App() {
                 />
               }
             />
-            <Route path="/confirmation" element={<Confirmation lab={lab} />} />
             <Route
               path="/assessments/:assessmentId"
               element={

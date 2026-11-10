@@ -52,6 +52,7 @@ export type AssessmentQuestion = {
   manual: boolean;
   required: boolean;
   correctAnswers?: string[];
+  answerMatching?: 'git-command';
   explanation?: string;
 };
 export type Definition = {
@@ -350,6 +351,8 @@ export function assertDefinition(value: unknown, draft = false): asserts value i
       q.points > 1000 ||
       typeof q.manual !== 'boolean' ||
       typeof q.required !== 'boolean' ||
+      (q.answerMatching !== undefined &&
+        (q.kind !== 'fill-blank' || q.answerMatching !== 'git-command')) ||
       !Array.isArray(q.options) ||
       q.options.length > 20 ||
       q.options.some((o) => !bounded(o, 500)) ||
@@ -370,6 +373,7 @@ export function assertDefinition(value: unknown, draft = false): asserts value i
             typeof a !== 'string' ||
             !a.trim() ||
             a.length > 500 ||
+            (q.answerMatching === 'git-command' && !normalizeGitCommandAnswer(a)) ||
             (q.kind !== 'fill-blank' && !q.options.includes(a)),
         ))
     )
@@ -466,6 +470,12 @@ export function answerPresent(q: AssessmentQuestion, value = '') {
 }
 export const normalizeAnswer = (s: string) =>
   s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+
+export function normalizeGitCommandAnswer(answer: string) {
+  const command = answer.replace(/^[ \t]+|[ \t]+$/g, '').replace(/[ \t]+/g, ' ');
+  // Match a single command with bare tokens. Newlines and Unicode lookalikes are significant.
+  return /^git(?: [A-Za-z0-9_./-]+)+(?![\s\S])/.test(command) ? command : '';
+}
 export function gradeObjective(
   d: Definition,
   answers: Record<string, string>,
@@ -480,14 +490,17 @@ export function gradeObjective(
     .map((q) => {
       const expected = keys[q.id]?.correctAnswers;
       if (!expected?.length) throw new Error('Missing private objective answer key');
-      const actual = [...new Set((answers[q.id] || '').split('\n').filter(Boolean))].sort();
+      const answer = answers[q.id] || '';
+      const normalize =
+        q.answerMatching === 'git-command' ? normalizeGitCommandAnswer : normalizeAnswer;
+      const typed = q.kind === 'fill-blank' ? normalize(answer) : '';
+      const choices = [...new Set(answer.split('\n').filter(Boolean))].sort();
       return {
         question_id: q.id,
         points: (
           q.kind === 'fill-blank'
-            ? !!normalizeAnswer(answers[q.id] || '') &&
-              expected.some((a) => normalizeAnswer(a) === normalizeAnswer(answers[q.id] || ''))
-            : JSON.stringify(actual) === JSON.stringify([...expected].sort())
+            ? !!typed && expected.some((a) => normalize(a) === typed)
+            : JSON.stringify(choices) === JSON.stringify([...expected].sort())
         )
           ? q.points
           : 0,

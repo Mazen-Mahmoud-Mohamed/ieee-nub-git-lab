@@ -1,32 +1,10 @@
-import type { Definition, Task } from './model';
-import type { TaskProgress } from './requirements';
-export type TaskGuide = {
-  title: string;
-  before: string;
-  steps: string[];
-  result: string;
-  message?: string;
-  warning?: string;
-};
-export function taskGuide(task: Task): TaskGuide {
-  return {
-    title: task.title,
-    before: 'Follow the published task instructions.',
-    steps: task.instructions.split('\n').filter(Boolean),
-    result: 'All required checks below are complete.',
-  };
-}
-
-export function taskFeedback(state: TaskProgress) {
-  if (state.passed) return 'Task complete. You can move on.';
-  return state.requirements.find((check) => check.status !== 'completed' && !check.preparation)?.hint || state.next;
-}
+import type { Definition } from './model';
 
 export const courseLessons = [
   {
     id: 'files',
     title: 'Files and the editor',
-    text: 'Create a text file, select its name above the editor, and type your text. Your work saves on this device. Creating a file does not save it in Git.',
+    text: 'Create a text file in Files, then open it in Code Editor. Your work saves on this device. Commit the file to record it in Git.',
     command: 'touch notes.txt',
   },
   {

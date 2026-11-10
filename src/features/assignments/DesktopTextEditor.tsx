@@ -5,13 +5,11 @@ export default function DesktopTextEditor({
   onChange,
   readOnly,
   dark,
-  focus,
 }: {
   value: string;
   onChange: (v: string) => void;
   readOnly: boolean;
   dark: boolean;
-  focus: boolean;
 }) {
   return (
     <CodeMirror
@@ -24,7 +22,6 @@ export default function DesktopTextEditor({
       basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
       onCreateEditor={(view) => {
         view.contentDOM.setAttribute('aria-label', 'Text file editor');
-        if (focus) view.focus();
       }}
     />
   );

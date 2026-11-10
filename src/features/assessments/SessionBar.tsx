@@ -29,12 +29,15 @@ export function SessionBar({
   const warning = timed && seconds <= 300 && !session.finalized;
   return (
     <section
-      className={'session-bar ' + (timed ? 'timed ' : 'untimed ') + (warning ? 'time-warning' : '')}
+      className={
+        'session-bar lab-session-bar ' +
+        (timed ? 'timed ' : 'untimed ') +
+        (warning ? 'time-warning' : '')
+      }
       aria-label="Assessment session"
     >
-      <div>
-        <strong>{state.definition.type === 'exam' ? 'Exam' : 'Assignment'}</strong>
-        {timed ? (
+      <div className="lab-session-line">
+        {timed && (
           <span role="timer" aria-label="Time remaining">
             {session.finalized
               ? 'Finalized'
@@ -44,21 +47,17 @@ export function SessionBar({
                   ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} remaining`
                   : ''}
           </span>
-        ) : (
-          <span className="untimed-label">
-            {session.finalized ? 'Finalized' : 'Untimed assignment'}
-          </span>
         )}
         <small role="status">{session.sync}</small>
+        {session.consent &&
+          !session.finalized &&
+          state.status === 'in_progress' &&
+          session.remaining > 0 && (
+            <button className="text-button" onClick={() => void session.save().catch(() => {})}>
+              Save now
+            </button>
+          )}
       </div>
-      {session.consent &&
-        !session.finalized &&
-        state.status === 'in_progress' &&
-        session.remaining > 0 && (
-          <button className="text-button" onClick={() => void session.save().catch(() => {})}>
-            Save now
-          </button>
-        )}
       {session.finalized && (
         <p role="status">
           This attempt is read only.{' '}

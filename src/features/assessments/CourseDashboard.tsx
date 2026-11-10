@@ -1,12 +1,11 @@
 import { CourseGrades } from './CourseGrades';
 import { taskOneDefinition } from './taskOne';
-import { taskGuide, assessmentSummary } from './presentation';
+import { assessmentSummary } from './presentation';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Clock, GitBranch } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronDown, Clock, GitBranch, GraduationCap } from 'lucide-react';
 import { supabase, type Profile } from '../../services/supabase';
 import { sumPoints, totals, type Definition, type AssessmentRecord } from './model';
-import { facultyLabel } from '../auth/faculty';
 import { TASK_ONE_ID } from '../assignments/assignment';
 type Card = AssessmentRecord & { definition: Definition };
 type Attempt = {
@@ -86,187 +85,227 @@ export function CourseDashboard({ profile }: { profile: Profile | null }) {
   useEffect(() => {
     void load();
   }, [profile?.id]);
+  const available = cards.filter((card) => card.type === 'assignment');
+  const exams = cards.filter((card) => card.type === 'exam');
+  const submitted = cards.filter((card) =>
+    attempts.some(
+      (attempt) =>
+        attempt.assignment_id === card.id &&
+        ['submitted', 'graded', 'pending_review', 'expired'].includes(attempt.status),
+    ),
+  ).length;
+  const upcoming = [
+    { slot: 'task2', label: 'Task 2' },
+    { slot: 'final', label: 'Final Exam' },
+  ].filter(({ slot }) => !cards.some((card) => card.definition.courseSlot === slot));
+
+  function renderCard(a: Card) {
+    const d = a.definition;
+    const history = attempts.filter((attempt) => attempt.assignment_id === a.id);
+    const [attempt, ...earlier] = history;
+    const points = totals(d);
+    const originalPoints = attempt?.definition ? totals(attempt.definition) : null;
+    const now = Date.now();
+    const closed = [d.endsAt, d.deadline].some((date) => date && Date.parse(date) <= now);
+    const scheduled = !!d.startsAt && Date.parse(d.startsAt) > now;
+    const active = attempt?.status === 'in_progress';
+    const status = attempt?.released
+      ? 'Grade released'
+      : attempt?.status === 'pending_review'
+        ? 'Awaiting review'
+        : active
+          ? 'In progress'
+          : attempt
+            ? attempt.status.replaceAll('_', ' ')
+            : closed
+              ? 'Closed'
+              : scheduled
+                ? 'Scheduled'
+                : 'Not started';
+    const path = '/assessments/' + a.id;
+    const destination = attempt
+      ? path +
+        '/attempts/' +
+        attempt.id +
+        '/' +
+        (active
+          ? (attempt.definition ?? d).format === 'theory'
+            ? 'theory'
+            : 'workspace'
+          : attempt.status === 'restarted'
+            ? 'workspace'
+            : 'result')
+      : path;
+    const action = active
+      ? d.type === 'exam'
+        ? 'Continue Exam'
+        : 'Continue assignment'
+      : attempt
+        ? d.type === 'exam'
+          ? 'View Result'
+          : 'View submission'
+        : closed || scheduled
+          ? 'View details'
+          : d.type === 'exam'
+            ? 'Start Exam'
+            : 'Start assignment';
+    return (
+      <article className="lab-assignment-card" key={a.id}>
+        <span className="lab-assignment-icon" aria-hidden="true">
+          {a.type === 'exam' ? <Clock /> : <GitBranch />}
+        </span>
+        <div className="lab-assignment-content">
+          <div className="lab-assignment-status">
+            <span className="lab-kicker">{a.type}</span>
+            <span className={attempt?.released ? 'lab-state lab-state-done' : 'lab-state'}>
+              {status}
+            </span>
+          </div>
+          <h3 dir="auto">{d.title}</h3>
+          <p>
+            {assessmentSummary(d)} · {sumPoints([points.practical, points.theory])} points
+            {points.bonus ? ' + ' + points.bonus + ' bonus' : ''}
+          </p>
+          {d.type === 'exam' && (
+            <small>
+              {d.durationMinutes} min · {d.attemptLimit} attempt{d.attemptLimit === 1 ? '' : 's'}
+            </small>
+          )}
+          {scheduled && <small>Opens {new Date(d.startsAt!).toLocaleString()}</small>}
+          {(d.endsAt || d.deadline) && (
+            <small>Deadline {new Date(d.endsAt || d.deadline!).toLocaleString()}</small>
+          )}
+          {attempt?.released && (
+            <p className="result-summary">
+              Score:{' '}
+              {sumPoints([Number(attempt.practical_score) || 0, Number(attempt.theory_score) || 0])}{' '}
+              /{' '}
+              {originalPoints ? sumPoints([originalPoints.practical, originalPoints.theory]) : '—'}
+              {originalPoints?.bonus ? ' + bonus' : ''} · Version {attempt.assignment_version}
+              {attempt.feedback && (
+                <span className="lab-grade-feedback" dir="auto">
+                  {attempt.feedback}
+                </span>
+              )}
+            </p>
+          )}
+          {earlier.length > 0 && (
+            <details className="lab-previous-attempts">
+              <summary>Previous attempts</summary>
+              <ul>
+                {earlier.map((old) => (
+                  <li key={old.id}>
+                    <Link
+                      to={
+                        path +
+                        '/attempts/' +
+                        old.id +
+                        '/' +
+                        (old.status === 'restarted' ? 'workspace' : 'result')
+                      }
+                    >
+                      {old.status === 'restarted'
+                        ? 'Previous work (restarted)'
+                        : old.status.replaceAll('_', ' ')}{' '}
+                      · {old.id.slice(0, 8)}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+        <div className="lab-assignment-actions">
+          <Link className="primary" to={destination}>
+            {action}
+            <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+          {attempt && (
+            <Link className="text-button" to={path}>
+              Details
+            </Link>
+          )}
+        </div>
+      </article>
+    );
+  }
+
   return (
-    <div className="page dashboard">
-      <CourseGrades />
-      <div className="page-heading">
+    <div className="page lab-dashboard">
+      <header className="lab-dashboard-intro">
         <div>
-          <span className="eyebrow">IEEE NUB · GIT COURSE</span>
+          <span className="lab-kicker">IEEE NUB · Git course</span>
           <h1>
-            {profile
-              ? `Welcome back, ${profile.full_name.split(' ')[0]}.`
-              : 'Your Git assignments, in one place.'}
+            {profile ? 'Welcome back, ' + profile.full_name.split(' ')[0] + '.' : 'My learning'}
           </h1>
           <p>
             {profile
-              ? `${facultyLabel(profile.faculty)} · Choose an assignment or exam below.`
-              : 'Explore Assignment 01 locally. Sign in to access your published assignments and exams.'}
+              ? 'Pick up your Git work below.'
+              : 'Try the Git workspace locally or sign in to start an assessed attempt.'}
           </p>
         </div>
-      </div>
-      <div className="learning-path">
-        <Link to="/learn">1. Learn the basics</Link>
-        <span>2. Open an assignment</span>
-        <span>3. Complete tasks and submit</span>
-      </div>
+        <Link className="outline-button" to="/learn">
+          <BookOpen size={16} aria-hidden="true" /> Practice guide
+        </Link>
+      </header>
+      {!loading && !error && (
+        <section className="lab-course-progress" aria-label="Course progress">
+          <div>
+            <span className="lab-kicker">Course progress</span>
+            <strong>
+              {submitted} / {cards.length} published assessments submitted
+            </strong>
+          </div>
+          {cards.length > 0 && (
+            <progress
+              value={submitted}
+              max={cards.length}
+              aria-label="Published assessments submitted"
+            />
+          )}
+        </section>
+      )}
       {error && (
         <div className="error" role="alert">
-          {error}
-          <button onClick={() => void load()}>Retry</button>
+          {error} <button onClick={() => void load()}>Retry</button>
         </div>
       )}
       {loading ? (
-        <p>Loading assessments…</p>
+        <p role="status">Loading assessments…</p>
       ) : (
-        (['assignment', 'exam'] as const).map((type) => (
-          <section className="course-section" key={type}>
-            <h2>{type === 'exam' ? 'Exams' : 'Assignments'}</h2>
-            <div className="course-grid">
-              {cards
-                .filter((a) => a.type === type)
-                .map((a) => {
-                  const d = a.definition;
-                  const attempt = attempts.find((t) => t.assignment_id === a.id);
-                  const now = Date.now();
-                  const closed = !!(
-                    (d.endsAt && Date.parse(d.endsAt) <= now) ||
-                    (d.deadline && Date.parse(d.deadline) <= now)
-                  );
-                  const future = !!d.startsAt && Date.parse(d.startsAt) > now;
-                  const status =
-                    attempt?.status === 'pending_review'
-                      ? 'Submitted · pending review'
-                      : attempt
-                        ? attempt.status.replaceAll('_', ' ')
-                        : closed
-                          ? 'Closed'
-                          : future
-                            ? 'Scheduled'
-                            : 'Not started';
-                  const points = totals(d);
-                  const attemptPoints = attempt?.definition ? totals(attempt.definition) : null;
-                  return (
-                    <article className="form-card assessment-card" key={a.id}>
-                      <div className="assignment-label">
-                        {type.toUpperCase()}
-                        <span>{status}</span>
-                      </div>
-                      <h3>{d.title}</h3>
-                      <p>{d.description}</p>
-                      <small>{assessmentSummary(d)}</small>
-                      <div className="assessment-meta">
-                        <span>
-                          <GitBranch size={13} />
-                          {
-                            {
-                              practical: 'Git practice',
-                              theory: 'Questions',
-                              mixed: 'Git practice + questions',
-                            }[d.format]
-                          }
-                        </span>
-                        <span>
-                          {sumPoints([points.practical, points.theory])} points
-                          {points.bonus ? ' + ' + points.bonus + ' bonus' : ''}
-                        </span>
-                        {type === 'exam' && (
-                          <span>
-                            <Clock size={13} />
-                            {d.durationMinutes} minutes · {d.attemptLimit} attempt
-                            {d.attemptLimit > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                      {d.startsAt && <small>Opens: {new Date(d.startsAt).toLocaleString()}</small>}
-                      {(d.endsAt || d.deadline) && (
-                        <small>
-                          {type === 'exam' ? 'Available until' : 'Deadline'}:{' '}
-                          {new Date(d.endsAt || d.deadline!).toLocaleString()}
-                        </small>
-                      )}
-                      {!d.endsAt && !d.deadline && <small>No deadline</small>}
-                      {attempt?.released && (
-                        <p className="result-summary">
-                          Score:{' '}
-                          {sumPoints([
-                            Number(attempt.practical_score) || 0,
-                            Number(attempt.theory_score) || 0,
-                          ])}{' '}
-                          /{' '}
-                          {attemptPoints
-                            ? sumPoints([attemptPoints.practical, attemptPoints.theory])
-                            : '—'}
-                          {attemptPoints?.bonus ? ' + bonus' : ''} · Version{' '}
-                          {attempt.assignment_version}
-                          <br />
-                          {attempt.feedback}
-                        </p>
-                      )}
-                      {attempts.filter((t) => t.assignment_id === a.id).length > 1 && (
-                        <details>
-                          <summary>Previous attempts</summary>
-                          <ul>
-                            {attempts
-                              .filter((t) => t.assignment_id === a.id && t.id !== attempt?.id)
-                              .map((t) => (
-                                <li key={t.id}>
-                                  <Link
-                                    to={`/assessments/${a.id}/attempts/${t.id}/${t.status === 'restarted' ? 'workspace' : 'result'}`}
-                                  >
-                                    {t.status === 'restarted'
-                                      ? 'Previous work (restarted)'
-                                      : t.status.replaceAll('_', ' ')}{' '}
-                                    · {t.id.slice(0, 8)}
-                                  </Link>
-                                </li>
-                              ))}
-                          </ul>
-                        </details>
-                      )}
-                      <div className="assessment-card-actions">
-                        <Link to={`/assessments/${a.id}`} className="text-button">
-                          Details
-                          <ArrowRight size={14} />
-                        </Link>
-                        {attempt ? (
-                          <Link
-                            className="primary"
-                            to={`/assessments/${a.id}/attempts/${attempt.id}/${attempt.status === 'in_progress' ? (d.format === 'theory' ? 'theory' : 'workspace') : 'result'}`}
-                          >
-                            {attempt.status === 'in_progress'
-                              ? type === 'exam'
-                                ? 'Continue Exam'
-                                : 'Continue assignment'
-                              : type === 'exam'
-                                ? 'View Result'
-                                : 'View submission'}
-                          </Link>
-                        ) : (
-                          <Link className="primary" to={`/assessments/${a.id}`}>
-                            {closed || future
-                              ? 'View details'
-                              : type === 'exam'
-                                ? 'Start Exam'
-                                : 'Start assignment'}
-                            <ArrowRight size={14} />
-                          </Link>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-            </div>
-            {!cards.some((a) => a.type === type) && (
-              <p className="empty-state">
-                No published {type === 'exam' ? 'exams' : 'assignments'} available.
-              </p>
-            )}
+        <>
+          <section className="lab-course-section" aria-labelledby="lab-assignment-heading">
+            <h2 id="lab-assignment-heading">Assignments</h2>
+            {available.length ? available.map(renderCard) : <p>No published assignments yet.</p>}
           </section>
-        ))
+          {exams.length > 0 && (
+            <section className="lab-course-section" aria-labelledby="lab-exam-heading">
+              <h2 id="lab-exam-heading">Exams</h2>
+              {exams.map(renderCard)}
+            </section>
+          )}
+          {upcoming.length > 0 && (
+            <section className="lab-upcoming" aria-label="Coming soon">
+              <strong>Coming soon</strong>
+              {upcoming.map(({ slot, label }) => (
+                <span key={slot}>{label}</span>
+              ))}
+            </section>
+          )}
+        </>
       )}
-      {!profile && (
-        <Link className="practice-link" to="/auth">
-          Sign in or create an account →
+      {profile ? (
+        <details className="lab-grades">
+          <summary>
+            <GraduationCap size={20} aria-hidden="true" />
+            <span>Grades and certificate progress</span>
+            <ChevronDown size={17} aria-hidden="true" />
+          </summary>
+          <CourseGrades unconfigured={upcoming.map(({ slot }) => slot)} />
+        </details>
+      ) : (
+        <Link className="text-button" to="/auth">
+          Sign in or create an account <ArrowRight size={15} />
         </Link>
       )}
     </div>
@@ -286,18 +325,19 @@ export function AssessmentDetails({
   const [error, setError] = useState('');
   const points = totals(d);
   return (
-    <div className="page overview">
+    <div className="page lab-start">
       <Link className="breadcrumb" to="/dashboard">
         My learning → {d.type === 'exam' ? 'Exam' : 'Assignment'}
       </Link>
-      <span className="eyebrow">
+      <span className="lab-kicker">
         {d.type.toUpperCase()} · {d.format.toUpperCase()}
       </span>
       <h1>{d.title}</h1>
       <p className="lead">{d.description}</p>
-      <div className="overview-meta">
+      <div className="lab-start-meta">
         <span>
-          {sumPoints([points.practical, points.theory])} points + {points.bonus} bonus
+          {sumPoints([points.practical, points.theory])} points
+          {points.bonus > 0 ? ' + ' + points.bonus + ' bonus' : ''}
         </span>
         <span>
           {d.attemptLimit} allowed attempt{d.attemptLimit > 1 ? 's' : ''}
@@ -308,33 +348,24 @@ export function AssessmentDetails({
           <span>Closes {new Date(d.deadline || d.endsAt!).toLocaleString()}</span>
         )}
       </div>
-      <p>
-        <Link className="text-button" to="/learn">
-          New to Git? Read the short learning guide first.
-        </Link>
-      </p>
-      <div className="overview-grid">
-        <section>
-          <h2>Instructions</h2>
-          <p className="written-answer" dir="auto">
-            {d.instructions}
+      <div className="lab-start-grid">
+        <section className="lab-start-outline">
+          <h2>What you’ll work on</h2>
+          <p>
+            {assessmentSummary(d)}.{' '}
+            {points.practical > 0 && points.theory > 0
+              ? points.practical + ' practical points and ' + points.theory + ' theory points.'
+              : ''}
           </p>
-          <h3>Your tasks</h3>
-          <ol className="overview-task-list">
-            {d.sections
-              .flatMap((s) => s.tasks)
-              .map((t) => (
-                <li key={t.id}>
-                  <strong>{taskGuide(t).title}</strong>
-                  <span>
-                    {t.points} points{t.bonus ? ' · Optional bonus' : ''}
-                  </span>
-                  <p>{taskGuide(t).result}</p>
-                </li>
-              ))}
-          </ol>
+          <p>
+            Open any criterion in the workspace and check your work as you go. You can submit
+            partial work.
+          </p>
           <details className="published-instructions">
             <summary>Full assessment instructions</summary>
+            <p className="written-answer" dir="auto">
+              {d.instructions}
+            </p>
             {d.sections.map((s) => (
               <section key={s.id}>
                 <h3 dir="auto">{s.title}</h3>
@@ -354,13 +385,8 @@ export function AssessmentDetails({
               </section>
             ))}
           </details>
-          <h3>Theory</h3>
-          <p>
-            {d.questions.length} question{d.questions.length === 1 ? '' : 's'} · {points.theory}{' '}
-            points. Written answers are reviewed manually.
-          </p>
         </section>
-        <aside className="form-card sticky-card">
+        <aside className="form-card lab-start-action">
           <h3>{d.type === 'exam' ? 'Before starting your exam' : 'Before you begin'}</h3>
           <p>
             {d.type === 'exam'
@@ -374,8 +400,7 @@ export function AssessmentDetails({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />
-              Save my files, answers and command activity online every 15 seconds. Only saves
-              accepted before the deadline count.
+              Save my files, answers and command activity online every 15 seconds.
             </label>
           )}
           <details>

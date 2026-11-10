@@ -1,7 +1,25 @@
 import { test, expect } from '@playwright/test';
+import { criterionIds } from '../../src/features/assessments/independentCriteria';
 async function view(page: import('@playwright/test').Page, name: string) {
   await page.getByRole('tab', { name, exact: true }).click();
 }
+
+test('phone students can jump to every criterion and move backwards without completing earlier work', async ({
+  page,
+}) => {
+  await page.goto('/#/workspace');
+  await view(page, 'Task');
+  const picker = page.getByRole('combobox', { name: 'Task', exact: true });
+  await expect(picker.locator('option')).toHaveCount(25);
+  for (const id of [...criterionIds].reverse()) {
+    await picker.selectOption('t1-' + id);
+    await expect(picker).toHaveValue('t1-' + id);
+    await expect(page.getByRole('button', { name: 'Check Work', exact: true })).toBeEnabled();
+  }
+  await expect(page.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(picker).toHaveValue('t1-identity-name');
+});
 test('phone Git editing, tab state, command helpers, history and refresh preserve actual work', async ({
   page,
 }) => {
@@ -25,7 +43,7 @@ test('phone Git editing, tab state, command helpers, history and refresh preserv
   ])
     await command(cmd);
   await view(page, 'Files');
-  await page.getByRole('button', { name: /^about.txt/ }).click();
+  await page.getByRole('button', { name: 'about.txt', exact: true }).click();
   const editor = page.getByRole('textbox', { name: 'Text file editor' });
   await editor.fill('Hello mobile\nمرحبا من الهاتف');
   await expect(page.getByText('File saved locally', { exact: true })).toBeVisible();
@@ -33,11 +51,11 @@ test('phone Git editing, tab state, command helpers, history and refresh preserv
   await page.getByLabel('Terminal command').fill('git status');
   await view(page, 'Task');
   await page.getByRole('combobox', { name: 'Task', exact: true }).selectOption('t1-about-focused');
-  await expect(page.locator('.student-next')).toContainText(
+  await expect(page.locator('.lab-checklist')).toContainText(
     'A later focused change also qualifies',
   );
   await expect(page.locator('.task-caution')).toHaveCount(0);
-  await view(page, 'Files');
+  await view(page, 'Code Editor');
   await expect(editor).toHaveValue('Hello mobile\nمرحبا من الهاتف');
   await view(page, 'Terminal');
   await expect(page.getByLabel('Terminal command')).toHaveValue('git status');
@@ -53,7 +71,7 @@ test('phone Git editing, tab state, command helpers, history and refresh preserv
   await expect(page.getByLabel('Terminal command')).toHaveValue('git ');
   await command('git log --oneline');
   await expect(page.getByRole('log')).toContainText('Add personal information');
-  await view(page, 'Files');
+  await view(page, 'Code Editor');
   await page.reload();
   await expect(editor).toHaveValue('Hello mobile\nمرحبا من الهاتف');
   await view(page, 'Task');
@@ -96,7 +114,7 @@ test('all requested phone widths, tablet and landscape avoid horizontal overflow
   }
   await page.goto('/#/workspace');
   await view(page, 'Terminal');
-  for (const name of ['Terminal', 'Files', 'Task']) {
+  for (const name of ['Terminal', 'Files', 'Code Editor', 'Task']) {
     await expect
       .poll(
         async () => (await page.getByRole('tab', { name, exact: true }).boundingBox())?.height ?? 0,

@@ -1,275 +1,231 @@
+import { Check, ChevronLeft, ChevronRight, Circle, CircleCheck, ListChecks } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { taskGuide, taskFeedback } from '../assessments/presentation';
-import { Link } from 'react-router-dom';
-import { type Definition } from '../assessments/model';
 import type { TaskProgress } from '../assessments/requirements';
 import type { StudentIdentity } from './assignment';
+
+const commands: Record<string, string> = {
+  'identity-name': 'git config user.name "Your Name"',
+  'identity-email': 'git config user.email you@example.com',
+  'main-branch': 'git branch -M main',
+  'about-focused': 'git add about.txt',
+  'about-message': 'git commit -m "Add personal information"',
+  'goals-focused': 'git add goals.txt',
+  'notes-focused': 'git add notes.txt',
+  'four-commits': 'git log --oneline',
+  'skills-branch': 'git switch -c feature/skills',
+  'skills-merged': 'git switch main\ngit merge feature/skills',
+  clean: 'git status',
+};
+
+function status(item: TaskProgress) {
+  if (!item.task.points) return 'Unscored';
+  if (item.requirements.some((check) => check.status === 'unverifiable')) return 'Unavailable';
+  if (item.requirements.some((check) => check.status === 'checking')) return 'Checking';
+  if (item.passed) return 'Completed';
+  if (item.earned > 0 || item.requirements.some((check) => check.passed)) return 'Partial';
+  return 'Not started';
+}
+
 export function TaskInstructions({
-  definition: d,
   progress,
   taskId,
-  onTask,
   identity,
+  initializationHint,
   checking,
   error,
-  basePath,
+  checked,
+  onTask,
+  onCheck,
   recovery,
-  onWork = () => {},
-  onRecheck = () => {},
 }: {
-  definition: Definition;
   progress: TaskProgress[];
   taskId: string;
-  onTask: (id: string) => void;
   identity: StudentIdentity;
+  initializationHint: string;
   checking: boolean;
   error: string;
-  basePath: string;
+  checked: string;
+  onTask: (id: string) => void;
+  onCheck: () => Promise<void>;
   recovery?: ReactNode;
-  onWork?: (view: string) => void;
-  onRecheck?: () => void;
 }) {
-  const tasks = d.sections.flatMap((s) => s.tasks.map((task) => ({ task, section: s }))),
-    index = Math.max(
-      0,
-      tasks.findIndex((t) => t.task.id === taskId),
-    ),
-    current = tasks[index],
-    state = progress.find((p) => p.task.id === current?.task.id),
-    done = state?.requirements.filter((c) => c.status === 'completed').length || 0,
-    independent = current?.task.rules.some((r) => r.type === 'criterion'),
-    guide = current ? taskGuide(current.task) : null,
-    feedback = state ? taskFeedback(state) : null;
-  const displayRequirements = state?.requirements || [];
-  const labels = {
-    completed: 'Completed',
-    incomplete: 'Not completed',
-    checking: 'Checking',
-    unverifiable: 'Unable to verify',
-  };
+  const index = Math.max(
+    0,
+    progress.findIndex(({ task }) => task.id === taskId),
+  );
+  const current = progress[index];
+  if (!current)
+    return (
+      <>
+        <p>This assessment has no practical tasks. Open Questions to continue.</p>
+        {recovery}
+      </>
+    );
+
+  const { task, requirements } = current;
+  const state = status(current);
+  const criterion = task.rules.length === 1 && task.rules[0].type === 'criterion';
+  const outcome = task.rules[0]?.outcomeId;
+  const requiredText = criterion
+    ? (
+        {
+          'about-content':
+            'Name: ' +
+            (identity.full_name || 'your profile name') +
+            '\nUniversity: Nahda University\nDepartment: ' +
+            (identity.department || 'your profile department'),
+          'goals-content':
+            'My Goals:\n1. Learn Git\n2. Understand version control\n3. Work on team projects',
+          'notes-content': 'Git Course - Session 1\nIEEE NUB Student Branch',
+          'skills-content': 'Problem Solving\nCommunication\nTeamwork',
+        } as Record<string, string>
+      )[outcome || '']
+    : '';
+  const hint =
+    criterion && !current.passed
+      ? outcome === 'initialized'
+        ? initializationHint
+        : commands[outcome || '']
+      : '';
+  const instructions = task.instructions.split('\n').filter(Boolean);
+
   return (
-    <aside
-      className="student-task"
-      id="workspace-task"
-      role="tabpanel"
-      aria-labelledby="workspace-tab-task"
-      aria-label="Task Instructions"
-    >
-      <div className="task-picker">
-        <label>
-          Task
-          <select
-            aria-label="Task"
-            value={current?.task.id || ''}
-            onChange={(e) => onTask(e.target.value)}
-          >
-            {tasks.map((t, i) => (
-              <option key={t.task.id} value={t.task.id}>
-                {i + 1}. {taskGuide(t.task).title}
-                {t.task.points === 0
-                  ? ' (unscored)'
-                  : t.task.bonus
-                    ? ' (optional)'
-                    : ''}
-                {progress.find((p) => p.task.id === t.task.id)?.passed ? ' · Complete' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-        <small>
-          {index + 1} / {tasks.length} · {current?.section.title}
-        </small>
+    <>
+      <div className="lab-task-top">
+        <span>
+          <ListChecks size={17} aria-hidden="true" /> Practical criteria
+        </span>
+        <span>
+          {index + 1} of {progress.length}
+        </span>
       </div>
-      {error && (
-        <p role="alert" className="error">
-          Unable to verify: {error}
-        </p>
-      )}
-      {current && state ? (
-        <>
-          <div className="task-heading">
-            <span className={'task-status ' + (state.passed ? 'done' : '')}>
-              {current.task.points === 0
-                ? 'Informational'
-                : checking
-                  ? 'Checking…'
-                  : state.passed
-                    ? 'Complete'
-                    : 'In progress'}
-            </span>
-            <span>
-              {state.earned} / {current.task.points} points
-              {current.task.bonus ? ' · Optional bonus' : ''}
-            </span>
-          </div>
-          <h2 dir="auto">{guide?.title}</h2>
-          {!independent && <p className="task-start">{guide?.before}</p>}
-          <ol className="task-actions">
-            {!independent &&
-              guide?.steps.map((step) => (
-                <li key={step} dir="auto">
-                  {step}
-                </li>
-              ))}
-          </ol>
-          {guide?.message && (
-            <div className="required-message">
-              <strong>Exact commit message</strong>
-              <code dir="ltr">{guide.message}</code>
-            </div>
-          )}
-          {guide?.warning && !state.passed && <p className="task-caution">{guide.warning}</p>}
-          {current.task.rules
-            .filter((r) => (r.type === 'file' && r.value) || (r.type === 'message' && r.value))
-            .map((r, i) => (
-              <div className="required-text" key={i}>
-                <strong>
-                  {r.type === 'message' ? 'Required commit message' : r.path + ' · Required text'}
-                </strong>
-                <pre>
-                  {(r.value || '')
-                    .replaceAll('{{name}}', identity.full_name || 'Your full name')
-                    .replaceAll('{{department}}', identity.department || 'Your department')}
-                </pre>
-              </div>
-            ))}
-          <div className="task-work-actions">
-            <button className="outline-button" onClick={() => onWork('terminal')}>
-              Open Terminal
-            </button>
-            <button className="outline-button" onClick={() => onWork('files')}>
-              Open Files
-            </button>
-          </div>
-          <h3>Check your work</h3>
-          <small>
-            Each scored requirement earns its own points. You can continue with unfinished work.
-          </small>
-          <ol className="requirement-list">
-            {displayRequirements.map((c) => (
-              <li key={c.id} data-state={c.status}>
-                <span aria-hidden>
-                  {c.status === 'completed' ? '✓' : c.status === 'checking' ? '…' : '○'}
-                </span>
-                <span>
-                  {c.label}
-                  {c.detected && (
-                    <details>
-                      <summary>Verified evidence</summary>
-                      <small>{c.detected}</small>
-                    </details>
-                  )}
-                  {c.passed !== true && displayRequirements.length > 1 && <small>{c.hint}</small>}
-                  <small className="requirement-state">
-                    {labels[c.status]}
-                    {c.preparation
-                      ? ' · Preparation · Unscored'
-                      : c.points !== undefined
-                        ? ` · ${c.earned || 0} / ${c.points} points`
-                        : ''}
+      <label className="lab-task-picker">
+        Choose a criterion
+        <select aria-label="Task" value={task.id} onChange={(event) => onTask(event.target.value)}>
+          {progress.map((item, i) => (
+            <option key={item.task.id} value={item.task.id}>
+              {i + 1}. {item.task.title} · {status(item)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="lab-task-content" key={task.id}>
+        <div className="lab-task-result">
+          <span className={current.passed ? 'lab-state lab-state-done' : 'lab-state'}>
+            {current.passed ? (
+              <CircleCheck size={15} aria-hidden="true" />
+            ) : (
+              <Circle size={14} aria-hidden="true" />
+            )}
+            {state}
+          </span>
+          <strong>
+            {checking || error ? '—' : current.earned} / {task.points} points
+          </strong>
+        </div>
+        <h2 dir="auto">
+          {index + 1}. {task.title}
+        </h2>
+        <h3>What you need to do</h3>
+        <ul className="lab-checklist">
+          {instructions.map((instruction, i) => (
+            <li key={i} dir="auto">
+              {criterion && current.passed ? (
+                <Check size={16} aria-hidden="true" />
+              ) : (
+                <Circle size={13} aria-hidden="true" />
+              )}
+              <span>{instruction}</span>
+            </li>
+          ))}
+          {!criterion &&
+            requirements.map((item) => (
+              <li key={item.id}>
+                {item.passed ? (
+                  <Check size={16} aria-hidden="true" />
+                ) : (
+                  <Circle size={13} aria-hidden="true" />
+                )}
+                <span>{item.label}</span>
+                {!!item.points && (
+                  <small>
+                    {item.earned ?? 0} / {item.points} points
                   </small>
-                </span>
+                )}
               </li>
             ))}
-          </ol>
-          <div className="student-next" role="status">
-            <strong>
-              {state.passed ? 'Ready for the next task' : 'What to do next'}
-            </strong>
-            <p>{checking ? 'Checking your latest changes…' : feedback}</p>
-            {!state.passed && (
-              <button
-                className="text-button"
-                onClick={() =>
-                  onWork(
-                    current.task.rules.some(
-                      (r) => r.type === 'file' || (r.type === 'criterion' && /-(exists|content)$/.test(r.outcomeId || '')),
-                    )
-                      ? 'files'
-                      : 'terminal',
-                  )
-                }
-              >
-                Fix This Step
-              </button>
-            )}
-            <button className="text-button" disabled={checking} onClick={onRecheck}>
-              Check again
-            </button>
+        </ul>
+        {requiredText && (
+          <div className="lab-command-hint">
+            <span>Required text</span>
+            <pre dir="auto">{requiredText}</pre>
           </div>
-          {!independent && (
-            <details className="check-evidence">
-              <summary>Technical check details</summary>
-              <p>{guide?.result}</p>
-              <p>
-                {done} completed · {state.requirements.length - done} remaining
-              </p>
-              {state.requirements.map((c) => (
-                <div key={c.id}>
-                  <strong>{c.label}</strong>
-                  <p>
-                    Expected: {c.expected || c.label}. Detected: {c.detected || labels[c.status]}.
-                  </p>
-                </div>
-              ))}
-            </details>
-          )}
-          <details className="published-instructions">
-            <summary>
-              {independent
-                ? 'Original exercise guide (including optional extension)'
-                : 'Full published instructions'}
-            </summary>
-            {independent &&
-              d.sections
-                .filter((s) => s.steps.length)
-                .map((s) => (
-                  <section key={s.id}>
-                    <h3>{s.title}</h3>
-                    <ol>
-                      {s.steps.map((step) => (
-                        <li key={step}>{step}</li>
-                      ))}
-                    </ol>
-                  </section>
-                ))}
-            <p className="written-answer" dir="auto">
-              {current.task.title}
-            </p>
-            <p className="written-answer" dir="auto">
-              {current.task.instructions}
-            </p>
-            {current.section.description && <p dir="auto">{current.section.description}</p>}
-            {current.section.steps.map((step, i) => (
-              <p key={i} dir="auto">
-                {step}
-              </p>
+        )}
+        {!criterion &&
+          task.rules
+            .filter((rule) => rule.value && (rule.type === 'file' || rule.type === 'message'))
+            .map((rule, i) => (
+              <div className="lab-command-hint" key={i}>
+                <span>{rule.type === 'file' ? 'Required text' : 'Commit message text'}</span>
+                <pre dir="auto">{rule.value}</pre>
+              </div>
             ))}
-          </details>
-          <div className="task-navigation">
-            <button
-              className="outline-button"
-              disabled={index === 0}
-              onClick={() => onTask(tasks[index - 1].task.id)}
-            >
-              Previous Task
-            </button>
-            <button
-              className="outline-button"
-              disabled={index === tasks.length - 1}
-              onClick={() => onTask(tasks[index + 1].task.id)}
-            >
-              Next Task
-            </button>
+        {hint && (
+          <div className="lab-command-hint">
+            <span>Try in Terminal</span>
+            <pre dir="ltr">{hint}</pre>
           </div>
-        </>
-      ) : (
-        <p>No practical tasks. Continue to Questions or Review.</p>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {requirements.some((item) => item.detected || (!criterion && item.expected)) && (
+          <details className="lab-evidence">
+            <summary>Technical evidence</summary>
+            <ul>
+              {requirements
+                .filter((item) => item.detected || item.expected)
+                .map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.label}</strong>
+                    <p>{item.detected || item.expected}</p>
+                  </li>
+                ))}
+            </ul>
+          </details>
+        )}
+      </div>
+      <button
+        className="primary lab-check-button"
+        disabled={checking}
+        onClick={() => void onCheck()}
+      >
+        <CircleCheck size={17} aria-hidden="true" /> {checking ? 'Checking…' : 'Check Work'}
+      </button>
+      {checked && (
+        <small className="lab-check-feedback" role="status">
+          {checked}
+        </small>
       )}
+      <nav className="lab-criterion-nav" aria-label="Criterion navigation">
+        <button
+          className="outline-button"
+          disabled={index === 0}
+          onClick={() => onTask(progress[index - 1].task.id)}
+        >
+          <ChevronLeft size={16} aria-hidden="true" /> Previous
+        </button>
+        <button
+          className="outline-button"
+          disabled={index === progress.length - 1}
+          onClick={() => onTask(progress[index + 1].task.id)}
+        >
+          Next <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      </nav>
       {recovery}
-      <Link className="primary continue-questions" to={basePath + (d.questions.length ? '/theory' : '/review')}>
-        {d.questions.length ? 'Continue to Questions' : 'Review submission'}
-      </Link>
-    </aside>
+    </>
   );
 }

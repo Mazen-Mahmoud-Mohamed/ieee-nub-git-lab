@@ -70,36 +70,17 @@ export function AssessmentResult({
   }, [key, definition.reviewAnswers, state.id]);
   const points = totals(definition);
   return (
-    <div className="page narrow">
-      <span className="eyebrow">{definition.type.toUpperCase()} / SUBMISSION</span>
-      <h1>{definition.title}</h1>
-      {breakdown.length > 0 && (
-        <details className="form-card">
-          <summary>Official requirement points</summary>
-          {breakdown.map((row) => {
-            const task = definition.sections
-              .flatMap((s) => s.tasks)
-              .find((t) => t.id === row.task_key);
-            const checks = task ? requirementCatalog(task) : [];
-            return (
-              <section key={row.task_key}>
-                <h3>
-                  {task?.title}: {row.points} / {task?.points}
-                  {task?.bonus ? ' bonus' : ''}
-                </h3>
-                <ul>
-                  {row.requirement_results?.map((c) => (
-                    <li key={c.id}>
-                      {checks.find((r) => r.id === c.id)?.label || c.id}: {c.earned} / {c.points}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            );
-          })}
-        </details>
-      )}
-      <div className="form-card">
+    <div className="page lab-review">
+      <Link className="lab-back" to="/dashboard">
+        My learning
+      </Link>
+      <header className="lab-page-heading">
+        <div>
+          <span className="lab-kicker">Submission</span>
+          <h1>{definition.title}</h1>
+        </div>
+      </header>
+      <div className="lab-review-card">
         <h2>
           {lab.receipt
             ? 'Submission received'
@@ -126,15 +107,13 @@ export function AssessmentResult({
           <>
             <h3>
               Official score:{' '}
-              {sumPoints([Number(result.practical_score), Number(result.theory_score)])}{' '}
-              /{' '}
+              {sumPoints([Number(result.practical_score), Number(result.theory_score)])} /{' '}
               {sumPoints([points.practical, points.theory])}
             </h3>
             {points.bonus > 0 && (
               <p>
                 Up to {points.bonus} optional bonus points can raise this score above{' '}
-                {sumPoints([points.practical, points.theory])}
-                .
+                {sumPoints([points.practical, points.theory])}.
               </p>
             )}
             <p>
@@ -171,7 +150,7 @@ export function AssessmentResult({
             ))}
           </details>
         )}
-        <div className="review-actions">
+        <div className="lab-review-actions">
           <Link to="/dashboard" className="primary">
             Back to assignments & exams
           </Link>
@@ -182,6 +161,33 @@ export function AssessmentResult({
           )}
         </div>
       </div>
+
+      {breakdown.length > 0 && (
+        <details className="lab-review-card lab-result-breakdown">
+          <summary>Official requirement points</summary>
+          {breakdown.map((row) => {
+            const task = definition.sections
+              .flatMap((s) => s.tasks)
+              .find((t) => t.id === row.task_key);
+            const checks = task ? requirementCatalog(task) : [];
+            return (
+              <section key={row.task_key}>
+                <h3>
+                  {task?.title}: {row.points} / {task?.points}
+                  {task?.bonus ? ' bonus' : ''}
+                </h3>
+                <ul>
+                  {row.requirement_results?.map((c) => (
+                    <li key={c.id}>
+                      {checks.find((r) => r.id === c.id)?.label || c.id}: {c.earned} / {c.points}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </details>
+      )}
     </div>
   );
 }

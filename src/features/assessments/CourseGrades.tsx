@@ -10,7 +10,13 @@ export type CourseGrade = {
   eligible: boolean;
   completed_components: number;
 };
-export function CourseGrades({ instructor = false }: { instructor?: boolean }) {
+export function CourseGrades({
+  instructor = false,
+  unconfigured = [],
+}: {
+  instructor?: boolean;
+  unconfigured?: string[];
+}) {
   const [rows, setRows] = useState<CourseGrade[]>([]),
     [error, setError] = useState('');
   useEffect(() => {
@@ -46,7 +52,9 @@ export function CourseGrades({ instructor = false }: { instructor?: boolean }) {
         <div key={r.student_id}>
           <h3>{instructor ? r.full_name : 'Your released score'}</h3>
           <p>
-            Task 1: {r.task1}/150 · Task 2: {r.task2}/150 · Final: {r.final}/200
+            Task 1: {r.task1}/150 · Task 2:{' '}
+            {unconfigured.includes('task2') ? 'Coming soon' : r.task2 + '/150'}
+            {' · '}Final: {unconfigured.includes('final') ? 'Coming soon' : r.final + '/200'}
           </p>
           <strong>
             {r.total}/500 ·{' '}
