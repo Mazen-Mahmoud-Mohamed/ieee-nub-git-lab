@@ -9,6 +9,7 @@ import { verifyAssessment } from '../../src/features/assessments/verify';
 import { pptxBytes } from '../helpers/presentation';
 import { PPTX_MIME } from '../../src/features/learning/materials';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { test, expect, devices, type Page } from '@playwright/test';
 import { managementDatabase, ADMIN, TEACHER, STUDENT } from '../helpers/managementDatabase';
 import { blankDefinition } from '../../src/features/assessments/model';
@@ -19,6 +20,7 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   page,
   browser,
 }) => {
+  test.setTimeout(process.env.COURSE_VIEWER_DECK_DIR ? 180000 : 90000);
   const course = '70000000-0000-4000-8000-000000000001',
     section = '70000000-0000-4000-8000-000000000002',
     legacy = '70000000-0000-4000-8000-000000000011';
@@ -60,15 +62,31 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   const protectedCounts = await h.db.query(
     'select (select count(*) from public.attempts) as attempts,(select count(*) from public.grading_summaries) as grades,(select count(*) from public.assessment_versions) as versions',
   );
-  const student = await browser.newPage({ baseURL: 'http://127.0.0.1:5174' });
+  const project = test.info().project.name;
+  const mobileDevice = project.startsWith('Android')
+    ? devices['Pixel 7']
+    : project.startsWith('iPhone')
+      ? devices['iPhone 13']
+      : undefined;
+  const student = await browser.newPage({ ...mobileDevice, baseURL: 'http://127.0.0.1:5174' });
   await backend(student, STUDENT);
+  let pendingVideo: Promise<void> | undefined;
+  // Never contact actual Drive resources, including the retained legacy lesson below.
+  await student.route('https://drive.google.com/**', async (route) => {
+    if (pendingVideo) await pendingVideo;
+    await route.fulfill({
+      status: 403,
+      contentType: 'text/html',
+      body: '<html><body style="margin:0;display:grid;place-items:center;height:100vh;background:#0c1625;color:#cbd5e1;font:16px system-ui"><p>Sign in to Google Drive to watch this recording.</p></body></html>',
+    });
+  });
   await student.goto('/ieee-git-lab/#/learn');
   await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
   await expect(student.locator('.teaching-session-card')).toHaveCount(0);
   await expect(student.getByText('Files and the editor', { exact: true })).toHaveCount(0);
   await student.goto('/ieee-git-lab/#/learn/' + legacy);
   await expect(
-    student.getByRole('heading', { name: 'Files and the editor', exact: true }),
+    student.getByRole('heading', { name: 'Files and the editor', exact: true, level: 1 }),
   ).toBeVisible();
   await student.goto('/ieee-git-lab/#/learn');
   await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
@@ -87,13 +105,18 @@ test('direct Learning Sessions shows only published teaching cards and preserves
     page.getByRole('heading', { name: 'Files and the editor', exact: true }),
   ).toBeVisible();
   const lessons: string[] = [];
-  const presentations = [
-    Buffer.from(pptxBytes()),
-    execFileSync('git', ['show', 'HEAD:Git Course IEEE.pptx'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      maxBuffer: 5000000,
-    }),
-  ];
+  const uploadedDecks = process.env.COURSE_VIEWER_DECK_DIR;
+  const presentations = uploadedDecks
+    ? await Promise.all(
+        [1, 2].map((number) => readFile(uploadedDecks + '/session-' + number + '.pptx')),
+      )
+    : [
+        Buffer.from(pptxBytes()),
+        execFileSync('git', ['show', 'HEAD:Git Course IEEE.pptx'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          maxBuffer: 5000000,
+        }),
+      ];
   for (const [index, title] of [
     'Git foundations — isolated test',
     'Branches and merges — isolated test',
@@ -129,18 +152,18 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   await student.reload();
   const cards = student.locator('.teaching-session-card');
   await expect(cards).toHaveCount(2);
-  await expect(cards.locator('h3')).toHaveText([
+  await expect(cards.getByRole('heading', { level: 2 })).toHaveText([
     'Git foundations — isolated test',
     'Branches and merges — isolated test',
   ]);
-  await expect(student.getByRole('link', { name: 'Open session', exact: true })).toHaveCount(0);
+  await expect(student.getByRole('link', { name: 'Open session', exact: true })).toHaveCount(2);
   await expect(student.locator('.published-course .written-answer')).toHaveCount(0);
   for (const [index, id] of lessons.entries()) {
     await expect(
       cards.nth(index).getByText('Session ' + (index + 1), { exact: true }),
     ).toBeVisible();
     await expect(
-      cards.nth(index).getByRole('link', { name: 'Watch Recording', exact: true }),
+      cards.nth(index).getByRole('link', { name: 'Open session', exact: true }),
     ).toHaveAttribute('href', '#/learn/' + id);
     const doc = (await h.rpc(STUDENT, 'learning_catalog', { p_parent: id })).parent.document;
     const m = await h.rpc(STUDENT, 'learning_presentation', { p_item: id });
@@ -151,7 +174,7 @@ test('direct Learning Sessions shows only published teaching cards and preserves
     route.fulfill({ status: 503, json: { message: 'Isolated temporary failure' } }),
   );
   await cards.first().getByRole('button', { name: 'Download PowerPoint', exact: true }).click();
-  await expect(student.getByRole('alert')).toContainText('PowerPoint could not be opened');
+  await expect(student.getByRole('alert')).toContainText('PowerPoint could not be downloaded');
   await student.unroute('**/storage/v1/object/sign/learning-presentations/**');
   for (const index of [0, 1]) {
     const downloading = student.waitForEvent('download');
@@ -182,18 +205,345 @@ test('direct Learning Sessions shows only published teaching cards and preserves
         fullPage: false,
       });
   }
-  await cards.first().getByRole('link', { name: 'Watch Recording', exact: true }).click();
-  await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveAttribute(
-    'src',
-    'https://drive.google.com/file/d/firstvideo123/preview',
+  // These fixtures exercise the real PPTX bytes and upload/RLS path. Drive access is simulated.
+  let expired = false;
+  const signedRoute = '**/storage/v1/object/sign/learning-presentations/**';
+  await student.route(signedRoute, (route) => {
+    if (!expired && route.request().method() === 'GET') {
+      expired = true;
+      return route.fulfill({ status: 403, headers: { 'Access-Control-Allow-Origin': '*' } });
+    }
+    return route.fallback();
+  });
+  const capture = async (name: string) => {
+    await student.evaluate(() => window.scrollTo(0, 0));
+    await student.screenshot({
+      path: join(
+        process.env.COURSE_CONTENT_CAPTURE_DIR || 'test-results/course-content-review',
+        name + '-' + project + '.png',
+      ),
+      fullPage: true,
+      animations: 'disabled',
+    });
+  };
+  await student.setViewportSize({ width: 1440, height: 1000 });
+  await capture('overview-desktop');
+  for (const index of uploadedDecks ? [0, 1] : [1]) {
+    await student.setViewportSize({ width: 1440, height: 1000 });
+    await cards.nth(index).getByRole('link', { name: 'View slides', exact: true }).click();
+    await expect(student.getByRole('tab', { name: 'Slides', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const viewer = student.getByRole('region', { name: 'PowerPoint slides', exact: true });
+    const count = uploadedDecks ? [27, 61][index] : 61;
+    await expect(viewer.locator('output').or(viewer.getByRole('alert'))).toContainText(
+      /1 \/|presentation|preview|Failed/i,
+      { timeout: 15000 },
+    );
+    expect(await viewer.getByRole('alert').allTextContents()).toEqual([]);
+    await expect(viewer.locator('output')).toHaveText('1 / ' + count);
+    await expect(viewer.locator('.slide-canvas')).not.toBeEmpty();
+    const fitBounds = await viewer.evaluate((element) => {
+      const viewport = element.querySelector('.slide-viewport')!;
+      const canvas = element.querySelector('.slide-canvas')!;
+      const viewRect = viewport.getBoundingClientRect();
+      const slideRect = canvas.getBoundingClientRect();
+      return {
+        viewWidth: viewRect.width,
+        viewHeight: viewRect.height,
+        slideWidth: slideRect.width,
+        slideHeight: slideRect.height,
+      };
+    });
+    expect(fitBounds.slideWidth).toBeLessThanOrEqual(fitBounds.viewWidth + 2);
+    expect(fitBounds.slideHeight).toBeLessThanOrEqual(fitBounds.viewHeight + 2);
+    await capture('session-' + (index + 1) + '-slides-desktop');
+    // Inspect every slide of both retained course decks on desktop, not just the cover.
+    // Phone projects repeat the interaction checks with their own browser engines below.
+    if (uploadedDecks && !mobileDevice) {
+      const slidesWithWarnings: number[] = [];
+      if (await viewer.getByRole('status').filter({ hasText: 'Some slide elements' }).count()) {
+        slidesWithWarnings.push(1);
+      }
+      for (let number = 2; number <= count; number++) {
+        await viewer.getByRole('button', { name: 'Next', exact: true }).click();
+        await expect(viewer.locator('output')).toHaveText(number + ' / ' + count);
+        await expect(viewer.getByRole('alert')).toHaveCount(0);
+        await expect(viewer.locator('.slide-canvas')).not.toBeEmpty();
+        if (await viewer.getByRole('status').filter({ hasText: 'Some slide elements' }).count()) {
+          slidesWithWarnings.push(number);
+        }
+      }
+      await test.info().attach('session-' + (index + 1) + '-slide-scan', {
+        body: JSON.stringify({ slidesReviewed: count, slidesWithWarnings }),
+        contentType: 'application/json',
+      });
+      await expect(viewer.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+      await capture('session-' + (index + 1) + '-last-slide-desktop');
+      await viewer.getByLabel('Slide viewport').focus();
+      await student.keyboard.press('Home');
+      await expect(viewer.locator('output')).toHaveText('1 / ' + count);
+    }
+    await expect(viewer.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
+    await viewer.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    // A direct View slides link must remember its resource even before any tab is clicked.
+    await student.getByRole('link', { name: 'Back to Course', exact: true }).click();
+    await cards.nth(index).getByRole('link', { name: 'Open session', exact: true }).click();
+    await expect(student.getByRole('tab', { name: 'Slides', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    await viewer.getByLabel('Slide zoom').selectOption('200');
+    await expect(viewer.getByLabel('Slide zoom')).toBeEnabled();
+    const pan = await viewer.getByLabel('Slide viewport').evaluate((element) => {
+      const canvas = element.querySelector('.slide-canvas')!;
+      element.scrollTo(0, 0);
+      const viewportRect = element.getBoundingClientRect();
+      const slideRect = canvas.getBoundingClientRect();
+      const originAccessible =
+        slideRect.left >= viewportRect.left - 2 && slideRect.top >= viewportRect.top - 2;
+      element.scrollTo(element.scrollWidth, element.scrollHeight);
+      return {
+        originAccessible,
+        scrollable:
+          element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+        moved: element.scrollLeft > 0 || element.scrollTop > 0,
+      };
+    });
+    expect(pan).toEqual({ originAccessible: true, scrollable: true, moved: true });
+    await capture('session-' + (index + 1) + '-zoom-desktop');
+    await viewer.getByLabel('Slide zoom').selectOption('100');
+    await expect(viewer.getByLabel('Slide zoom')).toBeEnabled();
+    if (
+      !mobileDevice &&
+      (await viewer.getByRole('button', { name: 'Toggle fullscreen' }).isVisible())
+    ) {
+      await viewer.getByRole('button', { name: 'Toggle fullscreen' }).click();
+      await expect.poll(() => student.evaluate(() => !!document.fullscreenElement)).toBe(true);
+      await capture('session-' + (index + 1) + '-fullscreen');
+      await viewer.getByRole('button', { name: 'Toggle fullscreen' }).click();
+      await expect.poll(() => student.evaluate(() => !!document.fullscreenElement)).toBe(false);
+    }
+    if (!mobileDevice) {
+      // Browsers can expose the API but reject it; the in-page alternative must remain usable.
+      const previousOverflow = await student.evaluate(() => document.body.style.overflow);
+      await viewer.evaluate((element) =>
+        Object.defineProperty(element, 'requestFullscreen', {
+          configurable: true,
+          value: () => Promise.reject(new DOMException('Fullscreen blocked in isolated test')),
+        }),
+      );
+      await viewer.getByRole('button', { name: 'Toggle fullscreen' }).click();
+      const expanded = student.getByRole('dialog', { name: 'PowerPoint slides', exact: true });
+      await expect(expanded).toBeVisible();
+      await expect(expanded).toHaveAttribute('aria-modal', 'true');
+      await expect(expanded.locator('output')).toHaveText('2 / ' + count);
+      await capture('session-' + (index + 1) + '-expanded-fallback');
+      await student.keyboard.press('Escape');
+      await expect(expanded).toHaveCount(0);
+      await expect(viewer.getByRole('button', { name: 'Toggle fullscreen' })).toBeFocused();
+      expect(await student.evaluate(() => document.body.style.overflow)).toBe(previousOverflow);
+      await viewer.evaluate((element) => {
+        Reflect.deleteProperty(element, 'requestFullscreen');
+      });
+    }
+    let releaseVideo!: () => void;
+    pendingVideo = new Promise<void>((resolve) => {
+      releaseVideo = resolve;
+    });
+    await student.getByRole('tab', { name: 'Video', exact: true }).click();
+    try {
+      await expect(
+        student.getByRole('status').filter({ hasText: 'Loading recording' }),
+      ).toBeVisible();
+      await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toBeVisible();
+      await capture('session-' + (index + 1) + '-video-loading');
+    } finally {
+      pendingVideo = undefined;
+      releaseVideo();
+    }
+    await expect(student.getByRole('status').filter({ hasText: 'Loading recording' })).toHaveCount(
+      0,
+    );
+    await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveAttribute(
+      'src',
+      'https://drive.google.com/file/d/' +
+        (index ? 'secondvideo123' : 'firstvideo123') +
+        '/preview',
+    );
+    await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toBeVisible();
+    const videoBounds = await student.getByTitle('Recorded lecture on Google Drive').boundingBox();
+    expect(videoBounds).not.toBeNull();
+    expect(Math.abs(videoBounds!.width / videoBounds!.height - 16 / 9)).toBeLessThan(0.03);
+    await capture('session-' + (index + 1) + '-video-desktop');
+    const videoTab = student.getByRole('tab', { name: 'Video', exact: true });
+    const slidesTab = student.getByRole('tab', { name: 'Slides', exact: true });
+    await videoTab.focus();
+    await student.keyboard.press('ArrowRight');
+    await expect(slidesTab).toBeFocused();
+    await expect(slidesTab).toHaveAttribute('aria-selected', 'true');
+    await expect(videoTab).toHaveAttribute('tabindex', '-1');
+    await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveCount(0);
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    await student.keyboard.press('Home');
+    await expect(videoTab).toBeFocused();
+    await expect(videoTab).toHaveAttribute('aria-selected', 'true');
+    await student.keyboard.press('End');
+    await expect(slidesTab).toBeFocused();
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    await viewer.getByLabel('Slide viewport').focus();
+    await student.keyboard.press('ArrowLeft');
+    await expect(viewer.locator('output')).toHaveText('1 / ' + count);
+    for (const width of [320, 390, 844]) {
+      await student.setViewportSize({ width, height: width === 844 ? 390 : 844 });
+      await expect
+        .poll(async () =>
+          viewer.evaluate((element) => {
+            const viewport = element.querySelector('.slide-viewport')!.getBoundingClientRect();
+            const canvas = element.querySelector('.slide-canvas')!.getBoundingClientRect();
+            return canvas.width <= viewport.width + 2 && canvas.height <= viewport.height + 2;
+          }),
+        )
+        .toBe(true);
+      expect(
+        await student.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(width);
+      if (width === 320) await capture('session-' + (index + 1) + '-slides-small-phone');
+    }
+    await student.setViewportSize({ width: 390, height: 844 });
+    if (mobileDevice) {
+      await viewer.getByRole('button', { name: 'Next', exact: true }).tap();
+    } else {
+      await viewer.getByRole('button', { name: 'Next', exact: true }).click();
+    }
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    expect(await student.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
+    await capture('session-' + (index + 1) + '-slides-mobile');
+    if (mobileDevice) {
+      // Mobile browsers may use native fullscreen or the supported expanded-view fallback.
+      // Use a stable locator because the fallback changes this region into a modal dialog.
+      const presentation = student.locator('.study-slide-viewer');
+      await presentation.getByRole('button', { name: 'Toggle fullscreen' }).tap();
+      await expect
+        .poll(() =>
+          presentation.evaluate(
+            (element) =>
+              document.fullscreenElement === element || element.classList.contains('is-expanded'),
+          ),
+        )
+        .toBe(true);
+      const exit = presentation.getByRole('button', { name: 'Toggle fullscreen' });
+      await expect(exit).toHaveText('Exit fullscreen');
+      await expect(exit).toBeInViewport();
+      await expect
+        .poll(() =>
+          presentation.evaluate((element) => {
+            const viewport = element.querySelector('.slide-viewport')!.getBoundingClientRect();
+            const canvas = element.querySelector('.slide-canvas')!.getBoundingClientRect();
+            return (
+              canvas.width > 0 &&
+              canvas.height > 0 &&
+              canvas.left >= viewport.left - 2 &&
+              canvas.top >= viewport.top - 2 &&
+              canvas.right <= viewport.right + 2 &&
+              canvas.bottom <= viewport.bottom + 2
+            );
+          }),
+        )
+        .toBe(true);
+      await expect(presentation.locator('output')).toHaveText('2 / ' + count);
+      await capture('session-' + (index + 1) + '-fullscreen-mobile');
+      await exit.tap();
+      await expect
+        .poll(() =>
+          presentation.evaluate(
+            (element) =>
+              document.fullscreenElement === element || element.classList.contains('is-expanded'),
+          ),
+        )
+        .toBe(false);
+      await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    }
+    await student.getByRole('tab', { name: 'Video', exact: true }).click();
+    await capture('session-' + (index + 1) + '-video-mobile');
+    await student.getByRole('tab', { name: 'Slides', exact: true }).click();
+    await student.getByRole('link', { name: 'Back to Course', exact: true }).click();
+    await expect(cards).toHaveCount(2);
+    await cards.nth(index).getByRole('link', { name: 'Open session', exact: true }).click();
+    await expect(student.getByRole('tab', { name: 'Slides', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      student.getByRole('region', { name: 'PowerPoint slides', exact: true }).locator('output'),
+    ).toHaveText('2 / ' + count);
+    await student.reload();
+    await expect(student.getByRole('tab', { name: 'Slides', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(viewer.locator('output')).toHaveText('2 / ' + count);
+    await student.getByRole('link', { name: 'Back to Course', exact: true }).click();
+  }
+  expect(expired).toBe(true);
+  await student.unroute(signedRoute);
+  await student.route(signedRoute, (route) =>
+    route.fulfill({ status: 403, json: { message: 'Denied' } }),
   );
-  await expect(student.getByRole('alert')).toHaveCount(0);
-  await student.getByRole('button', { name: 'Video won’t play?', exact: true }).click();
-  await expect(student.getByRole('alert')).toContainText('share it with you');
+  await cards.first().getByRole('link', { name: 'View slides', exact: true }).click();
   await expect(
-    student.getByRole('link', { name: '← Back to Course Content', exact: true }),
-  ).toHaveAttribute('href', '#/learn/' + course);
-  await student.getByRole('link', { name: '← Back to Course Content', exact: true }).click();
+    student.getByRole('region', { name: 'PowerPoint slides', exact: true }).getByRole('alert'),
+  ).toContainText('Presentation access is unavailable');
+  await student.unroute(signedRoute);
+  // A failed preview can recover in place without affecting the independent download action.
+  if (uploadedDecks) {
+    await student.getByRole('button', { name: 'Retry preview', exact: true }).click();
+    await expect(
+      student.getByRole('region', { name: 'PowerPoint slides', exact: true }).locator('output'),
+    ).toHaveText('2 / 27');
+  }
+  await student.getByRole('tab', { name: 'Video', exact: true }).click();
+  await expect(student.getByRole('link', { name: 'Previous Session', exact: true })).toHaveCount(0);
+  await student.getByRole('link', { name: 'Next Session', exact: true }).click();
+  await expect(
+    student.getByRole('heading', {
+      name: 'Branches and merges — isolated test',
+      exact: true,
+      level: 1,
+    }),
+  ).toBeVisible();
+  await expect(student.getByRole('link', { name: 'Next Session', exact: true })).toHaveCount(0);
+  await student.getByRole('link', { name: 'Previous Session', exact: true }).click();
+  await expect(
+    student.getByRole('heading', {
+      name: 'Git foundations — isolated test',
+      exact: true,
+      level: 1,
+    }),
+  ).toBeVisible();
+  await student.getByRole('tab', { name: 'Video', exact: true }).click();
+  await student.getByRole('button', { name: 'Video won’t play?', exact: true }).click();
+  await expect(
+    student.getByText(/sign in with the account your instructor shared it with/),
+  ).toBeVisible();
+  await expect(student.getByRole('link', { name: 'Back to Course', exact: true })).toHaveAttribute(
+    'href',
+    '#/learn/' + course,
+  );
+  await student.getByRole('button', { name: 'Toggle light and dark theme' }).click();
+  await expect(student.locator('html')).toHaveAttribute('data-theme', 'light');
+  await capture('lesson-light-mobile');
+  await student.getByRole('link', { name: 'Back to Course', exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  await capture('overview-light-mobile');
+  await student.setViewportSize({ width: 1440, height: 1000 });
+  await capture('overview-light-desktop');
+  await student.getByRole('button', { name: 'Toggle light and dark theme' }).click();
   // Reorder creates a new version only for this isolated teaching session.
   const row = page
     .locator('.session-list > .managed-row')
@@ -206,10 +556,9 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
   await student.reload();
-  await expect(student.locator('.teaching-session-card h3')).toHaveText([
-    'Branches and merges — isolated test',
-    'Git foundations — isolated test',
-  ]);
+  await expect(
+    student.locator('.teaching-session-card').getByRole('heading', { level: 2 }),
+  ).toHaveText(['Branches and merges — isolated test', 'Git foundations — isolated test']);
   await expect(
     h.rpc(STUDENT, 'manage_learning_unpublish', { p_id: lessons[0], p_revision: 1 }),
   ).rejects.toThrow(/Instructor authorization/);
@@ -246,8 +595,8 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   await student.reload();
   await expect(student.locator('.teaching-session-card')).toHaveCount(1);
   await expect(student.getByText('Session 3', { exact: true })).toBeVisible();
-  await expect(student.getByText('Recording coming soon.', { exact: true })).toBeVisible();
-  await expect(student.getByText('PowerPoint coming soon.', { exact: true })).toBeVisible();
+  await expect(student.getByText('Recorded lecture', { exact: true })).toHaveCount(0);
+  await expect(student.getByRole('link', { name: 'View slides' })).toHaveCount(0);
   expect(third).toBeTruthy();
   expect(await fingerprint()).toBe(before);
   expect(
@@ -372,8 +721,8 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
   const row = student
     .locator('.teaching-session-card')
     .filter({ has: student.getByRole('heading', { name: 'Session 1 — Git Basics', exact: true }) });
-  await expect(row.getByRole('link', { name: 'Watch Recording', exact: true })).toBeVisible();
-  await expect(row.getByRole('button', { name: 'Open PowerPoint', exact: true })).toBeVisible();
+  await expect(row.getByRole('link', { name: 'Open session', exact: true })).toBeVisible();
+  await expect(row.getByRole('link', { name: 'View slides', exact: true })).toBeVisible();
   const download = student.waitForEvent('download');
   await row.getByRole('button', { name: 'Download PowerPoint', exact: true }).click();
   const saved = await download;
@@ -957,12 +1306,13 @@ test.beforeEach(async () => {
           !(await h.rpc(null, 'can_read_learning_material', { p_path: path })) ||
           !uploadedObjects.has(path)
         ) {
-          res.writeHead(403);
+          res.writeHead(403, { 'Access-Control-Allow-Origin': '*' });
           res.end('Published material unavailable');
           return;
         }
         res.writeHead(200, {
           'Content-Type': PPTX_MIME,
+          'Access-Control-Allow-Origin': '*',
           'Content-Disposition': 'attachment; filename="Slides.pptx"',
         });
         res.end(Buffer.from(uploadedObjects.get(path)!));
@@ -1620,10 +1970,18 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     viewport: { width: 390, height: 844 },
   });
   await backend(student, STUDENT);
+  // Intercept before entering the lesson, so its automatically mounted iframe stays local.
+  await student.route('https://drive.google.com/**', (r) =>
+    r.fulfill({
+      status: 403,
+      contentType: 'text/html',
+      body: '<p>Request access in Google Drive</p>',
+    }),
+  );
   await student.goto('/ieee-git-lab/#/learn/' + lesson);
   await expect(student.locator('h1')).toContainText('Mobile session with slides');
   await expect(
-    student.getByRole('heading', { name: 'Mobile session with slides', exact: true }),
+    student.getByRole('heading', { name: 'Mobile session with slides', exact: true, level: 1 }),
   ).toBeVisible();
   for (const width of [320, 390]) {
     await student.setViewportSize({ width, height: 844 });
@@ -1637,14 +1995,6 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
     'href',
     'https://drive.google.com/file/d/abcdefghij123/view',
   );
-  // Simulate restricted Drive access; never contact an actual external video in this fixture.
-  await student.route('https://drive.google.com/**', (r) =>
-    r.fulfill({
-      status: 403,
-      contentType: 'text/html',
-      body: '<p>Request access in Google Drive</p>',
-    }),
-  );
   await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveAttribute(
     'src',
     'https://drive.google.com/file/d/abcdefghij123/preview',
@@ -1653,10 +2003,18 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   expect(Math.abs(player!.width / player!.height - 16 / 9)).toBeLessThan(0.03);
   await expect(student.getByRole('link', { name: 'Open in Google Drive' })).toBeVisible();
   // External playback is deliberately not represented as verified by this localhost test.
-  await student.screenshot({ path: 'test-results/mobile-learning-session.png', fullPage: true });
-  await expect(student.getByRole('button', { name: 'Download PowerPoint' })).toBeVisible();
+  await student.screenshot({
+    path:
+      'test-results/course-content-review/mobile-learning-session-' +
+      test.info().project.name +
+      '.png',
+    fullPage: true,
+  });
+  await student.getByRole('tab', { name: 'Slides', exact: true }).click();
+  await expect(student.getByTitle('Recorded lecture on Google Drive')).toHaveCount(0);
+  await expect(student.getByRole('button', { name: 'Download PPTX', exact: true })).toBeVisible();
   const download = student.waitForEvent('download');
-  await student.getByRole('button', { name: 'Download PowerPoint' }).click();
+  await student.getByRole('button', { name: 'Download PPTX', exact: true }).click();
   const downloaded = await download;
   expect(await readFile((await downloaded.path())!)).toEqual(Buffer.from(pptxBytes()));
   await expect(student.getByRole('link', { name: /Practice What You Learned/ })).toHaveCount(0);

@@ -1,4 +1,4 @@
-import { DriveVideo } from '../learning/SessionResources';
+import { DriveVideo } from '../learning/TeachingResources';
 import { SessionMaterials } from '../learning/SessionMaterials';
 import { driveVideo, type LearningDocument } from '../learning/materials';
 import { useEffect, useState } from 'react';
@@ -420,7 +420,13 @@ export function LearningContent() {
                     ))}
                   </ul>
                 )}
-                {editing.document.video_url && <DriveVideo url={editing.document.video_url} />}
+                {editing.document.video_url && (
+                  <DriveVideo
+                    key={editing.document.video_url}
+                    url={editing.document.video_url}
+                    deferred
+                  />
+                )}
                 {editing.document.presentation_id && (
                   <p>
                     The draft presentation can be opened above. Students see it only after

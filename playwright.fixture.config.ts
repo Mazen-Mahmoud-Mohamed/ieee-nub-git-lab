@@ -8,7 +8,10 @@ export default defineConfig({
   timeout: 45000,
   use: {
     baseURL: 'http://127.0.0.1:5174/ieee-git-lab/',
-    trace: process.env.TASK1_THEORY_DRAFT ? 'off' : 'retain-on-failure',
+    trace:
+      process.env.TASK1_THEORY_DRAFT || process.env.COURSE_VIEWER_DECK_DIR
+        ? 'off'
+        : 'retain-on-failure',
   },
   webServer: {
     command: 'npm run dev -- --port 5174',

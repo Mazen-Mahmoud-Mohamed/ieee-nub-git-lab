@@ -1,139 +1,185 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Presentation, Video } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
-import { driveVideo, type LearningDocument } from './materials';
-import { presentationURL } from './materialService';
-export function DriveVideo({ url }: { url: string }) {
-  const [load, setLoad] = useState(false);
-  let video;
-  try {
-    video = driveVideo(url);
-  } catch {
-    return <p>Video link is unavailable. Ask your instructor to update it.</p>;
-  }
-  if (!video) return null;
-  return (
-    <section className="session-video">
-      <h2>Recorded lecture</h2>
-      {load ? (
-        <iframe
-          title="Recorded lecture on Google Drive"
-          src={video.preview}
-          allow="fullscreen"
-          allowFullScreen
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <button className="outline-button" onClick={() => setLoad(true)}>
-          Load recorded lecture
-        </button>
-      )}
-      <p>
-        Google Drive controls playback and access. If the player asks for access or cannot load, use
-        the original link or contact your instructor.
-      </p>
-      <a className="outline-button" href={video.open} target="_blank" rel="noopener noreferrer">
-        Open in Google Drive ↗
-      </a>
-    </section>
-  );
-}
+import type { LearningDocument } from './materials';
+import { DriveVideo, usePresentationDownload } from './TeachingResources';
+
+const Viewer = lazy(() =>
+  import('./PresentationViewer').then((module) => ({ default: module.PresentationViewer })),
+);
+
 export function SessionResources({ id, document }: { id: string; document: LearningDocument }) {
-  const [urls, setUrls] = useState<{ open: string; download: string } | null>(null),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+  const [search, setSearch] = useSearchParams();
+  const memoryKey = 'learning-resource:' + id;
+  const initial = () => {
+    let saved = '';
+    try {
+      saved = sessionStorage.getItem(memoryKey) || '';
+    } catch {
+      /* Browser storage is optional. */
+    }
+    const requested = search.get('resource') || saved;
+    return requested === 'slides' && document.presentation_id
+      ? 'slides'
+      : document.video_url
+        ? 'video'
+        : 'slides';
+  };
+  const [tab, setTab] = useState(initial);
+  const [visitedSlides, setVisitedSlides] = useState(tab === 'slides');
+  const tabs = useRef<HTMLDivElement>(null);
+  const { busy, error, download } = usePresentationDownload(id);
   const [related, setRelated] = useState<{ id: string; title: string } | null>(null);
   useEffect(() => {
+    try {
+      sessionStorage.setItem(memoryKey, tab);
+    } catch {
+      // Resource navigation also works when browser storage is unavailable.
+    }
+  }, [memoryKey, tab]);
+  function select(next: string) {
+    setTab(next);
+    if (next === 'slides') setVisitedSlides(true);
+    try {
+      sessionStorage.setItem(memoryKey, next);
+    } catch {
+      /* Keep navigation available without storage. */
+    }
+    setSearch(
+      (previous) => {
+        const updated = new URLSearchParams(previous);
+        updated.set('resource', next);
+        return updated;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  }
+  useEffect(() => {
+    const resource = search.get('resource');
+    if (resource === 'video' || resource === 'slides') {
+      setTab(resource);
+      if (resource === 'slides') setVisitedSlides(true);
+    }
+  }, [search]);
+  useEffect(() => {
     let live = true;
-    setUrls(null);
     setRelated(null);
     if (supabase)
-      void supabase.rpc('learning_related_activity', { p_item: id }).then((r) => {
-        if (live && !r.error) setRelated(r.data);
+      void supabase.rpc('learning_related_activity', { p_item: id }).then((result) => {
+        if (live && !result.error) setRelated(result.data);
       });
     return () => {
       live = false;
     };
-  }, [id, document.presentation_id]);
+  }, [id]);
+  const topics = document.topics?.filter(Boolean) || [];
   return (
-    <div className="session-resources">
-      {!!document.topics?.length && (
-        <section>
-          <h2>Topics covered</h2>
-          <ul>
-            {document.topics.filter(Boolean).map((topic, i) => (
-              <li key={i} dir="auto">
-                {topic}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {document.video_url && <DriveVideo key={document.video_url} url={document.video_url} />}
-      {document.presentation_id && (
-        <section>
-          <h2>PowerPoint presentation</h2>
-          <p>Access the original .pptx file. Your phone may need a compatible presentation app.</p>
+    <div className="lesson-resources">
+      <div ref={tabs} role="tablist" aria-label="Lesson resources" className="lesson-tabs">
+        {[
+          { value: 'video', label: 'Video', icon: Video },
+          { value: 'slides', label: 'Slides', icon: Presentation },
+        ].map(({ value, label, icon: Icon }, index) => (
           <button
-            className="outline-button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError('');
-              try {
-                const [open, download] = await Promise.all([
-                  presentationURL(id),
-                  presentationURL(id, true),
-                ]);
-                setUrls({ open, download });
-              } catch {
-                setError(
-                  'Presentation could not be opened. It may be restricted, unpublished or temporarily unavailable. Retry or contact your instructor.',
-                );
-              } finally {
-                setBusy(false);
-              }
+            key={value}
+            type="button"
+            role="tab"
+            id={'resource-tab-' + value}
+            aria-controls={'resource-panel-' + value}
+            aria-selected={tab === value}
+            tabIndex={tab === value ? 0 : -1}
+            onClick={() => select(value)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
+              select(next ? 'slides' : 'video');
+              tabs.current?.querySelectorAll('button')[next]?.focus();
             }}
           >
-            {busy
-              ? 'Preparing presentation…'
-              : urls
-                ? 'Refresh presentation links'
-                : 'Get presentation links'}
+            <Icon size={18} aria-hidden="true" /> {label}
           </button>
-          {urls && (
-            <div className="review-actions">
-              <a
-                className="outline-button"
-                href={urls.open}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open PowerPoint ↗
-              </a>
-              <a className="primary" href={urls.download}>
-                Download PowerPoint
-              </a>
-              <small>Links expire after two minutes. Refresh them if needed.</small>
-            </div>
+        ))}
+        <span className="lesson-tabs-hint">
+          {tab === 'video' ? 'Watch the lesson' : 'Study at your own pace'}
+        </span>
+      </div>
+      <div
+        id="resource-panel-video"
+        role="tabpanel"
+        tabIndex={0}
+        aria-labelledby="resource-tab-video"
+        hidden={tab !== 'video'}
+      >
+        {tab === 'video' &&
+          (document.video_url ? (
+            <DriveVideo key={document.video_url} url={document.video_url} title={document.title} />
+          ) : (
+            <p className="resource-empty">A recording has not been added to this session yet.</p>
+          ))}
+        {document.video_url && (
+          <p className="video-position-note">
+            Switching to Slides closes the video player. Google Drive may restart the recording when
+            you return.
+          </p>
+        )}
+      </div>
+      <div
+        id="resource-panel-slides"
+        role="tabpanel"
+        tabIndex={0}
+        aria-labelledby="resource-tab-slides"
+        hidden={tab !== 'slides'}
+      >
+        {document.presentation_id ? (
+          visitedSlides && (
+            <Suspense
+              fallback={
+                <p role="status" className="resource-empty">
+                  Loading slides…
+                </p>
+              }
+            >
+              <Viewer
+                key={document.presentation_id}
+                id={id}
+                title={document.title}
+                active={tab === 'slides'}
+                download={() => void download()}
+                downloading={busy}
+                downloadError={error}
+              />
+            </Suspense>
+          )
+        ) : (
+          <p className="resource-empty">A presentation has not been added to this session yet.</p>
+        )}
+      </div>
+      {(!!topics.length || related) && (
+        <div className="lesson-notes">
+          {!!topics.length && (
+            <section>
+              <h2>In this session</h2>
+              <ul className="session-topics">
+                {topics.map((topic, index) => (
+                  <li key={index} dir="auto">
+                    {topic}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
-          {error && (
-            <p className="error" role="alert">
-              {error}
-            </p>
+          {related && (
+            <section>
+              <h2>Put it into practice</h2>
+              <Link className="text-button" to={'/assessments/' + related.id}>
+                {related.title} →
+              </Link>
+            </section>
           )}
-        </section>
+        </div>
       )}
-      {related ? (
-        <Link className="primary" to={'/assessments/' + related.id}>
-          Practice What You Learned · {related.title}
-        </Link>
-      ) : document.related_assessment_id ? (
-        <p>
-          Related practice is shown when you are signed in and it is available under the assessment
-          policy. Check My learning for your attempts.
-        </p>
-      ) : null}
     </div>
   );
 }

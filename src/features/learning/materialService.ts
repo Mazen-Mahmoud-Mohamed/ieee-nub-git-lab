@@ -63,3 +63,45 @@ export async function presentationURL(item: string, download = false, materialId
   if (signed.error) throw signed.error;
   return signed.data.signedUrl;
 }
+
+export async function presentationBytes(item: string, signal: AbortSignal) {
+  for (const retry of [false, true]) {
+    let url: string;
+    try {
+      url = await presentationURL(item);
+    } catch {
+      throw Error(
+        'Presentation access is unavailable. Sign in again or ask your instructor for access.',
+      );
+    }
+    const response = await fetch(url, { signal, cache: 'no-store' });
+    if (!retry && [400, 401, 403, 404].includes(response.status)) continue;
+    if (!response.ok)
+      throw Error('The presentation could not be retrieved. Retry or download the original.');
+    const reader = response.body?.getReader();
+    if (!reader) throw Error('The presentation could not be read in this browser.');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > MAX_PRESENTATION_BYTES)
+          throw Error('This presentation is too large to preview.');
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    validatePresentation('presentation.pptx', PPTX_MIME, bytes);
+    return bytes;
+  }
+  throw Error('The presentation link expired. Retry the preview.');
+}

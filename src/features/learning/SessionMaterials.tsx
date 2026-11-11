@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { requireBackend } from '../../services/supabase';
-import { DriveVideo } from './SessionResources';
+import { DriveVideo } from './TeachingResources';
 import {
   driveVideo,
   validatePresentation,
@@ -173,7 +173,7 @@ export function SessionMaterials({
             type="button"
             onClick={async () => {
               try {
-                const url = await presentationURL(id, false, document.presentation_id!);
+                const url = await presentationURL(id, true, document.presentation_id!);
                 setDraftUrl(url);
               } catch (e) {
                 setError(String(e));
@@ -183,8 +183,8 @@ export function SessionMaterials({
             Get draft presentation link
           </button>
           {draftUrl && (
-            <a className="outline-button" href={draftUrl} target="_blank" rel="noopener noreferrer">
-              Open draft PowerPoint ↗
+            <a className="outline-button" href={draftUrl} download>
+              Download draft PowerPoint
             </a>
           )}
         </details>
@@ -225,7 +225,7 @@ export function SessionMaterials({
         {document.video_url && (
           <details>
             <summary>Preview video for students</summary>
-            <DriveVideo url={document.video_url} />
+            <DriveVideo key={document.video_url} url={document.video_url} deferred />
           </details>
         )}
       </details>

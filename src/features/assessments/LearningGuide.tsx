@@ -5,8 +5,7 @@ import { courseLessons } from './presentation';
 export function LearningGuide() {
   if (supabase)
     return (
-      <div className="page narrow learning-guide">
-        <h1>Course Content</h1>
+      <div className="page learning-guide course-content">
         <PublishedCourses />
       </div>
     );
@@ -33,7 +32,6 @@ export function LearningGuide() {
           ))}
         </div>
       )}
-      {!!supabase && <PublishedCourses />}
       <Link className="primary" to="/workspace">
         Try it in the practice lab
       </Link>
