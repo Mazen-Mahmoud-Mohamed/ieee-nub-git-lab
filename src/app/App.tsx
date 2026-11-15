@@ -36,7 +36,9 @@ import { AssessmentResult } from '../features/assessments/AssessmentResult';
 import { Assessment } from '../features/questions/Assessment';
 import { Review } from '../features/submissions/Review';
 const Instructor = lazy(() =>
-  import('../features/instructor/Instructor').then((m) => ({ default: m.Instructor })),
+  import('../features/instructor/Instructor').then((m) => ({
+    default: m.Instructor,
+  })),
 );
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
@@ -82,6 +84,7 @@ export function App() {
   const session = useAssessmentSession(lab, course.state);
   const navigate = useNavigate();
   const location = useLocation();
+  const adminArea = location.pathname.startsWith('/instructor') && !!user && isInstructor;
   const loadProfile = async () => {
     if (!supabase) return;
     const {
@@ -183,80 +186,83 @@ export function App() {
     <ErrorBoundary>
       <a
         className="skip-link"
-        href="#main"
+        href={adminArea ? '#admin-content' : '#main'}
         onClick={(e) => {
           e.preventDefault();
-          document.getElementById('main')?.focus();
+          document.getElementById(adminArea ? 'admin-content' : 'main')?.focus();
         }}
       >
         Skip to main content
       </a>
-      <header className="app-header">
-        <Link to="/" className="brand">
-          <span className="brand-ieee">
-            IEEE<span>NAHDA UNIVERSITY</span>
-          </span>
-          <i />
-          <span className="brand-lab">
-            Git Lab<span>LEARN. COMMIT. GROW.</span>
-          </span>
-        </Link>
-        <nav aria-label="Main navigation">
-          <NavLink to="/dashboard">
-            <LayoutDashboard size={15} />
-            My learning
-          </NavLink>
-          <NavLink to="/learn">
-            <BookOpen size={15} />
-            Course Content
-          </NavLink>
-          {!course.active && !['/workspace', '/theory', '/review'].includes(location.pathname) && (
-            <>
-              <NavLink to="/workspace">
-                <TerminalSquare size={15} />
-                Practice lab
-              </NavLink>
-            </>
-          )}
-          {isInstructor && <NavLink to="/instructor">Admin Dashboard</NavLink>}
-        </nav>
-        <div className="header-actions">
-          <button
-            className="theme-toggle"
-            aria-label="Toggle light and dark theme"
-            onClick={() => setDark(!dark)}
-          >
-            {dark ? <Sun size={17} /> : <Moon size={17} />}
-          </button>
-          <span className="header-divider" />
-          {user ? (
-            <>
-              <Link className="avatar" title="Student profile" to="/profile">
-                {profile?.full_name
-                  ?.split(' ')
-                  .map((x) => x[0])
-                  .slice(0, 2)
-                  .join('') || 'ST'}
+      {!adminArea && (
+        <header className="app-header">
+          <Link to="/" className="brand">
+            <span className="brand-ieee">
+              IEEE<span>NAHDA UNIVERSITY</span>
+            </span>
+            <i />
+            <span className="brand-lab">
+              Git Lab<span>LEARN. COMMIT. GROW.</span>
+            </span>
+          </Link>
+          <nav aria-label="Main navigation">
+            <NavLink to="/dashboard">
+              <LayoutDashboard size={15} />
+              My learning
+            </NavLink>
+            <NavLink to="/learn">
+              <BookOpen size={15} />
+              Course Content
+            </NavLink>
+            {!course.active &&
+              !['/workspace', '/theory', '/review'].includes(location.pathname) && (
+                <>
+                  <NavLink to="/workspace">
+                    <TerminalSquare size={15} />
+                    Practice lab
+                  </NavLink>
+                </>
+              )}
+            {isInstructor && <NavLink to="/instructor">Admin Dashboard</NavLink>}
+          </nav>
+          <div className="header-actions">
+            <button
+              className="theme-toggle"
+              aria-label="Toggle light and dark theme"
+              onClick={() => setDark(!dark)}
+            >
+              {dark ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <span className="header-divider" />
+            {user ? (
+              <>
+                <Link className="avatar" title="Student profile" to="/profile">
+                  {profile?.full_name
+                    ?.split(' ')
+                    .map((x) => x[0])
+                    .slice(0, 2)
+                    .join('') || 'ST'}
+                </Link>
+                <button
+                  aria-label="Sign out"
+                  onClick={async () => {
+                    await lab.persist();
+                    await supabase?.auth.signOut();
+                    navigate('/');
+                  }}
+                >
+                  <LogOut size={16} />
+                </button>
+              </>
+            ) : (
+              <Link className="header-signin" to="/auth">
+                Sign in
+                <ArrowUpRight size={14} />
               </Link>
-              <button
-                aria-label="Sign out"
-                onClick={async () => {
-                  await lab.persist();
-                  await supabase?.auth.signOut();
-                  navigate('/');
-                }}
-              >
-                <LogOut size={16} />
-              </button>
-            </>
-          ) : (
-            <Link className="header-signin" to="/auth">
-              Sign in
-              <ArrowUpRight size={14} />
-            </Link>
-          )}
-        </div>
-      </header>
+            )}
+          </div>
+        </header>
+      )}
       {!online && (
         <div className="offline" role="status">
           <WifiOff size={15} />
@@ -462,7 +468,16 @@ export function App() {
                       </p>
                     }
                   >
-                    <Instructor />
+                    <Instructor
+                      name={profile?.full_name || user.email || 'Instructor'}
+                      dark={dark}
+                      toggleTheme={() => setDark(!dark)}
+                      signOut={async () => {
+                        await lab.persist();
+                        await supabase?.auth.signOut();
+                        navigate('/');
+                      }}
+                    />
                   </Suspense>
                 ) : (
                   <div className="page narrow">

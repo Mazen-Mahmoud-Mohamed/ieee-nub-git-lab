@@ -1,6 +1,4 @@
-import { DriveVideo } from '../learning/TeachingResources';
-import { SessionMaterials } from '../learning/SessionMaterials';
-import { driveVideo, type LearningDocument } from '../learning/materials';
+import type { LearningDocument } from '../learning/materials';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { adminError, adminRPC } from './adminData';
@@ -64,25 +62,6 @@ export function LearningContent() {
       live = false;
     };
   }, [parentId, page, state, refresh]);
-  const recoverForm = (item: Item) => {
-    try {
-      const cached = JSON.parse(sessionStorage.getItem(editorCache) || 'null');
-      if (
-        cached?.id === item.id &&
-        typeof cached.document?.title === 'string' &&
-        Array.isArray(cached.document.links) &&
-        typeof cached.revision === 'number'
-      ) {
-        setNotice(
-          'Recovered this editor form from your device. Save or publish checks its original revision. Reload saved version to discard local form changes.',
-        );
-        return { ...item, document: cached.document, revision: cached.revision };
-      }
-    } catch {
-      /* Saved server content remains available if recovery storage is unavailable. */
-    }
-    return item;
-  };
   const openId = query.get('open');
   useEffect(() => {
     let live = true;
@@ -90,8 +69,8 @@ export function LearningContent() {
       void adminRPC<Item>('manage_learning_edit', { p_id: openId })
         .then((item) => {
           if (!live) return;
-          if (item.kind === 'lesson') setEditing(recoverForm(item));
-          else setQuery({ parent: item.id });
+          if (item.kind === 'lesson') setQuery({ open: item.id });
+          else setQuery({ tab: 'structure', parent: item.id });
         })
         .catch((e) => {
           if (live) setError(adminError(e));
@@ -109,7 +88,7 @@ export function LearningContent() {
           cached &&
           cached.parent_id === (parentId || null) &&
           typeof cached.id === 'string' &&
-          ['course', 'section', 'lesson'].includes(cached.kind) &&
+          ['course', 'section'].includes(cached.kind) &&
           typeof cached.document?.title === 'string' &&
           Array.isArray(cached.document.links)
         ) {
@@ -149,9 +128,9 @@ export function LearningContent() {
     setError('');
     try {
       const item = await adminRPC<Item>('manage_learning_edit', { p_id: id });
-      if (item.kind === 'lesson') setEditing(recoverForm(item));
+      if (item.kind === 'lesson') setQuery({ open: item.id });
       else {
-        setQuery({ parent: id });
+        setQuery({ tab: 'structure', parent: id });
         setPage(0);
         setState('active');
       }
@@ -168,10 +147,7 @@ export function LearningContent() {
         p_id: editing.id || null,
         p_kind: editing.kind,
         p_parent: editing.parent_id,
-        p_document: {
-          ...editing.document,
-          video_url: driveVideo(editing.document.video_url || '')?.open || '',
-        },
+        p_document: editing.document,
         p_revision: editing.revision || null,
         p_publish: publish,
       });
@@ -195,7 +171,11 @@ export function LearningContent() {
         <button
           className="text-button"
           onClick={() => {
-            setQuery(parent.parent_id ? { parent: parent.parent_id } : {});
+            setQuery(
+              parent.parent_id
+                ? { tab: 'structure', parent: parent.parent_id }
+                : { tab: 'structure' },
+            );
             setPage(0);
           }}
         >
@@ -204,17 +184,25 @@ export function LearningContent() {
       )}
       <div className="page-heading">
         <div>
-          <h2>{parent ? parent.document.title : 'Courses & lessons'}</h2>
+          <h2>{parent ? parent.document.title : 'Courses & sections'}</h2>
           <p>
             {kind === 'lesson'
-              ? 'Add a session name, upload your PowerPoint, add a video link, then publish.'
+              ? 'Manage session content and materials in the session editor.'
               : 'Organize courses and sections. Open a section to add learning sessions.'}
           </p>
         </div>
         <button
           className="primary"
           disabled={busy || loading || !!parent?.archived_at || !!parent?.deleted_at}
-          onClick={() =>
+          onClick={() => {
+            if (kind === 'lesson' && parent) {
+              setQuery({
+                course: parent.parent_id || '',
+                section: parent.id,
+                new: 'session',
+              });
+              return;
+            }
             setEditing({
               id: crypto.randomUUID(),
               kind,
@@ -224,8 +212,8 @@ export function LearningContent() {
               archived_at: null,
               deleted_at: null,
               published_version: 0,
-            })
-          }
+            });
+          }}
         >
           New {kind === 'lesson' ? 'session' : kind}
         </button>
@@ -234,7 +222,7 @@ export function LearningContent() {
         <Link
           className="outline-button"
           to={
-            '/instructor/sessions' +
+            '/instructor/courses' +
             (parent?.kind === 'course'
               ? '?course=' + parent.id
               : parent?.kind === 'section'
@@ -242,7 +230,7 @@ export function LearningContent() {
                 : '')
           }
         >
-          Learning Sessions · Add a PowerPoint and recorded lecture
+          Manage course sessions
         </Link>
       </p>
       {parent && (
@@ -269,8 +257,7 @@ export function LearningContent() {
       {editing && (
         <section className="form-card editor-fields">
           <h3>
-            {editing.revision ? 'Edit' : 'Create'}{' '}
-            {editing.kind === 'lesson' ? 'session' : editing.kind}
+            {editing.revision ? 'Edit' : 'Create'} {editing.kind}
           </h3>
           {(editing.archived_at || editing.deleted_at) && (
             <p>Restore this content before editing it.</p>
@@ -283,7 +270,7 @@ export function LearningContent() {
           >
             <fieldset disabled={busy || !!editing.archived_at || !!editing.deleted_at}>
               <label>
-                {editing.kind === 'lesson' ? 'Session name' : 'Content title'}
+                Content title
                 <input
                   dir="auto"
                   required
@@ -292,37 +279,6 @@ export function LearningContent() {
                   onChange={(e) => update({ title: e.target.value })}
                 />
               </label>
-              {editing.kind === 'lesson' && (
-                <SessionMaterials
-                  id={editing.id}
-                  document={editing.document}
-                  update={update}
-                  busy={busy}
-                  onBusy={setBusy}
-                  prepare={async () => {
-                    const doc = {
-                      ...editing.document,
-                      video_url: driveVideo(editing.document.video_url || '')?.open || '',
-                    };
-                    await adminRPC('manage_learning_save', {
-                      p_id: editing.id,
-                      p_kind: editing.kind,
-                      p_parent: editing.parent_id,
-                      p_document: doc,
-                      p_revision: editing.revision || null,
-                      p_publish: false,
-                    });
-                    const saved = await adminRPC<Item>('manage_learning_edit', {
-                      p_id: editing.id,
-                    });
-                    setEditing((current) =>
-                      current && current.id === editing.id
-                        ? { ...current, revision: saved.revision }
-                        : current,
-                    );
-                  }}
-                />
-              )}
               <details className="session-options">
                 <summary>Optional description and supporting resources</summary>{' '}
                 <label>
@@ -382,7 +338,9 @@ export function LearningContent() {
                           )
                         )
                           return;
-                        update({ links: editing.document.links.filter((_, j) => i !== j) });
+                        update({
+                          links: editing.document.links.filter((_, j) => i !== j),
+                        });
                       }}
                     >
                       Remove resource {i + 1}
@@ -394,56 +352,13 @@ export function LearningContent() {
                   className="outline-button"
                   disabled={editing.document.links.length >= 20}
                   onClick={() =>
-                    update({ links: [...editing.document.links, { label: '', url: '' }] })
+                    update({
+                      links: [...editing.document.links, { label: '', url: '' }],
+                    })
                   }
                 >
                   Add resource link
                 </button>
-              </details>
-              <details className="draft-session-preview">
-                <summary>Preview this draft</summary>
-                <h3 dir="auto">
-                  {editing.document.session_number
-                    ? `Session ${editing.document.session_number} — `
-                    : ''}
-                  {editing.document.title}
-                </h3>
-                <p className="written-answer" dir="auto">
-                  {editing.document.body}
-                </p>
-                {!!editing.document.topics?.length && (
-                  <ul>
-                    {editing.document.topics.map((t, i) => (
-                      <li dir="auto" key={i}>
-                        {t}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {editing.document.video_url && (
-                  <DriveVideo
-                    key={editing.document.video_url}
-                    url={editing.document.video_url}
-                    deferred
-                  />
-                )}
-                {editing.document.presentation_id && (
-                  <p>
-                    The draft presentation can be opened above. Students see it only after
-                    publication.
-                  </p>
-                )}
-                <ul>
-                  {editing.document.links
-                    .filter((l) => /^https:\/\//.test(l.url))
-                    .map((l, i) => (
-                      <li key={i}>
-                        <a href={l.url} target="_blank" rel="noopener noreferrer">
-                          {l.label}
-                        </a>
-                      </li>
-                    ))}
-                </ul>
               </details>
               <div className="review-actions">
                 <button className="outline-button">Save content draft</button>
@@ -454,7 +369,7 @@ export function LearningContent() {
                     if (e.currentTarget.form?.reportValidity()) void save(true);
                   }}
                 >
-                  {editing.kind === 'lesson' ? 'Publish session' : 'Publish content version'}
+                  Publish content version
                 </button>
               </div>
             </fieldset>
@@ -603,7 +518,10 @@ export function AssessmentCourse({ id }: { id: string }) {
     let live = true;
     void Promise.all([
       adminRPC<Array<{ id: string; title: string }>>('manage_course_options'),
-      adminRPC<ManagedRecord>('manage_preview', { p_kind: 'assessment', p_id: id }),
+      adminRPC<ManagedRecord>('manage_preview', {
+        p_kind: 'assessment',
+        p_id: id,
+      }),
       requireBackend()
         .from('assessment_courses')
         .select('course_id')
@@ -655,8 +573,12 @@ export function AssessmentCourse({ id }: { id: string }) {
               p_revision: revision,
             });
             setRevision(
-              (await adminRPC<ManagedRecord>('manage_preview', { p_kind: 'assessment', p_id: id }))
-                .revision,
+              (
+                await adminRPC<ManagedRecord>('manage_preview', {
+                  p_kind: 'assessment',
+                  p_id: id,
+                })
+              ).revision,
             );
             setNotice('Course organization saved.');
           } catch (e) {
@@ -674,7 +596,7 @@ export function AssessmentCourse({ id }: { id: string }) {
           {error}
         </p>
       )}
-      <Link to="/instructor/content">Manage courses</Link>
+      <Link to="/instructor/courses?tab=structure">Manage courses</Link>
     </section>
   );
 }

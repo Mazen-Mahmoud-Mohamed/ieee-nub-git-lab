@@ -5,7 +5,18 @@ import { RecordActions } from './RecordManagement';
 import { AssessmentCourse } from './LearningContent';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Plus, ArrowUp, ArrowDown, Copy, Save, Trash2 } from 'lucide-react';
+import {
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  Save,
+  Trash2,
+  RefreshCw,
+  History,
+  ClipboardList,
+  ArrowLeft,
+} from 'lucide-react';
 import { requireBackend } from '../../services/supabase';
 import {
   assertDefinition,
@@ -39,63 +50,151 @@ function move<T>(items: T[], i: number, delta: number) {
   [next[i], next[j]] = [next[j], next[i]];
   return next;
 }
-export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
-  const [archiveFilter, setArchiveFilter] = useState('active'),
-    [managementNotice, setManagementNotice] = useState('');
+type CatalogAssessment = {
+  id: string;
+  title: string;
+  description: string;
+  type: 'assignment' | 'exam';
+  archived: boolean;
+  visible: boolean;
+  published_version: number;
+  course_slot?: string | null;
+  assessment_drafts?: {
+    document?: Pick<Definition, 'title'>;
+    updated_at?: string;
+  } | null;
+};
+type CatalogStatus =
+  'active' | 'published' | 'hidden' | 'draft' | 'archived' | 'unavailable' | 'all';
+const catalogStatuses: CatalogStatus[] = [
+  'active',
+  'published',
+  'hidden',
+  'draft',
+  'archived',
+  'unavailable',
+  'all',
+];
+function catalogStatus(assessment: CatalogAssessment) {
+  if (assessment.archived) return 'archived';
+  if (assessment.published_version > 0) return assessment.visible ? 'published' : 'hidden';
+  return assessment.assessment_drafts ? 'draft' : 'unavailable';
+}
+export function AssessmentManager({ type: legacyType }: { type?: 'assignment' | 'exam' }) {
+  const navigate = useNavigate();
+  const [routeParams] = useSearchParams();
+  const routeType = routeParams.get('type');
+  const routeStatus = routeParams.get('status');
+  const selectedRouteStatus = catalogStatuses.includes(routeStatus as CatalogStatus)
+    ? (routeStatus as CatalogStatus)
+    : 'active';
+  const [search, setSearch] = useState('');
+  const [type, setType] = useState(
+    legacyType || (routeType === 'assignment' || routeType === 'exam' ? routeType : ''),
+  );
+  const [status, setStatus] = useState<CatalogStatus>(selectedRouteStatus);
   const [page, setPage] = useState(0),
-    [total, setTotal] = useState(0),
-    [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<any[]>([]);
-  const [error, setError] = useState('');
-  const load = async () => {
+    [total, setTotal] = useState(0);
+  const [rows, setRows] = useState<CatalogAssessment[]>([]);
+  const [loading, setLoading] = useState(true),
+    [refresh, setRefresh] = useState(0);
+  const [error, setError] = useState(''),
+    [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [history, setHistory] = useState<CatalogAssessment | null>(null);
+  useEffect(() => {
+    setType(legacyType || (routeType === 'assignment' || routeType === 'exam' ? routeType : ''));
+    setPage(0);
+    setStatus(selectedRouteStatus);
+  }, [legacyType, routeType, selectedRouteStatus]);
+  useEffect(() => {
+    let live = true;
     setLoading(true);
     setError('');
-    let query = requireBackend()
-      .from('assignments')
-      .select('*,assessment_drafts(document)', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(page * 25, page * 25 + 24);
-    if (type) query = query.eq('type', type);
-    if (archiveFilter !== 'all') query = query.eq('archived', archiveFilter === 'archived');
-    const { data, error, count } = await query;
-    if (error) setError(error.message);
-    else {
-      setRows(data || []);
-      setTotal(count || 0);
-    }
-    setLoading(false);
-  };
-  useEffect(() => {
-    void load();
-  }, [type, page, archiveFilter]);
-  const action = async (
-    fn: () => PromiseLike<any>,
-    description = 'Apply this assessment change? Active attempts retain their published version.',
-  ) => {
-    if (!window.confirm(description)) return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          let query = requireBackend()
+            .from('assignments')
+            .select('*,assessment_drafts(document,updated_at)', {
+              count: 'exact',
+            })
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(page * 25, page * 25 + 24);
+          if (type) query = query.eq('type', type);
+          if (search.trim()) query = query.ilike('title', '%' + search.trim() + '%');
+          if (status !== 'all') query = query.eq('archived', status === 'archived');
+          if (status === 'published' || status === 'hidden')
+            query = query.gt('published_version', 0).eq('visible', status === 'published');
+          if (status === 'draft' || status === 'unavailable') {
+            query = query.eq('published_version', 0);
+            query =
+              status === 'draft'
+                ? query.not('assessment_drafts', 'is', null)
+                : query.is('assessment_drafts', null);
+          }
+          const response = await query;
+          if (response.error) throw response.error;
+          if (live) {
+            setRows(response.data || []);
+            setTotal(response.count ?? response.data?.length ?? 0);
+          }
+        } catch (e) {
+          if (live)
+            setError(
+              e instanceof Error ? e.message : String((e as { message?: string })?.message || e),
+            );
+        } finally {
+          if (live) setLoading(false);
+        }
+      })();
+    }, 180);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [search, type, status, page, refresh]);
+  const action = async (record: CatalogAssessment, duplicate: boolean) => {
+    setBusy(record.id);
+    setError('');
+    setNotice('');
     try {
-      const r = await fn();
-      if (r.error) throw r.error;
-      await load();
+      const result = await requireBackend().rpc(
+        duplicate ? 'duplicate_assessment' : 'set_assessment_visibility',
+        duplicate
+          ? { p_id: record.id }
+          : { p_id: record.id, p_visible: !record.visible, p_archive: false },
+      );
+      if (result.error) throw result.error;
+      setNotice(
+        duplicate
+          ? 'Created an unpublished copy. Open it to edit the new draft.'
+          : record.visible
+            ? 'Assessment hidden from new starts.'
+            : 'Published assessment made visible.',
+      );
+      if (duplicate && typeof result.data === 'string') {
+        navigate('/instructor/assessments/' + result.data);
+      } else {
+        setRefresh((n) => n + 1);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String((e as { message?: string })?.message || e));
+    } finally {
+      setBusy(null);
     }
   };
+  if (history)
+    return <AssessmentVersionHistory assessment={history} close={() => setHistory(null)} />;
   return (
-    <section>
-      <div className="page-heading">
+    <section className="assessment-catalog">
+      <div className="page-heading catalog-toolbar">
         <div>
-          <h2>
-            {type === 'exam'
-              ? 'Exams'
-              : type === 'assignment'
-                ? 'Assignments'
-                : 'Assignments & exams'}
-          </h2>
+          <h2>Assessment catalog</h2>
           <p>
-            Create a draft, configure tasks and questions, then publish it for students. Current
-            attempts keep their original instructions.
+            Manage drafts and published versions for Task 1, Task 2, the Final Exam and future
+            assessments.
           </p>
         </div>
         <Link
@@ -103,104 +202,290 @@ export function AssessmentManager({ type }: { type?: 'assignment' | 'exam' }) {
           to={'/instructor/assessments/new' + (type ? '?type=' + type : '')}
         >
           <Plus size={16} />
-          {type === 'exam'
-            ? 'New exam'
-            : type === 'assignment'
-              ? 'New assignment'
-              : 'New assessment'}
+          New assessment
         </Link>
       </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {loading && <p role="status">Loading assessments…</p>}
-      <label>
-        Show assessments
-        <select
-          value={archiveFilter}
+      <div className="table-toolbar">
+        <input
+          aria-label="Search assessment title"
+          placeholder="Search assessment title"
+          maxLength={180}
+          value={search}
           onChange={(e) => {
-            setArchiveFilter(e.target.value);
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+        />
+        <select
+          aria-label="Assessment type filter"
+          value={type}
+          onChange={(e) => {
+            setType(e.target.value);
             setPage(0);
           }}
         >
-          <option value="active">Active</option>
-          <option value="archived">Archived Items</option>
+          <option value="">All types</option>
+          <option value="assignment">Assignments</option>
+          <option value="exam">Exams</option>
+        </select>
+        <select
+          aria-label="Assessment status filter"
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value as CatalogStatus);
+            setPage(0);
+          }}
+        >
+          <option value="active">Active assessments</option>
+          <option value="published">Published</option>
+          <option value="draft">Drafts</option>
+          <option value="hidden">Hidden published versions</option>
+          <option value="archived">Archived assessments</option>
+          <option value="unavailable">Unavailable</option>
           <option value="all">All retained assessments</option>
         </select>
-      </label>
-      {managementNotice && <p role="status">{managementNotice}</p>}
-      <div className="course-grid">
-        {rows.map((r) => (
-          <article className="form-card assessment-card" key={r.id}>
-            <span className="eyebrow">
-              {r.type} ·{' '}
-              {r.archived
-                ? 'Archived'
-                : r.visible
-                  ? 'Published · v' + r.published_version
-                  : 'Draft / unpublished'}
-            </span>
-            <h3>{r.assessment_drafts?.document?.title || r.title}</h3>
-            <p>{r.description}</p>
-            <div className="assessment-card-actions">
-              {!r.archived && (
-                <Link className="primary" to={'/instructor/assessments/' + r.id}>
-                  Edit
-                </Link>
-              )}
-              <button
-                className="outline-button"
-                onClick={() =>
-                  void action(
-                    () => requireBackend().rpc('duplicate_assessment', { p_id: r.id }),
-                    'Duplicate ' +
-                      r.title +
-                      ' as a new unpublished draft? Existing versions and student work stay unchanged.',
-                  )
-                }
-              >
-                <Copy size={14} />
-                Duplicate
-              </button>
-              {r.published_version > 0 && !r.archived && (
-                <>
-                  {' '}
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      void action(
-                        () =>
-                          requireBackend().rpc('set_assessment_visibility', {
-                            p_id: r.id,
-                            p_visible: !r.visible,
-                            p_archive: false,
-                          }),
-                        (r.visible ? 'Hide ' : 'Make visible ') +
-                          r.title +
-                          '? Existing attempts keep their published version.',
-                      )
-                    }
-                  >
-                    {r.visible ? 'Unpublish' : 'Make visible'}
-                  </button>
-                </>
-              )}
-              <RecordActions
-                kind="assessment"
-                id={r.id}
-                changed={() => {
-                  setManagementNotice('Record management completed.');
-                  void load();
-                }}
-              />
-            </div>
-          </article>
-        ))}
+        <button
+          className="outline-button"
+          disabled={loading}
+          onClick={() => setRefresh((n) => n + 1)}
+        >
+          <RefreshCw size={15} />
+          Refresh
+        </button>
       </div>
-      {!loading && !rows.length && !error && <p>No assessments yet. Create your first draft.</p>}
-      <Pagination page={page} total={total} onPage={setPage} />
+      {error && (
+        <div className="error" role="alert">
+          <p>{error}</p>
+          <button className="outline-button" onClick={() => setRefresh((n) => n + 1)}>
+            Retry assessment load
+          </button>
+        </div>
+      )}
+      {notice && (
+        <p role="status" className="notice">
+          {notice}
+        </p>
+      )}
+      {loading ? (
+        <p role="status">Loading assessments…</p>
+      ) : (
+        !error && (
+          <>
+            <p className="muted">
+              {total} {total === 1 ? 'assessment' : 'assessments'} matching these filters
+            </p>
+            <div className="assessment-catalog-grid course-grid">
+              {rows.map((r) => {
+                const state = catalogStatus(r);
+                return (
+                  <article className="form-card assessment-catalog-card assessment-card" key={r.id}>
+                    <div className="assessment-meta">
+                      <span className="eyebrow">
+                        {r.course_slot === 'task1'
+                          ? 'Task 1'
+                          : r.course_slot === 'task2'
+                            ? 'Task 2'
+                            : r.course_slot === 'final'
+                              ? 'Final Exam'
+                              : r.type === 'exam'
+                                ? 'Exam'
+                                : 'Assignment'}
+                      </span>
+                      <span className="status-badge" data-tone={state}>
+                        {state === 'hidden'
+                          ? 'Hidden'
+                          : state.charAt(0).toUpperCase() + state.slice(1)}
+                      </span>
+                    </div>
+                    <h3 dir="auto">{r.title}</h3>
+                    {r.assessment_drafts?.document?.title &&
+                      r.assessment_drafts.document.title !== r.title && (
+                        <small dir="auto">Draft title: {r.assessment_drafts.document.title}</small>
+                      )}
+                    {r.description && <p dir="auto">{r.description}</p>}
+                    <p className="muted">
+                      {r.published_version > 0
+                        ? 'Published version ' + r.published_version
+                        : state === 'unavailable'
+                          ? 'Content has not been configured.'
+                          : 'Draft awaiting publication.'}
+                      {r.published_version > 0 &&
+                        r.assessment_drafts &&
+                        ' · Editable draft available'}
+                    </p>
+                    <div className="assessment-card-actions">
+                      {!r.archived && (
+                        <Link className="primary" to={'/instructor/assessments/' + r.id}>
+                          {state === 'unavailable' ? 'Configure assessment' : 'Edit draft'}
+                        </Link>
+                      )}
+                      <button
+                        className="outline-button"
+                        disabled={busy !== null}
+                        onClick={() => void action(r, true)}
+                      >
+                        <Copy size={14} />
+                        {busy === r.id ? 'Working…' : 'Duplicate'}
+                      </button>
+                      {r.published_version > 0 && (
+                        <button className="outline-button" onClick={() => setHistory(r)}>
+                          <History size={14} />
+                          Version history
+                        </button>
+                      )}
+                      {r.published_version > 0 && !r.archived && (
+                        <button
+                          className="text-button"
+                          disabled={busy !== null}
+                          onClick={() => void action(r, false)}
+                        >
+                          {r.visible ? 'Unpublish' : 'Make visible'}
+                        </button>
+                      )}
+                      <RecordActions
+                        kind="assessment"
+                        id={r.id}
+                        changed={() => {
+                          setNotice('Record management completed.');
+                          setRefresh((n) => n + 1);
+                        }}
+                      />
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            {!rows.length && (
+              <div className="empty-state">
+                <ClipboardList size={28} />
+                <h3>No matching assessments</h3>
+                <p>Adjust the filters or create a new assessment draft.</p>
+                {(search || type || status !== 'active') && (
+                  <button
+                    className="outline-button"
+                    onClick={() => {
+                      setSearch('');
+                      setType('');
+                      setStatus('active');
+                      setPage(0);
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            )}
+            <Pagination page={page} total={total} onPage={setPage} />
+          </>
+        )
+      )}
+    </section>
+  );
+}
+function AssessmentVersionHistory({
+  assessment,
+  close,
+}: {
+  assessment: CatalogAssessment;
+  close: () => void;
+}) {
+  const [rows, setRows] = useState<
+    Array<{ version: number; created_at: string; document: Definition }>
+  >([]);
+  const [page, setPage] = useState(0),
+    [total, setTotal] = useState(0),
+    [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true),
+    [error, setError] = useState('');
+  const [preview, setPreview] = useState<Definition>();
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError('');
+    void (async () => {
+      try {
+        const response = await requireBackend()
+          .from('assessment_versions')
+          .select('version,created_at,document', { count: 'exact' })
+          .eq('assessment_id', assessment.id)
+          .order('version', { ascending: false })
+          .range(page * 25, page * 25 + 24);
+        if (response.error) throw response.error;
+        if (live) {
+          setRows(response.data || []);
+          setTotal(response.count ?? response.data?.length ?? 0);
+        }
+      } catch (e) {
+        if (live)
+          setError(
+            e instanceof Error ? e.message : String((e as { message?: string })?.message || e),
+          );
+      } finally {
+        if (live) setLoading(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [assessment.id, page, refresh]);
+  if (preview) return <StudentPreview definition={preview} close={() => setPreview(undefined)} />;
+  return (
+    <section className="version-history">
+      <button className="text-button" onClick={close}>
+        <ArrowLeft size={16} />
+        Back to assessment catalog
+      </button>
+      <div className="page-heading">
+        <div>
+          <h2>{assessment.title} · Version history</h2>
+          <p>Published versions retain the instructions used by existing attempts.</p>
+        </div>
+        {!assessment.archived && (
+          <Link className="primary" to={'/instructor/assessments/' + assessment.id}>
+            Edit current draft
+          </Link>
+        )}
+      </div>
+      {error && (
+        <div role="alert" className="error">
+          <p>{error}</p>
+          <button className="outline-button" onClick={() => setRefresh((n) => n + 1)}>
+            Retry version history
+          </button>
+        </div>
+      )}
+      {loading ? (
+        <p role="status">Loading published versions…</p>
+      ) : (
+        !error && (
+          <>
+            {rows.map((version) => (
+              <article key={version.version} className="form-card version-row">
+                <div>
+                  <h3>
+                    Version {version.version}
+                    {version.version === assessment.published_version && (
+                      <span className="badge">Current</span>
+                    )}
+                  </h3>
+                  <p>
+                    {version.document.title} · {new Date(version.created_at).toLocaleString()}
+                  </p>
+                  <small>
+                    {totals(version.document).practical} practical +{' '}
+                    {totals(version.document).theory} theory points
+                  </small>
+                </div>
+                <button className="outline-button" onClick={() => setPreview(version.document)}>
+                  Preview version {version.version}
+                </button>
+              </article>
+            ))}
+            {!rows.length && <p className="empty-state">No published versions are available.</p>}
+            <Pagination page={page} total={total} onPage={setPage} />
+          </>
+        )
+      )}
     </section>
   );
 }
@@ -222,6 +507,8 @@ export function AssessmentEditor() {
       setEditorTab('details');
   }, [definition.format, editorTab]);
   const [loading, setLoading] = useState(!creating);
+  const [draftRefresh, setDraftRefresh] = useState(0);
+  const [draftLoadFailed, setDraftLoadFailed] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -237,25 +524,64 @@ export function AssessmentEditor() {
   const navigate = useNavigate();
   useEffect(() => {
     let live = true;
-    if (!creating)
-      void requireBackend()
-        .from('assessment_drafts')
-        .select('document')
-        .eq('assessment_id', assessmentId)
-        .single()
-        .then(({ data, error }) => {
-          if (!live) return;
-          if (error) setError(error.message);
-          else {
-            setDefinition(data.document);
-            setSavedTheoryDraft(data.document);
-          }
-          setLoading(false);
-        });
+    if (creating) {
+      setLoading(false);
+      setDraftLoadFailed(false);
+      setDefinition(blankDefinition(searchParams.get('type') === 'exam' ? 'exam' : 'assignment'));
+      setSavedTheoryDraft(undefined);
+      return;
+    }
+    setDraftLoadFailed(false);
+    setLoading(true);
+    setError('');
+    void (async () => {
+      try {
+        const client = requireBackend();
+        const draft = await client
+          .from('assessment_drafts')
+          .select('document')
+          .eq('assessment_id', assessmentId)
+          .maybeSingle();
+        if (draft.error) throw draft.error;
+        let document: Definition;
+        if (draft.data) document = draft.data.document;
+        else {
+          const record = await client
+            .from('assignments')
+            .select('title,description,type,course_slot,published_version')
+            .eq('id', assessmentId)
+            .single();
+          if (record.error) throw record.error;
+          if (record.data.published_version > 0)
+            throw new Error(
+              'The draft for this published assessment is unavailable. Retry or ask a data administrator to inspect the retained draft.',
+            );
+          document = {
+            ...blankDefinition(record.data.type),
+            title: record.data.title,
+            description: record.data.description || '',
+            courseSlot: record.data.course_slot || undefined,
+          };
+        }
+        if (live) {
+          setDefinition(document);
+          setSavedTheoryDraft(document);
+        }
+      } catch (e) {
+        if (live) {
+          setDraftLoadFailed(true);
+          setError(
+            e instanceof Error ? e.message : String((e as { message?: string })?.message || e),
+          );
+        }
+      } finally {
+        if (live) setLoading(false);
+      }
+    })();
     return () => {
       live = false;
     };
-  }, [assessmentId]);
+  }, [assessmentId, creating, draftRefresh]);
   useEffect(() => {
     let live = true;
     void requireBackend()
@@ -344,7 +670,22 @@ export function AssessmentEditor() {
     }
   };
   const points = totals(definition);
-  if (loading) return <p>Loading draft…</p>;
+  if (loading) return <p role="status">Loading draft…</p>;
+  if (draftLoadFailed)
+    return (
+      <section className="form-card">
+        <Link className="text-button" to="/instructor/assessments">
+          ← All assessments
+        </Link>
+        <h2>Assessment draft unavailable</h2>
+        <p role="alert" className="error">
+          {error}
+        </p>
+        <button className="outline-button" onClick={() => setDraftRefresh((n) => n + 1)}>
+          Retry draft load
+        </button>
+      </section>
+    );
   if (preview) return <StudentPreview definition={definition} close={() => setPreview(false)} />;
   return (
     <div className="assessment-editor">
@@ -505,7 +846,9 @@ export function AssessmentEditor() {
                 type="datetime-local"
                 value={localDate(definition[key])}
                 onChange={(e) =>
-                  update({ [key]: e.target.value ? new Date(e.target.value).toISOString() : null })
+                  update({
+                    [key]: e.target.value ? new Date(e.target.value).toISOString() : null,
+                  })
                 }
               />
             </label>
@@ -534,7 +877,9 @@ export function AssessmentEditor() {
           <select
             value={definition.courseSlot || ''}
             onChange={(e) =>
-              update({ courseSlot: (e.target.value || undefined) as Definition['courseSlot'] })
+              update({
+                courseSlot: (e.target.value || undefined) as Definition['courseSlot'],
+              })
             }
           >
             <option value="">Standalone assessment</option>
@@ -589,7 +934,12 @@ export function AssessmentEditor() {
                 type="checkbox"
                 checked={definition.starter.initialize}
                 onChange={(e) =>
-                  update({ starter: { ...definition.starter, initialize: e.target.checked } })
+                  update({
+                    starter: {
+                      ...definition.starter,
+                      initialize: e.target.checked,
+                    },
+                  })
                 }
               />
               Initialize a repository on main
@@ -633,7 +983,10 @@ export function AssessmentEditor() {
                       update({
                         starter: {
                           ...definition.starter,
-                          files: { ...definition.starter.files, [path]: e.target.value },
+                          files: {
+                            ...definition.starter.files,
+                            [path]: e.target.value,
+                          },
                         },
                       })
                     }
@@ -723,7 +1076,13 @@ export function AssessmentEditor() {
                   update({
                     sections: [
                       ...sections,
-                      { id: id(), title: 'New section', description: '', steps: [], tasks: [] },
+                      {
+                        id: id(),
+                        title: 'New section',
+                        description: '',
+                        steps: [],
+                        tasks: [],
+                      },
                     ],
                   })
                 }
@@ -787,7 +1146,12 @@ export function AssessmentEditor() {
                         onRemove={() =>
                           update({
                             sections: sections.map((s, i) =>
-                              i === si ? { ...s, tasks: s.tasks.filter((_, j) => j !== ti) } : s,
+                              i === si
+                                ? {
+                                    ...s,
+                                    tasks: s.tasks.filter((_, j) => j !== ti),
+                                  }
+                                : s,
                             ),
                           })
                         }
@@ -809,7 +1173,10 @@ export function AssessmentEditor() {
                           max={1000}
                           value={task.points}
                           onChange={(e) =>
-                            setTask(si, ti, { ...task, points: Number(e.target.value) })
+                            setTask(si, ti, {
+                              ...task,
+                              points: Number(e.target.value),
+                            })
                           }
                         />
                       </label>
@@ -820,7 +1187,12 @@ export function AssessmentEditor() {
                       <textarea
                         rows={3}
                         value={task.instructions}
-                        onChange={(e) => setTask(si, ti, { ...task, instructions: e.target.value })}
+                        onChange={(e) =>
+                          setTask(si, ti, {
+                            ...task,
+                            instructions: e.target.value,
+                          })
+                        }
                       />
                     </label>
                     <label className="checkbox-label">
@@ -889,7 +1261,10 @@ export function AssessmentEditor() {
                           })
                         }
                         onRemove={() =>
-                          setTask(si, ti, { ...task, rules: task.rules.filter((_, i) => i !== ri) })
+                          setTask(si, ti, {
+                            ...task,
+                            rules: task.rules.filter((_, i) => i !== ri),
+                          })
                         }
                       />
                     ))}
@@ -900,7 +1275,12 @@ export function AssessmentEditor() {
                           ...task,
                           rules: [
                             ...task.rules,
-                            { type: 'file', path: 'file.txt', ref: 'main', match: 'exists' },
+                            {
+                              type: 'file',
+                              path: 'file.txt',
+                              ref: 'main',
+                              match: 'exists',
+                            },
                           ],
                         })
                       }
@@ -925,7 +1305,13 @@ export function AssessmentEditor() {
                                   instructions: '',
                                   points: 10,
                                   bonus: false,
-                                  rules: [{ type: 'repository', branch: 'main', clean: true }],
+                                  rules: [
+                                    {
+                                      type: 'repository',
+                                      branch: 'main',
+                                      clean: true,
+                                    },
+                                  ],
                                 },
                               ],
                             }
@@ -1037,14 +1423,18 @@ export function AssessmentEditor() {
                   count={definition.questions.length}
                   onMove={(delta) => update({ questions: move(definition.questions, qi, delta) })}
                   onRemove={() =>
-                    update({ questions: definition.questions.filter((_, i) => i !== qi) })
+                    update({
+                      questions: definition.questions.filter((_, i) => i !== qi),
+                    })
                   }
                 />
               </div>
               <QuestionEditor
                 value={question}
                 onChange={(next) =>
-                  update({ questions: definition.questions.map((q, i) => (i === qi ? next : q)) })
+                  update({
+                    questions: definition.questions.map((q, i) => (i === qi ? next : q)),
+                  })
                 }
               />
               <button
@@ -1383,7 +1773,11 @@ export function QuestionEditor({
           <textarea
             value={(q.correctAnswers || []).join('\n')}
             onChange={(e) =>
-              onChange({ ...q, correctAnswers: e.target.value.split('\n'), manual: false })
+              onChange({
+                ...q,
+                correctAnswers: e.target.value.split('\n'),
+                manual: false,
+              })
             }
           />
         </label>
@@ -1396,7 +1790,11 @@ export function QuestionEditor({
               rows={4}
               value={q.options.join('\n')}
               onChange={(e) =>
-                onChange({ ...q, options: e.target.value.split('\n'), correctAnswers: [] })
+                onChange({
+                  ...q,
+                  options: e.target.value.split('\n'),
+                  correctAnswers: [],
+                })
               }
             />
           </label>
@@ -1589,7 +1987,11 @@ export function QuestionBank() {
               setBusy(true);
               setError('');
               try {
-                assertDefinition({ ...blankDefinition(), format: 'theory', questions: [editing] });
+                assertDefinition({
+                  ...blankDefinition(),
+                  format: 'theory',
+                  questions: [editing],
+                });
                 const { error } = await requireBackend().rpc('save_bank_question', {
                   p_id: selected,
                   p_document: editing,

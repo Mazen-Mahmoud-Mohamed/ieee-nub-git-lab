@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { requireBackend } from '../../services/supabase';
 import { DriveVideo } from './TeachingResources';
 import {
@@ -15,6 +15,7 @@ export function SessionMaterials({
   prepare,
   busy,
   onBusy,
+  advanced,
 }: {
   id: string;
   document: LearningDocument;
@@ -22,6 +23,7 @@ export function SessionMaterials({
   prepare: () => Promise<void>;
   busy: boolean;
   onBusy: (v: boolean) => void;
+  advanced?: ReactNode;
 }) {
   const [draftUrl, setDraftUrl] = useState('');
   const [progress, setProgress] = useState<number | null>(null),
@@ -230,7 +232,12 @@ export function SessionMaterials({
         )}
       </details>
       <details className="session-options">
-        <summary>Session options: order, topics and related practice</summary>{' '}
+        <summary>
+          {advanced
+            ? 'Advanced session settings'
+            : 'Session options: order, topics and related practice'}
+        </summary>
+        {advanced}{' '}
         <div className="session-numbers">
           <label>
             Session number

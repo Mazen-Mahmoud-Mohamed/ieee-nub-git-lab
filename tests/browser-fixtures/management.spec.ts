@@ -2,7 +2,7 @@ import { TASK_ONE_ID } from '../../src/features/assignments/assignment';
 import { taskOneDefinition } from '../../src/features/assessments/taskOne';
 import type { AssessmentQuestion } from '../../src/features/assessments/model';
 import { createServer, type Server } from 'node:http';
-import { execFileSync } from 'node:child_process';
+
 import { createHash } from 'node:crypto';
 import { handleMaterial } from '../../supabase/functions/learning-material/handler';
 import { verifyAssessment } from '../../src/features/assessments/verify';
@@ -97,10 +97,10 @@ test('direct Learning Sessions shows only published teaching cards and preserves
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor/sessions');
   await expect(
-    page.getByRole('heading', { name: 'Actual Teaching Sessions', exact: true }),
+    page.getByRole('heading', { name: 'Courses & sessions', exact: true }),
   ).toBeVisible();
   await expect(page.locator('.session-list > .managed-row')).toHaveCount(0);
-  await page.getByText('Legacy Learning Content · 6', { exact: true }).click();
+  await page.getByLabel('Include tutorial content').check();
   await expect(
     page.getByRole('heading', { name: 'Files and the editor', exact: true }),
   ).toBeVisible();
@@ -112,10 +112,9 @@ test('direct Learning Sessions shows only published teaching cards and preserves
       )
     : [
         Buffer.from(pptxBytes()),
-        execFileSync('git', ['show', 'HEAD:Git Course IEEE.pptx'], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          maxBuffer: 5000000,
-        }),
+        await readFile(
+          join(process.env.ADMIN_REVIEW_SOURCE || process.cwd(), 'Git Course IEEE.pptx'),
+        ),
       ];
   for (const [index, title] of [
     'Git foundations — isolated test',
@@ -549,9 +548,7 @@ test('direct Learning Sessions shows only published teaching cards and preserves
     .locator('.session-list > .managed-row')
     .filter({ hasText: 'Branches and merges — isolated test' });
   await row.getByRole('button', { name: 'Edit Session', exact: true }).click();
-  await page
-    .getByText('Session options: order, topics and related practice', { exact: true })
-    .click();
+  await openSessionOptions(page);
   await page.getByLabel('Display order', { exact: true }).fill('5');
   await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
@@ -563,19 +560,30 @@ test('direct Learning Sessions shows only published teaching cards and preserves
     h.rpc(STUDENT, 'manage_learning_unpublish', { p_id: lessons[0], p_revision: 1 }),
   ).rejects.toThrow(/Instructor authorization/);
   page.once('dialog', (d) => d.accept());
-  await row.getByRole('button', { name: 'Unpublish Session', exact: true }).click();
+  await row.getByRole('button', { name: 'Edit Session', exact: true }).click();
+  await page.getByRole('button', { name: 'Unpublish Session', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session unpublished.' })).toBeVisible();
   await student.reload();
   await expect(student.locator('.teaching-session-card')).toHaveCount(1);
   const remaining = page
     .locator('.session-list > .managed-row')
     .filter({ hasText: 'Git foundations — isolated test' });
-  page.once('dialog', (d) => d.dismiss());
-  await remaining.getByRole('button', { name: 'Archive Session', exact: true }).click();
+  await remaining.getByRole('button', { name: 'Manage record', exact: true }).click();
+  await remaining.getByRole('button', { name: 'Archive', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel management action', exact: true }).click();
   await expect(remaining).toBeVisible();
-  page.once('dialog', (d) => d.accept());
-  await remaining.getByRole('button', { name: 'Archive Session', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Session archived.' })).toBeVisible();
+  await remaining.getByRole('button', { name: 'Archive', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm Archive', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        !!(
+          await h.db.query<any>('select archived_at from public.learning_items where id=$1', [
+            lessons[0],
+          ])
+        ).rows[0].archived_at,
+    )
+    .toBe(true);
   await student.reload();
   await expect(student.getByText('No sessions available yet.', { exact: true })).toBeVisible();
   const third = await h.rpc(TEACHER, 'manage_learning_save', {
@@ -622,8 +630,13 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
 }) => {
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor');
-  await page.getByRole('link', { name: 'Learning Sessions', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Learning Sessions', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  const navigation = page.getByRole('button', { name: 'Open navigation', exact: true });
+  if (await navigation.isVisible()) await navigation.click();
+  await page.getByRole('link', { name: 'Courses & sessions', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Courses & sessions', exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel('Session course')).toHaveValue(
     '70000000-0000-4000-8000-000000000001',
   );
@@ -632,10 +645,9 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
   await expect(page.getByLabel('Content title', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel(/Resource \d+ URL/)).toHaveCount(0);
   await page.getByLabel('Session Title', { exact: true }).fill('Session 1 — Git Basics');
-  const pptx = execFileSync('git', ['show', 'HEAD:Git Course IEEE.pptx'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 5000000,
-  });
+  const pptx = await readFile(
+    join(process.env.ADMIN_REVIEW_SOURCE || process.cwd(), 'Git Course IEEE.pptx'),
+  );
   const drop = await page.evaluateHandle(
     ({ bytes, mime }) => {
       const transfer = new DataTransfer();
@@ -794,7 +806,7 @@ test('direct Learning Sessions accepts a real PPTX and lecture in one form and s
   await studentContext.close();
 });
 
-test('direct Learning Sessions saves a video independently and sets up an empty session section with consent', async ({
+test('direct Learning Sessions saves a video independently and preserves existing unpublished sections until explicit publication', async ({
   page,
   browser,
 }) => {
@@ -817,15 +829,23 @@ test('direct Learning Sessions saves a video independently and sets up an empty 
   await backend(page, TEACHER);
   await page.goto('/ieee-git-lab/#/instructor/sessions?course=' + course);
   await expect(page.getByLabel('Session course')).toHaveValue(course);
-  page.once('dialog', (d) => d.dismiss());
-  await page.getByRole('button', { name: 'Add Session', exact: true }).click();
-  await expect(page.getByLabel('Session Title', { exact: true })).toHaveCount(0);
-  page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Add Session', exact: true }).click();
   await page.getByLabel('Session Title', { exact: true }).fill('Lecture without slides');
   await page
     .getByLabel('Google Drive video link')
     .fill('https://drive.google.com/open?id=abcdefghij123');
+  const parentDraft = await h.rpc(TEACHER, 'manage_learning_edit', { p_id: draftSection });
+  await h.rpc(TEACHER, 'manage_learning_save', {
+    p_id: draftSection,
+    p_kind: 'section',
+    p_parent: course,
+    p_revision: parentDraft.revision,
+    p_document: parentDraft.document,
+    p_publish: true,
+  });
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Session draft saved.' })).toBeVisible();
+  await page.reload();
   await page.getByRole('button', { name: 'Publish Session', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
   const lesson = (
@@ -842,7 +862,7 @@ test('direct Learning Sessions saves a video independently and sets up an empty 
         draftSection,
       ])
     ).rows[0].published_version,
-  ).toBe(0);
+  ).toBe(1);
   expect(
     (
       await h.db.query<any>(
@@ -850,7 +870,7 @@ test('direct Learning Sessions saves a video independently and sets up an empty 
         [course],
       )
     ).rows[0].n,
-  ).toBe(1);
+  ).toBe(0);
   const s = await browser.newPage({ baseURL: 'http://127.0.0.1:5174' });
   await backend(s, STUDENT);
   await s.goto('/ieee-git-lab/#/instructor/sessions');
@@ -1349,6 +1369,7 @@ test.beforeEach(async () => {
   });
 });
 test.afterEach(async () => {
+  uploadServer?.closeAllConnections();
   await new Promise<void>((resolve) => uploadServer?.close(() => resolve()));
   await h?.db.close();
 });
@@ -1484,9 +1505,19 @@ async function backend(page: Page, actor = ADMIN) {
             user,
           };
         else if (u.pathname === '/auth/v1/user') result = user;
-        else if (u.pathname.includes('/rpc/'))
+        else if (u.pathname.includes('/rpc/')) {
           result = await h.rpc(actor, u.pathname.split('/rpc/')[1], body);
-        else if (u.pathname === '/rest/v1/profiles')
+          if (Array.isArray(result)) {
+            const range = req.headers().range?.split('-').map(Number);
+            const offset = Number(u.searchParams.get('offset') || range?.[0] || 0);
+            const limit = Number(
+              u.searchParams.get('limit') || (range ? range[1] - range[0] + 1 : result.length),
+            );
+            if (u.searchParams.get('order')?.startsWith('student_id.'))
+              result.sort((a, b) => a.student_id.localeCompare(b.student_id));
+            result = result.slice(offset, offset + limit);
+          }
+        } else if (u.pathname === '/rest/v1/profiles')
           result = (await h.asUser(actor, 'select * from public.profiles where id=$1', [actor]))
             .rows[0];
         else if (u.pathname === '/rest/v1/assessment_drafts')
@@ -1506,13 +1537,34 @@ async function backend(page: Page, actor = ADMIN) {
                 [u.searchParams.get('assessment_id')?.slice(3)],
               )
             ).rows[0] || null;
-        else if (u.pathname === '/rest/v1/question_bank')
+        else if (u.pathname === '/rest/v1/app_settings')
+          result = (
+            await h.asUser(
+              actor,
+              'select accessibility_paste from public.app_settings where id=true',
+            )
+          ).rows[0];
+        else if (
+          ['workspace_snapshots', 'student_answers', 'command_events', 'grading_results'].some(
+            (table) => u.pathname === '/rest/v1/' + table,
+          )
+        ) {
+          const table = u.pathname.split('/').pop()!;
+          const rows = (
+            await h.asUser(actor, 'select * from public.' + table + ' where attempt_id=$1', [
+              u.searchParams.get('attempt_id')?.slice(3),
+            ])
+          ).rows;
+          result = req.headers().accept?.includes('application/vnd.pgrst.object+json')
+            ? rows[0] || null
+            : rows;
+        } else if (u.pathname === '/rest/v1/question_bank')
           result = (await h.asUser(actor, 'select * from public.question_bank')).rows;
         else if (u.pathname === '/rest/v1/learning_items')
           result = (
             await h.asUser(
               actor,
-              'select id,kind,parent_id,title,published_version,archived_at,deleted_at,created_at from public.learning_items where archived_at is null and deleted_at is null order by created_at,id offset $1 limit $2',
+              'select id,kind,parent_id,title,published_version,archived_at,deleted_at,created_at from public.learning_items order by id offset $1 limit $2',
               [
                 Number(u.searchParams.get('offset') || 0),
                 Number(u.searchParams.get('limit') || 100),
@@ -1555,16 +1607,52 @@ async function backend(page: Page, actor = ADMIN) {
           ).rows;
         else if (u.pathname === '/rest/v1/assignments') {
           const id = u.searchParams.get('id')?.slice(3);
-          const rows = (
+          let rows = (
             await h.asUser(
               actor,
-              'select * from public.assignments where ($1::uuid is null or id=$1)',
+              "select a.*,case when d.assessment_id is null then null else jsonb_build_object('document',d.document) end as assessment_drafts from public.assignments a left join public.assessment_drafts d on d.assessment_id=a.id where ($1::uuid is null or a.id=$1)",
               [id || null],
             )
           ).rows;
+          for (const field of ['type', 'archived', 'visible', 'published_version']) {
+            const filter = u.searchParams.get(field);
+            if (filter?.startsWith('eq.'))
+              rows = rows.filter((r) => String(r[field]) === filter.slice(3));
+            else if (filter?.startsWith('gt.'))
+              rows = rows.filter((r) => Number(r[field]) > Number(filter.slice(3)));
+          }
+          const title = u.searchParams.get('title');
+          if (title?.startsWith('ilike.'))
+            rows = rows.filter((r) =>
+              r.title.toLowerCase().includes(title.slice(6).replaceAll('%', '').toLowerCase()),
+            );
+          const draftFilter = u.searchParams.get('assessment_drafts');
+          if (draftFilter === 'is.null') rows = rows.filter((r) => !r.assessment_drafts);
+          if (draftFilter === 'not.is.null') rows = rows.filter((r) => r.assessment_drafts);
+          rows.sort((a, b) =>
+            u.searchParams.get('order')?.startsWith('id.')
+              ? a.id.localeCompare(b.id)
+              : new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+                b.id.localeCompare(a.id),
+          );
+          const total = rows.length;
+          const range = req.headers().range?.split('-').map(Number);
+          const offset = Number(u.searchParams.get('offset') || range?.[0] || 0);
+          const limit = Number(
+            u.searchParams.get('limit') || (range ? range[1] - range[0] + 1 : rows.length),
+          );
+          rows = rows.slice(offset, offset + limit);
           result = req.headers().accept?.includes('application/vnd.pgrst.object+json')
             ? rows[0]
             : rows;
+          await route.fulfill({
+            json: result,
+            headers: {
+              'access-control-expose-headers': 'content-range',
+              'content-range': `${offset}-${Math.max(offset, offset + rows.length - 1)}/${total}`,
+            },
+          });
+          return;
         }
         await route.fulfill({ json: result });
       } catch (error) {
@@ -1652,17 +1740,24 @@ test('an instructor publishes a real course, section and lesson and students rea
     await page
       .getByRole('button', { name: 'New ' + (kind === 'lesson' ? 'session' : kind), exact: true })
       .click();
-    await page.getByLabel(/^(Content title|Session name)$/).fill(title);
-    await page.getByText('Optional description and supporting resources', { exact: true }).click();
+    await page.getByLabel(/^(Content title|Session Title)$/).fill(title);
     await page
-      .getByLabel('Lesson or overview text', { exact: true })
+      .getByText(/^(Optional description and supporting resources|Advanced session settings)$/)
+      .click();
+    await page
+      .getByRole('textbox', { name: /^(Lesson or overview text|Description)$/ })
       .fill('Clear learning material.');
     if (kind === 'lesson') {
-      await page.getByRole('button', { name: 'Add resource link', exact: true }).click();
+      await page
+        .getByRole('button', { name: /^(Add resource link|Add supplementary resource)$/ })
+        .click();
       await page.getByLabel('Resource 1 title', { exact: true }).fill('Official Git reference');
       await page.getByLabel('Resource 1 URL', { exact: true }).fill('https://git-scm.com/docs');
     }
-    await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
+    await page.getByRole('button', { name: /^(Publish content version|Publish Session)$/ }).click();
+    await expect(
+      page.getByRole('status').filter({ hasText: /^(Published|Session published)/ }),
+    ).toBeVisible();
     await expect(
       page.getByRole('heading', {
         name: kind === 'course' ? title : kind === 'section' ? title : title,
@@ -1926,40 +2021,44 @@ test('mobile learning journey uploads slides, publishes a session, downloads and
   });
   await page.goto('/ieee-git-lab/#/instructor/content?parent=70000000-0000-4000-8000-000000000002');
   await page.getByRole('button', { name: 'New session', exact: true }).click();
-  await page.getByLabel(/^(Content title|Session name)$/).fill('Mobile session with slides');
-  await page.getByText('Optional description and supporting resources', { exact: true }).click();
+  await page.getByLabel(/^(Content title|Session Title)$/).fill('Mobile session with slides');
   await page
-    .getByLabel('Lesson or overview text')
-    .fill('Study the slides and practice on your phone.');
-  await page
-    .getByText('Session options: order, topics and related practice', { exact: true })
+    .getByText(/^(Optional description and supporting resources|Advanced session settings)$/)
     .click();
+  await page
+    .getByRole('textbox', { name: /^(Lesson or overview text|Description)$/ })
+    .fill('Study the slides and practice on your phone.');
+  await openSessionOptions(page);
   await page.getByLabel('Session number', { exact: true }).fill('3');
+  await openSessionOptions(page);
   await page.getByLabel('Display order', { exact: true }).fill('30');
   await page
     .getByLabel('Google Drive video link')
     .fill('https://drive.google.com/open?id=abcdefghij123');
+  await openSessionOptions(page);
   await page.getByLabel('Related assessment (optional)').selectOption(assessment);
   await page
     .getByLabel(/Upload PowerPoint/)
     .setInputFiles({ name: 'Slides.pptx', mimeType: PPTX_MIME, buffer: Buffer.from(pptxBytes()) });
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
   await page
-    .getByText('Session options: order, topics and related practice', { exact: true })
+    .getByText(/^(Optional description and supporting resources|Advanced session settings)$/)
     .click();
-  await page.getByText('Optional description and supporting resources', { exact: true }).click();
-  await page.getByLabel('Session name', { exact: true }).scrollIntoViewIfNeeded();
+  await page.getByLabel('Session Title', { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({
     path: 'test-results/product-review/session-upload-' + test.info().project.name + '.png',
     fullPage: false,
   });
-  await page.getByRole('button', { name: 'Publish session', exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole('button', { name: 'Publish Session', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({
     path: 'test-results/product-review/session-publish-' + test.info().project.name + '.png',
     fullPage: false,
   });
-  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Published. Students' })).toBeVisible();
+  await page.getByRole('button', { name: /^(Publish content version|Publish Session)$/ }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: /^(Published|Session published)/ }),
+  ).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
   const lesson = (
     await h.db.query<{ id: string }>(
       "select id from public.learning_items where title='Mobile session with slides'",
@@ -2080,18 +2179,26 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   });
   const open = async () => {
     await page.goto('/ieee-git-lab/#/instructor/content?open=' + id);
-    await expect(page.getByLabel(/^(Content title|Session name)$/)).toHaveValue(
+    await expect(page.getByLabel(/^(Content title|Session Title)$/)).toHaveValue(
       'Slides replacement session',
     );
   };
   await open();
-  await page.getByText('Optional description and supporting resources', { exact: true }).click();
-  await page.getByLabel('Lesson or overview text').fill('Draft survived reload');
+  await page
+    .getByText(/^(Optional description and supporting resources|Advanced session settings)$/)
+    .click();
+  await page
+    .getByRole('textbox', { name: /^(Lesson or overview text|Description)$/ })
+    .fill('Draft survived reload');
   await page.reload();
-  await page.getByText('Optional description and supporting resources', { exact: true }).click();
-  await expect(page.getByLabel('Lesson or overview text')).toHaveValue('Draft survived reload');
+  await page
+    .getByText(/^(Optional description and supporting resources|Advanced session settings)$/)
+    .click();
+  await expect(
+    page.getByRole('textbox', { name: /^(Lesson or overview text|Description)$/ }),
+  ).toHaveValue('Draft survived reload');
   const upload = page.getByLabel(/Upload PowerPoint/);
-  await page.getByLabel('Session name', { exact: true }).fill('');
+  await page.getByLabel('Session Title', { exact: true }).fill('');
   await upload.setInputFiles({
     name: 'Unnamed.pptx',
     mimeType: PPTX_MIME,
@@ -2101,7 +2208,7 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   expect(
     (await h.db.query('select id from public.learning_materials where item_id=$1', [id])).rows,
   ).toHaveLength(0);
-  await page.getByLabel('Session name', { exact: true }).fill('Slides replacement session');
+  await page.getByLabel('Session Title', { exact: true }).fill('Slides replacement session');
   await upload.setInputFiles({
     name: 'fake.pptx',
     mimeType: PPTX_MIME,
@@ -2140,8 +2247,11 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   await page.locator('.presentation-drop').dispatchEvent('drop', { dataTransfer: drop });
   await expect(page.getByText(/Original.pptx · .* MiB/)).toBeVisible();
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
-  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Published. Students' })).toBeVisible();
+  await page.getByRole('button', { name: /^(Publish content version|Publish Session)$/ }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: /^(Published|Session published)/ }),
+  ).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Session published.' })).toBeVisible();
   const first = (
     await h.db.query<any>(
       'select document from public.learning_versions where item_id=$1 and version=1',
@@ -2170,7 +2280,10 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
     buffer: Buffer.from(pptxBytes()),
   });
   await expect(page.getByText(/Uploaded and validated/)).toBeVisible();
-  await page.getByRole('button', { name: /^(Publish content version|Publish session)$/ }).click();
+  await page.getByRole('button', { name: /^(Publish content version|Publish Session)$/ }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: /^(Published|Session published)/ }),
+  ).toBeVisible();
   await expect
     .poll(
       async () =>
@@ -2191,9 +2304,9 @@ test('session editor rejects invalid and failed uploads, confirms replacement, a
   ).toHaveLength(2);
   await open();
   page.once('dialog', (d) => d.accept());
-  await page.getByRole('button', { name: 'Unpublish content', exact: true }).click();
+  await page.getByRole('button', { name: 'Unpublish Session', exact: true }).click();
   await expect(
-    page.getByText('Content unpublished. Retained versions are unchanged.', { exact: true }),
+    page.getByText('Session unpublished. Files and versions retained.', { exact: true }),
   ).toBeVisible();
   const student = await browser.newPage();
   await backend(student, STUDENT);
@@ -2529,4 +2642,428 @@ test.describe('Private Task 1 theory draft', () => {
       await student.close();
     }
   });
+});
+
+async function openSessionOptions(page: Page) {
+  const options = page
+    .locator('details.session-options')
+    .filter({ has: page.getByText('Advanced session settings', { exact: true }) });
+  await expect(options).toHaveCount(1);
+  if ((await options.getAttribute('open')) === null) await options.locator('summary').click();
+}
+async function adminReviewFixture() {
+  const assessment = await h.rpc(TEACHER, 'save_assessment', {
+    p_id: null,
+    p_document: {
+      ...blankDefinition('assignment'),
+      title: 'Version control review',
+      format: 'theory',
+      description: 'Explain how commits preserve project history.',
+      questions: [
+        {
+          id: 'review-question',
+          prompt: 'Explain why commit history matters.',
+          kind: 'long',
+          manual: true,
+          required: true,
+          points: 5,
+          options: [],
+        },
+      ],
+    },
+    p_publish: true,
+  });
+  const attempt = (await h.rpc(STUDENT, 'start_assessment', { p_assessment: assessment })).id;
+  await h.db.query('select private.finish_assessment($1,false)', [attempt]);
+  await h.db.query(
+    'insert into public.student_answers(attempt_id,question_id,answer) values($1,$2,$3)',
+    [
+      attempt,
+      'review-question',
+      'Commits preserve meaningful project changes and allow earlier versions to be restored.',
+    ],
+  );
+  return { assessment, attempt };
+}
+
+test('admin dashboard design review captures', async ({ page }) => {
+  test.skip(!process.env.ADMIN_UI_CAPTURE, 'Opt-in local design review.');
+  test.setTimeout(180000);
+  const phase = process.env.ADMIN_UI_CAPTURE === 'before' ? 'before' : 'after';
+  let captureCourse = '';
+  let captureSession = '';
+  if (phase === 'after') {
+    await adminReviewFixture();
+    await draft('Task 2 preparation');
+    captureCourse = await h.rpc(TEACHER, 'manage_learning_save', {
+      p_id: null,
+      p_kind: 'course',
+      p_parent: null,
+      p_revision: 0,
+      p_document: {
+        title: 'Git & version control',
+        body: 'Practical version control at IEEE NUB.',
+        links: [],
+        description: 'IEEE NUB practical learning course',
+      },
+      p_publish: true,
+    });
+    const section = await h.rpc(TEACHER, 'manage_learning_save', {
+      p_id: null,
+      p_kind: 'section',
+      p_parent: captureCourse,
+      p_revision: 0,
+      p_document: {
+        title: 'Foundations',
+        body: 'Start with the fundamentals.',
+        links: [],
+        description: 'Start with repositories and commits.',
+      },
+      p_publish: true,
+    });
+    captureSession = await h.rpc(TEACHER, 'manage_learning_save', {
+      p_id: null,
+      p_kind: 'lesson',
+      p_parent: section,
+      p_revision: 0,
+      p_document: {
+        title: 'Git foundations',
+        body: 'Repositories, staging and commit history.',
+        links: [],
+        description: 'Understand repositories, staging and commit history.',
+        video_url: 'https://drive.google.com/file/d/fixturelecture123/view',
+        session_number: 1,
+      },
+      p_publish: true,
+    });
+  }
+  await backend(page);
+  const routes =
+    phase === 'before'
+      ? [
+          ['overview', ''],
+          ['students', 'students'],
+          ['assessments', 'assessments'],
+          ['submissions', 'submissions'],
+          ['courses', 'sessions'],
+          ['administration', 'records'],
+          ['settings', 'settings'],
+        ]
+      : [
+          ['overview', ''],
+          ['students', 'students'],
+          ['student-details', 'students?student=' + STUDENT],
+          ['assessments', 'assessments'],
+          ['submissions', 'submissions'],
+          ['help-requests', 'submissions?tab=help'],
+          ['course-totals', 'submissions?tab=totals'],
+          ['courses', 'courses?course=' + captureCourse],
+          ['session-editor', 'courses?open=' + captureSession],
+          ['course-structure', 'courses?tab=structure'],
+          ['administration', 'administration'],
+          ['records', 'administration?tab=records'],
+          ['activity', 'administration?tab=activity'],
+          ['settings', 'administration?tab=settings'],
+          ['assessment-editor', 'assessments/' + TASK_ONE_ID],
+        ];
+  const project = test.info().project.name.toLowerCase();
+  const viewports =
+    project === 'desktop'
+      ? [
+          { name: 'desktop', width: 1440, height: 1000 },
+          { name: 'mobile', width: 390, height: 844 },
+        ]
+      : [{ name: project, width: page.viewportSize()!.width, height: page.viewportSize()!.height }];
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    for (const theme of phase === 'before' ? ['dark'] : ['light', 'dark']) {
+      await page.evaluate((value) => localStorage.setItem('ieee-theme', value), theme);
+      await page.reload();
+      for (const [name, path] of routes) {
+        await page.goto('/ieee-git-lab/#/instructor' + (path ? '/' + path : ''));
+        await expect(
+          page.locator(phase === 'before' ? '.instructor' : '.admin-shell'),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('status').filter({ hasText: /^(Loading|Checking)/ }),
+        ).toHaveCount(0);
+        if (name === 'session-editor') await openSessionOptions(page);
+        await page.screenshot({
+          path: `test-results/admin-rebuild/${phase}/${viewport.name}-${name}${phase === 'after' ? '-' + theme : ''}.png`,
+          fullPage: true,
+        });
+        if (phase === 'after')
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+            `${name} ${viewport.name} ${theme}`,
+          ).toBeLessThanOrEqual(viewport.width);
+      }
+      if (phase === 'after') {
+        await page.goto('/ieee-git-lab/#/instructor/submissions');
+        await page.getByRole('button', { name: 'Review submission', exact: true }).click();
+        await expect(page.getByLabel('Instructor feedback')).toBeVisible();
+        await page.screenshot({
+          path: `test-results/admin-rebuild/after/${viewport.name}-submission-review-${theme}.png`,
+          fullPage: true,
+        });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          viewport.width,
+        );
+      }
+    }
+  }
+});
+
+test('rebuilt admin navigation preserves role guards, legacy links, keyboard menu and themes', async ({
+  page,
+  browser,
+}) => {
+  const student = await browser.newPage();
+  await backend(student, STUDENT);
+  await student.goto('/ieee-git-lab/#/instructor');
+  await expect(student.getByRole('heading', { name: 'Instructor access required.' })).toBeVisible();
+  await expect(student.locator('.admin-shell')).toHaveCount(0);
+  await expect(h.rpc(STUDENT, 'manage_activity')).rejects.toThrow('Instructor');
+  await backend(page, TEACHER);
+  await page.goto('/ieee-git-lab/#/instructor/administration');
+  await expect(page.getByText('Not assigned', { exact: true })).toBeVisible();
+  await expect(h.rpc(TEACHER, 'is_data_administrator')).resolves.toBe(false);
+  await expect(page.locator('.admin-sidebar-nav a')).toHaveCount(6);
+  for (const [old, destination] of [
+    ['sessions', 'courses'],
+    ['content', 'courses?tab=structure'],
+    ['results', 'submissions?status=graded'],
+    ['requests', 'submissions?tab=help'],
+    ['records', 'administration?tab=records'],
+    ['activity', 'administration?tab=activity'],
+    ['settings', 'administration?tab=settings'],
+  ]) {
+    await page.goto('/ieee-git-lab/#/instructor/' + old);
+    await expect(page).toHaveURL('/ieee-git-lab/#/instructor/' + destination);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  const opener = page.getByRole('button', { name: 'Open navigation', exact: true });
+  await opener.click();
+  await expect(page.getByRole('dialog', { name: 'Administration navigation' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await page
+    .getByRole('navigation', { name: 'Instructor navigation' })
+    .getByRole('link', { name: 'Students', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Student directory' })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Toggle light and dark theme', exact: true }).click();
+  const theme = await page.locator('html').getAttribute('data-theme');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme!);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await student.close();
+});
+
+test('rebuilt admin student search and review release use real PostgreSQL data', async ({
+  page,
+}) => {
+  page.on('dialog', (dialog) => dialog.accept());
+  const { attempt } = await adminReviewFixture();
+  await backend(page);
+  await page.goto('/ieee-git-lab/#/instructor/students');
+  await page.getByLabel('Search students').fill('student@example.test');
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('tbody')).toContainText('Student Example');
+  await page.getByLabel('Faculty filter').selectOption('computer_science');
+  await expect(page.getByText('No students match your filters.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await page.getByLabel('Search students').fill('student@example.test');
+  await page.getByRole('button', { name: 'View student', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Submission history & grades' })).toBeVisible();
+  await expect(page.locator('tbody')).toContainText('Version control review');
+  await page.getByRole('button', { name: 'Review submission', exact: true }).click();
+  await expect(
+    page.getByText(
+      'Commits preserve meaningful project changes and allow earlier versions to be restored.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByLabel('Points (0–5)', { exact: true }).fill('4');
+  await page
+    .getByLabel('Instructor feedback')
+    .fill('Clear explanation. Include an example next time.');
+  await page.getByRole('button', { name: 'Finalize grade privately', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await h.db.query<any>('select status from public.attempts where id=$1', [attempt])).rows[0]
+          .status,
+    )
+    .toBe('graded');
+  await expect(
+    h.asUser(STUDENT, 'select * from public.released_results where attempt_id=$1', [attempt]),
+  ).resolves.toMatchObject({ rows: [] });
+  await page.getByRole('button', { name: 'Publish grade', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (
+          await h.db.query<any>(
+            'select released from public.grading_summaries where attempt_id=$1',
+            [attempt],
+          )
+        ).rows[0].released,
+    )
+    .toBe(true);
+  const results = await h.asUser(
+    STUDENT,
+    'select * from public.released_results where attempt_id=$1',
+    [attempt],
+  );
+  expect(Number(results.rows[0].theory_score)).toBe(4);
+  await page.goto('/ieee-git-lab/#/instructor/submissions?status=graded');
+  await expect(page.getByLabel('Submission status filter')).toHaveValue('graded');
+  await expect(page.locator('tbody')).toContainText('Released to student');
+});
+
+test('rebuilt admin assessment catalog searches, filters, versions and paginates real records', async ({
+  page,
+}) => {
+  const { assessment } = await adminReviewFixture();
+  for (let index = 0; index < 27; index++)
+    await draft('Catalog draft ' + String(index).padStart(2, '0'));
+  await backend(page);
+  await page.goto('/ieee-git-lab/#/instructor/assessments');
+  await page.getByLabel('Search assessment title').fill('Catalog draft');
+  await expect(page.locator('.assessment-catalog-card')).toHaveCount(25);
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(page.locator('.assessment-catalog-card')).toHaveCount(2);
+  await page.getByLabel('Assessment status filter').selectOption('published');
+  await expect(page.getByRole('heading', { name: 'No matching assessments' })).toBeVisible();
+  await page.getByLabel('Search assessment title').fill('Version control review');
+  await expect(page.locator('.assessment-catalog-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Version history', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Version control review · Version history' }),
+  ).toBeVisible();
+  const publicVersion = await h.asUser(
+    STUDENT,
+    'select document from public.assessment_versions where assessment_id=$1',
+    [assessment],
+  );
+  expect(publicVersion.rows[0].document.questions[0]).not.toHaveProperty('correctAnswers');
+  await expect(h.asUser(STUDENT, 'select * from public.assessment_drafts')).resolves.toMatchObject({
+    rows: [],
+  });
+});
+
+test('rebuilt admin initial views preserve protected cutoff records and show verified counts', async ({
+  page,
+}) => {
+  const { attempt } = await adminReviewFixture();
+  await h.db.query("update auth.users set created_at='2026-11-12T22:00:00Z' where id=$1", [
+    STUDENT,
+  ]);
+  const fingerprint = async () =>
+    (
+      await h.db.query<any>(
+        "select md5(jsonb_build_object('users',(select jsonb_agg(to_jsonb(u) order by id) from auth.users u),'attempts',(select jsonb_agg(to_jsonb(a) order by id) from public.attempts a),'grades',(select jsonb_agg(to_jsonb(g) order by id) from public.grading_summaries g),'versions',(select jsonb_agg(to_jsonb(v) order by assessment_id,version) from public.assessment_versions v),'materials',(select jsonb_agg(to_jsonb(i) order by id) from public.learning_items i))::text) as digest",
+      )
+    ).rows[0].digest;
+  const before = await fingerprint();
+  const overview = await h.rpc(ADMIN, 'instructor_overview');
+  expect(overview.students).toBe(1);
+  await backend(page);
+  await page.goto('/ieee-git-lab/#/instructor');
+  const students = page.locator('.admin-kpi').filter({ hasText: 'Registered students' });
+  await expect(students.locator('strong')).toHaveText('1');
+  await expect(
+    page.locator('.admin-kpi').filter({ hasText: 'Submitted assessments' }).locator('strong'),
+  ).toHaveText(String(overview.submitted_assignments + overview.submitted_exams));
+  for (const route of [
+    'students',
+    'assessments',
+    'submissions',
+    'courses',
+    'administration?tab=records',
+    'administration?tab=activity',
+    'administration?tab=settings',
+  ]) {
+    await page.goto('/ieee-git-lab/#/instructor/' + route);
+    await expect(page.locator('.admin-shell')).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: /^(Loading|Checking)/ })).toHaveCount(
+      0,
+    );
+  }
+  expect(await fingerprint()).toBe(before);
+  expect(
+    (await h.db.query('select id from public.attempts where id=$1', [attempt])).rows,
+  ).toHaveLength(1);
+});
+
+test('rebuilt admin duplicate opens the new draft from a published filter', async ({ page }) => {
+  const { assessment } = await adminReviewFixture();
+  const before = (
+    await h.db.query<any>(
+      'select document from public.assessment_versions where assessment_id=$1',
+      [assessment],
+    )
+  ).rows;
+  await backend(page);
+  await page.goto('/ieee-git-lab/#/instructor/assessments?status=published');
+  await page.getByLabel('Search assessment title').fill('Version control review');
+  await expect(page.locator('.assessment-catalog-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Edit assessment draft', exact: true }),
+  ).toBeVisible();
+  const duplicated = page.url().split('/assessments/')[1];
+  expect(duplicated).not.toBe(assessment);
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
+    'Version control review (copy)',
+  );
+  const draft = (
+    await h.db.query<any>('select published_version,visible from public.assignments where id=$1', [
+      duplicated,
+    ])
+  ).rows[0];
+  expect(draft).toMatchObject({ published_version: 0, visible: false });
+  expect(
+    (
+      await h.db.query('select document from public.assessment_versions where assessment_id=$1', [
+        assessment,
+      ])
+    ).rows,
+  ).toEqual(before);
+});
+
+test('rebuilt admin newly saved session deep link refreshes archive and restore state', async ({
+  page,
+}) => {
+  await backend(page, TEACHER);
+  await page.goto('/ieee-git-lab/#/instructor/courses');
+  await page.getByRole('button', { name: 'Add Session', exact: true }).click();
+  await page.getByLabel('Session Title', { exact: true }).fill('Retained admin draft session');
+  await page.getByRole('button', { name: 'Save Draft', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Session draft saved.' })).toBeVisible();
+  const session = (
+    await h.db.query<any>(
+      "select id from public.learning_items where title='Retained admin draft session'",
+    )
+  ).rows[0].id;
+  await expect(page).toHaveURL(new RegExp('open=' + session));
+  await page.getByRole('button', { name: 'Manage record', exact: true }).click();
+  await page.getByRole('button', { name: 'Archive', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm Archive', exact: true }).click();
+  await expect(page.getByLabel('Session Title', { exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Manage record', exact: true }).click();
+  await page.getByRole('button', { name: 'Restore', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm Restore', exact: true }).click();
+  await expect(page.getByLabel('Session Title', { exact: true })).toBeEnabled();
+  expect(
+    (
+      await h.db.query<any>(
+        'select archived_at,published_version from public.learning_items where id=$1',
+        [session],
+      )
+    ).rows[0],
+  ).toMatchObject({ archived_at: null, published_version: 0 });
 });

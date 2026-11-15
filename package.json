@@ -14,7 +14,10 @@
     "lint": "eslint .",
     "format": "prettier --write src tests scripts *.ts *.json .github README.md docs",
     "test:e2e:mobile": "playwright test --config playwright.mobile.config.ts && playwright test --config playwright.mobile-connected.config.ts",
-    "test:e2e:production": "playwright test --config playwright.production.config.ts"
+    "test:e2e:production": "playwright test --config playwright.production.config.ts",
+    "test:e2e:admin": "node scripts/admin-browser-tests.mjs",
+    "test:e2e:admin:mobile": "node scripts/admin-browser-tests.mjs --mobile",
+    "test:e2e:admin:screenshots": "node scripts/admin-browser-tests.mjs --mobile --screenshots"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "1.4.0",

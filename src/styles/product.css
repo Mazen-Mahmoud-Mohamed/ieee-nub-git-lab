@@ -31,9 +31,6 @@
 .session-entry-link {
   margin-block: 16px;
 }
-.legacy-learning-content {
-  margin-top: 28px;
-}
 @media (max-width: 600px) {
   .session-list .managed-row {
     display: block;
@@ -88,7 +85,6 @@ p {
 .page-heading p {
   max-width: 65ch;
 }
-.admin-shortcuts,
 .editor-section-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -214,29 +210,6 @@ details > form {
   border-inline-start: 2px solid var(--line);
   border-radius: 0;
 }
-.admin-stats > div {
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: none;
-}
-.instructor-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  white-space: normal;
-}
-.instructor-nav a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 10px 14px;
-  font-size: 14px;
-  border-radius: 7px 7px 0 0;
-}
-.instructor-nav a.active {
-  background: var(--raised);
-}
 .session-bar {
   padding-block: 12px;
 }
@@ -258,9 +231,6 @@ details > form {
   }
   .editor-actions {
     flex-wrap: wrap;
-  }
-  .instructor-nav {
-    position: static;
   }
 }
 @media (max-width: 600px) {
@@ -490,10 +460,6 @@ details > form {
     margin-left: auto;
   }
   .student-steps {
-    flex-wrap: wrap;
-  }
-  .instructor-nav {
-    display: flex;
     flex-wrap: wrap;
   }
   .page-heading,

@@ -473,6 +473,7 @@ test('instructor faculty filter has only canonical faculties and an all option',
   const api = await fixture(page, true);
   await api.login();
   await page.goto('/ieee-git-lab/#/instructor/submissions');
+  await page.locator('.admin-more-filters > summary').click();
   const filter = page.getByRole('combobox', { name: 'Faculty filter', exact: true });
   await expect(filter.getByRole('option')).toHaveText([
     'All faculties',
@@ -724,10 +725,10 @@ test('instructor sees authenticated contact details and can search by email', as
   await api.login();
   await api.start(E);
   await page.goto('/ieee-git-lab/#/instructor/submissions');
-  await expect(page.getByRole('cell', { name: 'fixture@example.test', exact: true })).toBeVisible();
-  await expect(page.getByRole('cell', { name: '+201012345678', exact: true })).toBeVisible();
+  await expect(page.getByText('fixture@example.test', { exact: true })).toBeVisible();
+
   await page.getByLabel('Search student name, email or ID').fill('fixture@example.test');
-  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Review submission' })).toHaveCount(1);
 });
 
 test('expired or invalid OAuth code allows recovery without a session', async ({ page }) => {
@@ -745,7 +746,9 @@ test('authorized instructor access remains available without a student profile',
   await page.goto('/ieee-git-lab/#/instructor/submissions');
   await page.getByRole('link', { name: 'Sign in', exact: true }).click();
   await page.getByRole('button', { name: 'Continue with Google' }).click();
-  await expect(page.getByRole('heading', { name: 'Admin Dashboard', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Submissions & grading', exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Complete your profile' })).toHaveCount(0);
 });
 
@@ -763,7 +766,7 @@ test('instructor review preserves the attempt ID when the grading summary has it
     page.getByRole('heading', { name: 'Submission received', exact: true }),
   ).toBeVisible();
   await page.goto('/ieee-git-lab/#/instructor/submissions');
-  await page.getByRole('button', { name: 'Inspect attempt →' }).click();
+  await page.getByRole('button', { name: 'Review submission' }).click();
   await expect(
     page.getByRole('heading', { name: 'Explain how Git saves changes.', exact: true }),
   ).toBeVisible();
@@ -780,8 +783,8 @@ test('instructor review preserves the attempt ID when the grading summary has it
   const release = page.waitForRequest((r) => r.url().endsWith('/rpc/grade_assessment'));
   await page.getByRole('button', { name: 'Publish grade', exact: true }).click();
   expect((await release).postDataJSON().p_release).toBe(true);
-  await page.getByRole('link', { name: 'Grades', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await page.goto('/ieee-git-lab/#/instructor/results');
+  await expect(page.getByRole('heading', { name: 'Submission queue', exact: true })).toBeVisible();
   await expect(page.getByLabel('Assessment filter')).toBeVisible();
 });
 
@@ -794,19 +797,21 @@ test('admin navigation loads real-shaped overview, students and dedicated assess
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await expect(page.getByText('Registered students', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Students', exact: true }).click();
-  await expect(page.getByRole('cell', { name: 'fixture@example.test', exact: true })).toBeVisible();
+  await expect(page.getByText('fixture@example.test', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'View student', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Student attempts', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'Assignments', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'New assignment', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'Exams', exact: true }).click();
-  await page.getByRole('link', { name: 'New exam', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Submission history & grades', exact: true }),
+  ).toBeVisible();
+  await page.goto('/ieee-git-lab/#/instructor/assignments');
+  await expect(page.getByRole('link', { name: 'New assessment', exact: true })).toBeVisible();
+  await page.goto('/ieee-git-lab/#/instructor/exams');
+  await page.getByRole('link', { name: 'New assessment', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Type', exact: true })).toHaveValue('exam');
   await expect(page.getByLabel('Duration (minutes)', { exact: true })).toHaveValue('30');
-  await page.getByRole('link', { name: 'Question Bank', exact: true }).click();
+  await page.goto('/ieee-git-lab/#/instructor/questions');
   await expect(page.getByLabel('Search questions')).toBeVisible();
-  await page.getByRole('link', { name: 'Grades', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await page.goto('/ieee-git-lab/#/instructor/results');
+  await expect(page.getByRole('heading', { name: 'Submission queue', exact: true })).toBeVisible();
 });
 
 test('admin submissions paginate, send filters to the server and export every matching row', async ({
@@ -821,7 +826,7 @@ test('admin submissions paginate, send filters to the server and export every ma
     assignment_version: 1,
     attempt_number: i + 1,
     status: 'graded',
-    created_at: '2026-10-01T00:00:00Z',
+    created_at: '2026-09-30T21:00:00.000Z',
     submitted_at: '2026-10-02T00:00:00Z',
     practical_score: 4,
     theory_score: 6,
@@ -843,17 +848,16 @@ test('admin submissions paginate, send filters to the server and export every ma
   });
   await api.login();
   await page.goto('/ieee-git-lab/#/instructor/submissions');
-  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(25);
+  await expect(page.getByRole('button', { name: 'Review submission' })).toHaveCount(25);
   await page.getByRole('button', { name: 'Next page', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Inspect attempt →' })).toHaveCount(6);
-  await expect(
-    page.getByRole('cell', { name: 'student30@example.test', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review submission' })).toHaveCount(6);
+  await expect(page.getByText('student30@example.test', { exact: true })).toBeVisible();
+  await page.locator('.admin-more-filters > summary').click();
   await page.getByLabel('Faculty filter').selectOption('engineering');
   await expect.poll(() => last.p_offset).toBe(0);
   await page.getByLabel('Assessment type filter').selectOption('assignment');
-  await page.getByLabel('From date').fill('2026-10-01');
-  await expect.poll(() => last.p_from).toBe('2026-10-01T00:00:00Z');
+  await page.getByLabel('Submitted from date').fill('2026-10-01');
+  await expect.poll(() => last.p_from).toBe('2026-09-30T21:00:00.000Z');
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export CSV', exact: true }).click();
   const file = await download;

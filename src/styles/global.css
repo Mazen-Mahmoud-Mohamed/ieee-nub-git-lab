@@ -1701,22 +1701,6 @@ legend {
   margin-top: 12px;
   overflow-wrap: anywhere;
 }
-.instructor-nav {
-  display: flex;
-  gap: 25px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 30px;
-}
-.instructor-nav a {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 0 0 15px;
-  border-bottom: 2px solid transparent;
-}
-.instructor-nav a.active {
-  color: var(--blue);
-  border-color: var(--blue);
-}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2361,11 +2345,6 @@ td small {
   .stat span {
     font-size: 10px;
   }
-  .instructor-nav {
-    gap: 20px;
-    overflow: auto;
-    white-space: nowrap;
-  }
   .instructor-nav a {
     font-size: 10px;
   }
@@ -2998,28 +2977,6 @@ td small {
     font-size: 25px;
   }
 }
-.admin-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 1px;
-  background: var(--line);
-  border: 1px solid var(--line);
-  margin: 20px 0;
-}
-.admin-stats > div {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 18px;
-  background: var(--panel);
-}
-.admin-stats strong {
-  font-size: 26px;
-}
-.admin-stats span {
-  font-size: 13px;
-  color: var(--muted);
-}
 .admin-pagination {
   display: flex;
   gap: 12px;
@@ -3030,10 +2987,6 @@ td small {
 .admin-pagination span {
   margin-right: auto;
   font-size: 13px;
-}
-.instructor-nav {
-  flex-wrap: wrap;
-  gap: 8px;
 }
 .instructor .table-toolbar {
   flex-wrap: wrap;
@@ -3086,14 +3039,7 @@ td small {
 .student-preview .workspace-actions > a {
   display: none;
 }
-@media (min-width: 701px) {
-  .admin-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-.instructor-nav {
-  column-gap: 18px;
-}
+
 /* Focused student flow: one work area and one current task. */
 .student-steps {
   display: flex;

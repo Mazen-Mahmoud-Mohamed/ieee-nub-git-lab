@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { requireBackend } from '../../services/supabase';
 import { SessionMaterials } from '../learning/SessionMaterials';
+import { DriveVideo } from '../learning/TeachingResources';
+import { RecordActions } from './RecordManagement';
 import { isLegacyTutorial, orderedTeachingSessions } from '../learning/teachingSessions';
 import { driveVideo, type LearningDocument } from '../learning/materials';
 import { adminError, adminRPC } from './adminData';
@@ -13,15 +15,16 @@ import {
   type LearningItemSummary,
 } from './sessionDestination';
 
-type Session = LearningItemSummary & { revision: number; document: LearningDocument };
+type Session = LearningItemSummary & {
+  revision: number;
+  document: LearningDocument;
+};
 async function hierarchy() {
   const items: LearningItemSummary[] = [];
   for (let offset = 0; ; offset += 100) {
     const { data, error } = await requireBackend()
       .from('learning_items')
       .select('id,kind,parent_id,title,published_version,archived_at,deleted_at,created_at')
-      .is('archived_at', null)
-      .is('deleted_at', null)
       .order('created_at')
       .order('id')
       .range(offset, offset + 99);
@@ -29,6 +32,53 @@ async function hierarchy() {
     items.push(...(data || []));
     if (!data || data.length < 100) return items;
   }
+}
+function recoveredSession(saved: Session, courseId: string): Session {
+  for (const key of [
+    'learning-session-editor:' + courseId,
+    'learning-editor:' + saved.parent_id,
+    'learning-editor:root',
+  ]) {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (
+        cached?.id === saved.id &&
+        cached.parent_id === saved.parent_id &&
+        typeof cached.document?.title === 'string' &&
+        typeof cached.document?.body === 'string' &&
+        Array.isArray(cached.document.links) &&
+        typeof cached.revision === 'number'
+      )
+        return {
+          ...saved,
+          document: cached.document,
+          revision: cached.revision,
+        };
+    } catch {
+      // The server draft is available when device recovery is unavailable.
+    }
+  }
+  return saved;
+}
+function newSession(sectionId: string, sessions: Session[]): Session {
+  return {
+    id: crypto.randomUUID(),
+    kind: 'lesson',
+    parent_id: sectionId,
+    title: '',
+    revision: 0,
+    published_version: 0,
+    archived_at: null,
+    deleted_at: null,
+    document: {
+      title: '',
+      body: '',
+      links: [],
+      video_url: '',
+      session_number: Math.max(0, ...sessions.map((s) => s.document.session_number || 0)) + 1,
+      display_order: Math.max(0, ...sessions.map((s) => s.document.display_order || 0)) + 10,
+    },
+  };
 }
 export function LearningSessions() {
   const [query, setQuery] = useSearchParams();
@@ -41,6 +91,12 @@ export function LearningSessions() {
     [notice, setNotice] = useState('');
   const generation = useRef(0);
   const recoveredCourse = useRef('');
+  const openedId = useRef('');
+  const createdSection = useRef('');
+  const originalDocument = useRef('');
+  const [includeTutorials, setIncludeTutorials] = useState(false);
+  const [search, setSearch] = useState('');
+  const [publication, setPublication] = useState('all');
   const selectedCourse = useRef(query.get('course') || '');
   const [documents, setDocuments] = useState<Record<string, Session>>({});
   const load = useCallback(async () => {
@@ -48,11 +104,25 @@ export function LearningSessions() {
     setLoading(true);
     try {
       const rows = await hierarchy();
-      const destination = defaultSessionCourse(
-        rows,
-        selectedCourse.current || query.get('course') || '',
+      const requestedId = query.get('open');
+      const opened = requestedId
+        ? await adminRPC<Session>('manage_learning_edit', { p_id: requestedId })
+        : null;
+      if (generation.current !== token) return;
+      if (opened && opened.kind !== 'lesson') {
+        setQuery({ tab: 'structure', parent: opened.id });
+        return;
+      }
+      const requestedSection = rows.find(
+        (s) => s.id === query.get('section') && s.kind === 'section',
       );
-      const lessons = courseSessions(rows, destination).filter((s) => !isLegacyTutorial(s.id));
+      const section = opened
+        ? rows.find((s) => s.id === opened.parent_id && s.kind === 'section')
+        : requestedSection;
+      const destination =
+        section?.parent_id ||
+        defaultSessionCourse(rows, query.get('course') || selectedCourse.current);
+      const lessons = courseSessions(rows, destination);
       const saved: Session[] = [];
       for (let i = 0; i < lessons.length; i += 20)
         saved.push(
@@ -67,13 +137,63 @@ export function LearningSessions() {
       selectedCourse.current = destination;
       setCourseId(destination);
       setDocuments(Object.fromEntries(saved.map((s) => [s.id, s])));
+      if (opened && openedId.current !== opened.id) {
+        openedId.current = opened.id;
+        originalDocument.current = JSON.stringify(opened.document);
+        const recovered = recoveredSession(opened, destination);
+        setEditing(recovered);
+        if (recovered !== opened)
+          setNotice(
+            'Recovered your session form. Save or publish checks the current server revision.',
+          );
+      } else if (
+        query.get('new') === 'session' &&
+        requestedSection &&
+        createdSection.current !== requestedSection.id &&
+        !requestedSection.archived_at &&
+        !requestedSection.deleted_at
+      ) {
+        createdSection.current = requestedSection.id;
+        const draft = newSession(requestedSection.id, saved);
+        let recovered = draft;
+        try {
+          const cached = [
+            'learning-session-editor:' + destination,
+            'learning-editor:' + requestedSection.id,
+            'learning-editor:root',
+          ]
+            .map((key) => JSON.parse(sessionStorage.getItem(key) || 'null'))
+            .find((value) => value?.kind === 'lesson' && value.parent_id === requestedSection.id);
+          if (
+            cached?.kind === 'lesson' &&
+            cached.parent_id === requestedSection.id &&
+            typeof cached.id === 'string' &&
+            typeof cached.document?.title === 'string' &&
+            typeof cached.document?.body === 'string' &&
+            Array.isArray(cached.document.links)
+          )
+            recovered = cached;
+        } catch {
+          /* New session creation remains available without device recovery. */
+        }
+        originalDocument.current = JSON.stringify(
+          saved.find((s) => s.id === recovered.id)?.document || draft.document,
+        );
+        setEditing(recovered);
+        if (recovered !== draft)
+          setNotice(
+            'Recovered your session form. Save or publish checks the current server revision.',
+          );
+      }
+      if (!requestedId) openedId.current = '';
+      if (!query.get('new')) createdSection.current = '';
       setError('');
     } catch (e) {
       if (generation.current === token) setError(adminError(e));
     } finally {
       if (generation.current === token) setLoading(false);
     }
-  }, [query]);
+  }, [query, setQuery]);
   useEffect(() => {
     void load();
     return () => {
@@ -82,18 +202,25 @@ export function LearningSessions() {
   }, [load]);
   const cache = 'learning-session-editor:' + courseId;
   useEffect(() => {
-    if (loading || !courseId || recoveredCourse.current === courseId) return;
+    if (
+      loading ||
+      !courseId ||
+      query.get('open') ||
+      query.get('new') ||
+      recoveredCourse.current === courseId
+    )
+      return;
     recoveredCourse.current = courseId;
     try {
       const saved = JSON.parse(sessionStorage.getItem(cache) || 'null');
       if (
         saved?.kind === 'lesson' &&
         typeof saved.id === 'string' &&
-        !isLegacyTutorial(saved.id) &&
         typeof saved.document?.title === 'string' &&
         Array.isArray(saved.document.links) &&
         courseSections(items, courseId).some((s) => s.id === saved.parent_id)
       ) {
+        originalDocument.current = JSON.stringify(documents[saved.id]?.document || {});
         setEditing(saved);
         setNotice(
           'Recovered your session form. Save or publish checks the current server revision.',
@@ -102,7 +229,7 @@ export function LearningSessions() {
     } catch {
       /* Saved server drafts remain available. */
     }
-  }, [courseId, cache, loading]);
+  }, [courseId, cache, loading, query]);
   useEffect(() => {
     if (editing)
       try {
@@ -111,16 +238,45 @@ export function LearningSessions() {
         setNotice('Device draft recovery is unavailable. Save your session before leaving.');
       }
   }, [editing, cache]);
-  const course = sessionCourses(items).find((c) => c.id === courseId),
+  const course = items.find((c) => c.kind === 'course' && c.id === courseId),
     sections = courseSections(items, courseId),
     allLessons = courseSessions(items, courseId),
     legacy = allLessons.filter((s) => isLegacyTutorial(s.id)),
     sessions = orderedTeachingSessions(
       allLessons.map((s) => ({ ...s, document: documents[s.id]?.document })),
     );
+  const visibleSessions = [
+    ...sessions,
+    ...(includeTutorials ? legacy.map((s) => ({ ...s, document: documents[s.id]?.document })) : []),
+  ].filter(
+    (s) =>
+      s.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) &&
+      (publication === 'all' ||
+        (publication === 'published' ? s.published_version > 0 : !s.published_version)),
+  );
+  const clearRecovery = () => {
+    if (!editing) return;
+    for (const key of [cache, 'learning-editor:' + editing.parent_id, 'learning-editor:root']) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+        if (saved?.id === editing.id) sessionStorage.removeItem(key);
+      } catch {
+        /* Server content is unaffected by optional device recovery. */
+      }
+    }
+  };
   const canPublish =
     !!course?.published_version &&
+    !course.archived_at &&
+    !course.deleted_at &&
     sections.some((s) => s.id === editing?.parent_id && s.published_version > 0);
+  const unavailable = !!(
+    editing?.archived_at ||
+    editing?.deleted_at ||
+    course?.archived_at ||
+    course?.deleted_at ||
+    items.find((s) => s.id === editing?.parent_id && (s.archived_at || s.deleted_at))
+  );
   const update = (patch: Partial<LearningDocument>) =>
     setEditing((current) =>
       current ? { ...current, document: { ...current.document, ...patch } } : current,
@@ -131,10 +287,12 @@ export function LearningSessions() {
     setError('');
     setNotice('');
     try {
-      let section = sections.find((s) => s.published_version > 0);
+      let section = sections.find((s) => s.published_version > 0) || sections[0];
       if (!section) {
         if (!course.published_version)
-          throw Error('Publish this course in Courses & lessons before adding published sessions.');
+          throw Error(
+            'Create and publish a section in Courses & sections before adding published sessions.',
+          );
         if (
           !window.confirm(
             'This course has no published session section. Create an empty published “Learning Sessions” section? Existing course content stays unchanged; your new session remains a draft until you publish it.',
@@ -161,24 +319,9 @@ export function LearningSessions() {
         };
         setItems((rows) => [...rows, section!]);
       }
-      setEditing({
-        id: crypto.randomUUID(),
-        kind: 'lesson',
-        parent_id: section.id,
-        title: '',
-        revision: 0,
-        published_version: 0,
-        archived_at: null,
-        deleted_at: null,
-        document: {
-          title: '',
-          body: '',
-          links: [],
-          video_url: '',
-          session_number: Math.max(0, ...sessions.map((s) => s.document?.session_number || 0)) + 1,
-          display_order: Math.max(0, ...sessions.map((s) => s.document?.display_order || 0)) + 10,
-        },
-      });
+      const draft = newSession(section.id, Object.values(documents));
+      originalDocument.current = JSON.stringify(draft.document);
+      setEditing(draft);
     } catch (e) {
       setError(adminError(e));
     } finally {
@@ -190,10 +333,15 @@ export function LearningSessions() {
     setError('');
     setNotice('');
     try {
-      const saved = await adminRPC<Session>('manage_learning_edit', { p_id: id });
+      const saved = await adminRPC<Session>('manage_learning_edit', {
+        p_id: id,
+      });
       if (saved.kind !== 'lesson' || !sections.some((s) => s.id === saved.parent_id))
         throw Error('Session is unavailable in this course.');
-      setEditing(saved);
+      originalDocument.current = JSON.stringify(saved.document);
+      setEditing(recoveredSession(saved, courseId));
+      openedId.current = id;
+      setQuery({ course: courseId, open: id });
     } catch (e) {
       setError(adminError(e));
     } finally {
@@ -217,7 +365,7 @@ export function LearningSessions() {
     return adminRPC<Session>('manage_learning_edit', { p_id: editing.id });
   };
   const save = async (publish: boolean) => {
-    if (!editing || busy) return;
+    if (!editing || busy || unavailable) return;
     if (
       publish &&
       (!course?.published_version ||
@@ -233,17 +381,21 @@ export function LearningSessions() {
       const saved = await persist(publish);
       if (publish) {
         try {
-          sessionStorage.removeItem(cache);
+          clearRecovery();
         } catch {
           /* Publishing succeeded even when device recovery storage is unavailable. */
         }
         setEditing(null);
+        setQuery(courseId ? { course: courseId } : {});
         await load();
         setNotice(
           'Session published. Students can see its PowerPoint and video in Course Content.',
         );
       } else {
+        originalDocument.current = JSON.stringify(saved.document);
         setEditing(saved);
+        openedId.current = saved.id;
+        setQuery({ course: courseId, open: saved.id });
         setNotice('Session draft saved. You can publish it when ready.');
         await load();
       }
@@ -258,7 +410,7 @@ export function LearningSessions() {
     <section className="learning-sessions">
       <div className="page-heading">
         <div>
-          <h2>Learning Sessions</h2>
+          <h2>{course?.title || 'Learning Sessions'}</h2>
           <p>Upload a PowerPoint and add a recorded lecture in one session.</p>
         </div>
         <button
@@ -304,18 +456,32 @@ export function LearningSessions() {
       {notice && <p role="status">{notice}</p>}
       {!loading && !sessionCourses(items).length && !error && (
         <p>
-          No active courses are available. <Link to="/instructor/content">Create a course</Link>{' '}
-          first.
+          No active courses are available.{' '}
+          <Link to="/instructor/courses?tab=structure">Create a course</Link> first.
         </p>
       )}
       {editing && (
         <section className="form-card session-form">
+          {unavailable && (
+            <p role="status">Restore this session and its parent content before editing.</p>
+          )}
+          {editing.revision > 0 && (
+            <RecordActions
+              kind="learning"
+              id={editing.id}
+              changed={() => {
+                clearRecovery();
+                openedId.current = '';
+                void load();
+              }}
+            />
+          )}
           <h3>{editing.published_version ? 'Edit Session' : 'Add Session'}</h3>
           {!canPublish && (
             <p role="status">
               You can save a draft. Publish the parent course and section in{' '}
-              <Link to="/instructor/content">Courses &amp; lessons</Link> before making this session
-              visible to students.
+              <Link to="/instructor/courses?tab=structure">Courses &amp; sections</Link> before
+              making this session visible to students.
             </p>
           )}
           <form
@@ -324,7 +490,7 @@ export function LearningSessions() {
               void save(false);
             }}
           >
-            <fieldset disabled={busy}>
+            <fieldset disabled={busy || unavailable}>
               <label>
                 Session Title
                 <input
@@ -339,10 +505,90 @@ export function LearningSessions() {
                 id={editing.id}
                 document={editing.document}
                 update={update}
-                busy={busy}
+                busy={busy || unavailable}
                 onBusy={setBusy}
+                advanced={
+                  <>
+                    <label>
+                      Description
+                      <textarea
+                        rows={4}
+                        maxLength={20000}
+                        dir="auto"
+                        value={editing.document.body}
+                        onChange={(e) => update({ body: e.target.value })}
+                      />
+                    </label>
+                    <p>
+                      Saved under{' '}
+                      {sections.find((s) => s.id === editing.parent_id)?.title ||
+                        'this course’s session section'}
+                      . Course and section organization stays unchanged.
+                    </p>
+                    {editing.document.links.map((l, i) => (
+                      <div className="resource-editor" key={i}>
+                        <label>
+                          Resource {i + 1} title
+                          <input
+                            required
+                            maxLength={100}
+                            value={l.label}
+                            onChange={(e) =>
+                              update({
+                                links: editing.document.links.map((x, j) =>
+                                  j === i ? { ...x, label: e.target.value } : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Resource {i + 1} URL
+                          <input
+                            required
+                            type="url"
+                            maxLength={2000}
+                            pattern="https://.*"
+                            value={l.url}
+                            onChange={(e) =>
+                              update({
+                                links: editing.document.links.map((x, j) =>
+                                  j === i ? { ...x, url: e.target.value } : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() =>
+                            update({
+                              links: editing.document.links.filter((_, j) => j !== i),
+                            })
+                          }
+                        >
+                          Remove resource {i + 1}
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="outline-button"
+                      disabled={editing.document.links.length >= 20}
+                      onClick={() =>
+                        update({
+                          links: [...editing.document.links, { label: '', url: '' }],
+                        })
+                      }
+                    >
+                      Add supplementary resource
+                    </button>
+                  </>
+                }
                 prepare={async () => {
                   const saved = await persist(false);
+                  originalDocument.current = JSON.stringify(saved.document);
                   setEditing((current) =>
                     current && current.id === saved.id
                       ? {
@@ -354,77 +600,45 @@ export function LearningSessions() {
                   );
                 }}
               />
-              <details className="session-options">
-                <summary>Advanced session settings</summary>
-                <label>
-                  Description
-                  <textarea
-                    rows={4}
-                    maxLength={20000}
-                    dir="auto"
-                    value={editing.document.body}
-                    onChange={(e) => update({ body: e.target.value })}
-                  />
-                </label>
-                <p>
-                  Saved under{' '}
-                  {sections.find((s) => s.id === editing.parent_id)?.title ||
-                    'this course’s session section'}
-                  . Course and section organization stays unchanged.
+
+              <details className="draft-session-preview">
+                <summary>Preview this draft</summary>
+                <h3 dir="auto">{editing.document.title || 'Untitled session'}</h3>
+                <p className="written-answer" dir="auto">
+                  {editing.document.body}
                 </p>
-                {editing.document.links.map((l, i) => (
-                  <div className="resource-editor" key={i}>
-                    <label>
-                      Resource {i + 1} title
-                      <input
-                        required
-                        value={l.label}
-                        onChange={(e) =>
-                          update({
-                            links: editing.document.links.map((x, j) =>
-                              j === i ? { ...x, label: e.target.value } : x,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Resource {i + 1} URL
-                      <input
-                        required
-                        type="url"
-                        pattern="https://.*"
-                        value={l.url}
-                        onChange={(e) =>
-                          update({
-                            links: editing.document.links.map((x, j) =>
-                              j === i ? { ...x, url: e.target.value } : x,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() =>
-                        update({ links: editing.document.links.filter((_, j) => j !== i) })
-                      }
-                    >
-                      Remove resource {i + 1}
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="outline-button"
-                  disabled={editing.document.links.length >= 20}
-                  onClick={() =>
-                    update({ links: [...editing.document.links, { label: '', url: '' }] })
-                  }
-                >
-                  Add supplementary resource
-                </button>
+                {!!editing.document.topics?.length && (
+                  <ul>
+                    {editing.document.topics.map((topic, i) => (
+                      <li dir="auto" key={i}>
+                        {topic}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {editing.document.video_url && (
+                  <DriveVideo
+                    key={editing.document.video_url}
+                    url={editing.document.video_url}
+                    deferred
+                  />
+                )}
+                {editing.document.presentation_id && (
+                  <p>
+                    Download the draft PowerPoint from Presentation options to review its slides.
+                  </p>
+                )}
+                <ul>
+                  {editing.document.links
+                    .filter((link) => /^https:\/\//.test(link.url))
+                    .map((link, i) => (
+                      <li key={i}>
+                        <a href={link.url} target="_blank" rel="noopener noreferrer">
+                          {link.label}
+                        </a>
+                      </li>
+                    ))}
+                </ul>
               </details>
               <div className="review-actions">
                 <button className="outline-button">Save Draft</button>
@@ -440,22 +654,93 @@ export function LearningSessions() {
                 </button>
               </div>
             </fieldset>
+            {editing.revision > 0 && (
+              <button
+                type="button"
+                className="outline-button"
+                disabled={busy}
+                onClick={async () => {
+                  if (
+                    JSON.stringify(editing.document) !== originalDocument.current &&
+                    !window.confirm('Discard local changes and load the saved session?')
+                  )
+                    return;
+                  setBusy(true);
+                  setError('');
+                  try {
+                    const saved = await adminRPC<Session>('manage_learning_edit', {
+                      p_id: editing.id,
+                    });
+                    originalDocument.current = JSON.stringify(saved.document);
+                    setEditing(saved);
+                    setNotice('Loaded the latest saved session.');
+                  } catch (e) {
+                    setError(adminError(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Reload saved version
+              </button>
+            )}
+            {editing.published_version > 0 && (
+              <>
+                <Link className="outline-button" to={'/learn/' + editing.id}>
+                  View student session
+                </Link>
+                <button
+                  type="button"
+                  className="outline-button"
+                  disabled={busy || unavailable}
+                  onClick={async () => {
+                    if (
+                      !window.confirm(
+                        'Unpublish this session? Students will no longer see it. Files and published history are retained.',
+                      )
+                    )
+                      return;
+                    setBusy(true);
+                    setError('');
+                    try {
+                      await adminRPC('manage_learning_unpublish', {
+                        p_id: editing.id,
+                        p_revision: editing.revision,
+                      });
+                      clearRecovery();
+                      setEditing(null);
+                      setQuery(courseId ? { course: courseId } : {});
+                      await load();
+                      setNotice('Session unpublished. Files and versions retained.');
+                    } catch (e) {
+                      setError(adminError(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Unpublish Session
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="text-button"
               disabled={busy}
               onClick={() => {
                 if (
+                  JSON.stringify(editing.document) === originalDocument.current ||
                   window.confirm(
                     'Close this form? Changes since the last save will be discarded. Published versions and presentations stay unchanged.',
                   )
                 ) {
                   try {
-                    sessionStorage.removeItem(cache);
+                    clearRecovery();
                   } catch {
                     /* Server drafts and published versions remain available. */
                   }
                   setEditing(null);
+                  setQuery(courseId ? { course: courseId } : {});
                 }
               }}
             >
@@ -466,13 +751,39 @@ export function LearningSessions() {
       )}
       {!loading && course && !editing && (
         <div className="session-list" aria-label="Learning session list">
-          <h3>Actual Teaching Sessions</h3>
+          <div className="table-toolbar">
+            <input
+              aria-label="Search sessions"
+              placeholder="Search sessions"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              aria-label="Session publication"
+              value={publication}
+              onChange={(e) => setPublication(e.target.value)}
+            >
+              <option value="all">All publication states</option>
+              <option value="published">Published</option>
+              <option value="draft">Drafts</option>
+            </select>
+            {!!legacy.length && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={includeTutorials}
+                  onChange={(e) => setIncludeTutorials(e.target.checked)}
+                />
+                Include tutorial content
+              </label>
+            )}
+          </div>
           <p>
             Edit a session to replace materials or change its number and display order. Publish to
             apply draft changes.
           </p>
-          {sessions.length ? (
-            sessions.map((s) => (
+          {visibleSessions.length ? (
+            visibleSessions.map((s) => (
               <article className="managed-row" key={s.id}>
                 <div>
                   <h3 dir="auto">{s.title}</h3>
@@ -489,76 +800,14 @@ export function LearningSessions() {
                   >
                     Edit Session
                   </button>
-                  <button
-                    className="outline-button"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (
-                        !window.confirm(
-                          'Archive this session? It will be hidden from students. Published versions and files are retained.',
-                        )
-                      )
-                        return;
-                      setBusy(true);
-                      setError('');
-                      setNotice('');
-                      try {
-                        const record = await adminRPC<{ revision: number }>('manage_preview', {
-                          p_kind: 'learning',
-                          p_id: s.id,
-                        });
-                        await adminRPC('manage_records', {
-                          p_kind: 'learning',
-                          p_records: [{ id: s.id, revision: record.revision }],
-                          p_action: 'archive',
-                          p_reason: 'Instructor archived a teaching session',
-                          p_confirmation: 'ARCHIVE 1',
-                        });
-                        await load();
-                        setNotice('Session archived. Files and versions retained.');
-                      } catch (e) {
-                        setError(adminError(e));
-                      } finally {
-                        setBusy(false);
-                      }
+                  <RecordActions
+                    kind="learning"
+                    id={s.id}
+                    changed={() => {
+                      void load();
+                      setNotice('Session management completed.');
                     }}
-                  >
-                    Archive Session
-                  </button>
-                  {s.published_version > 0 && (
-                    <button
-                      className="outline-button"
-                      disabled={busy}
-                      onClick={async () => {
-                        if (
-                          !window.confirm(
-                            'Unpublish this session? Students will no longer see it. Files and published history are retained.',
-                          )
-                        )
-                          return;
-                        setBusy(true);
-                        setError('');
-                        setNotice('');
-                        try {
-                          const record = await adminRPC<Session>('manage_learning_edit', {
-                            p_id: s.id,
-                          });
-                          await adminRPC('manage_learning_unpublish', {
-                            p_id: s.id,
-                            p_revision: record.revision,
-                          });
-                          await load();
-                          setNotice('Session unpublished. Files and versions retained.');
-                        } catch (e) {
-                          setError(adminError(e));
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      Unpublish Session
-                    </button>
-                  )}
+                  />
                   {s.published_version > 0 && (
                     <Link className="outline-button" to={'/learn/' + s.id}>
                       View student session
@@ -568,24 +817,7 @@ export function LearningSessions() {
               </article>
             ))
           ) : (
-            <p>No teaching sessions yet. Choose Add Session to upload your first presentation.</p>
-          )}
-          {!!legacy.length && (
-            <details className="legacy-learning-content">
-              <summary>Legacy Learning Content · {legacy.length}</summary>
-              <p>
-                Hidden from the student session list. Original files, lesson routes and published
-                versions are retained.
-              </p>
-              {legacy.map((s) => (
-                <article className="managed-row" key={s.id}>
-                  <h4>{s.title}</h4>
-                  <Link className="text-button" to={'/instructor/content?parent=' + s.parent_id}>
-                    Manage legacy content
-                  </Link>
-                </article>
-              ))}
-            </details>
+            <p>No sessions match these filters. Clear your filters or choose Add Session.</p>
           )}
         </div>
       )}

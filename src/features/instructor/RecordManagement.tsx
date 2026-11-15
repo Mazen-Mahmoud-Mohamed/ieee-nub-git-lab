@@ -105,7 +105,10 @@ export function RecordConfirmation({
           try {
             await adminRPC('manage_records', {
               p_kind: records[0].kind,
-              p_records: records.map((r) => ({ id: r.id, revision: r.revision })),
+              p_records: records.map((r) => ({
+                id: r.id,
+                revision: r.revision,
+              })),
               p_action: action,
               p_reason: reason,
               p_confirmation: typed,
@@ -206,7 +209,12 @@ export function RecordActions({
           setAction('');
           setRecord(null);
           try {
-            setRecord(await adminRPC<ManagedRecord>('manage_preview', { p_kind: kind, p_id: id }));
+            setRecord(
+              await adminRPC<ManagedRecord>('manage_preview', {
+                p_kind: kind,
+                p_id: id,
+              }),
+            );
           } catch (e) {
             setError(
               /foreign key/i.test(adminError(e))
@@ -393,7 +401,15 @@ export function RecordManager() {
               {Object.entries(labels)
                 .filter(([key]) => chosen.length > 0 && chosen.every((r) => r.actions[key]))
                 .map(([key, label]) => (
-                  <button key={key} className="outline-button" onClick={() => setAction(key)}>
+                  <button
+                    key={key}
+                    className={
+                      ['purge', 'trash', 'invalidate'].includes(key)
+                        ? 'outline-button admin-danger-button'
+                        : 'outline-button'
+                    }
+                    onClick={() => setAction(key)}
+                  >
                     {label} selected ({chosen.length})
                   </button>
                 ))}
@@ -423,7 +439,7 @@ export function RecordManager() {
                   <p>{r.reason}</p>
                   <div className="review-actions">
                     {kind === 'request' && (
-                      <Link className="text-button" to="/instructor/requests">
+                      <Link className="text-button" to="/instructor/submissions?tab=help">
                         View help requests
                       </Link>
                     )}
@@ -433,7 +449,7 @@ export function RecordManager() {
                       </Link>
                     )}
                     {kind === 'learning' && (
-                      <Link className="text-button" to={'/instructor/content?open=' + r.id}>
+                      <Link className="text-button" to={'/instructor/courses?open=' + r.id}>
                         View content
                       </Link>
                     )}
