@@ -6,8 +6,8 @@ export default defineConfig({
   use: fixture.use,
   timeout: fixture.timeout,
   fullyParallel: false,
-  testMatch: 'management.spec.ts',
-  grep: /mobile learning journey|session editor rejects|new requirement policy|instructor explicitly|Task 1 recovers|instructor publishes new Task 1|direct Learning Sessions/,
+  testMatch: ['management.spec.ts', 'task2.spec.ts'],
+  grep: /mobile learning journey|session editor rejects|new requirement policy|instructor explicitly|Task 1 recovers|instructor publishes new Task 1|direct Learning Sessions|Task 2/,
   workers: 1,
   outputDir: 'test-results/mobile-connected',
   projects: [

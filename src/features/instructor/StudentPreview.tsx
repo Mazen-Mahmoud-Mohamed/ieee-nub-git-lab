@@ -3,6 +3,7 @@ import { useLab } from '../../hooks/useLab';
 import type { Definition } from '../assessments/model';
 import { Workspace } from '../assignments/Workspace';
 import { Assessment } from '../questions/Assessment';
+import { Task2RubricPreview } from '../task2/Task2Workspace';
 export function StudentPreview({
   definition,
   close,
@@ -53,7 +54,9 @@ export function StudentPreview({
           }
         }}
       >
-        {definition.format !== 'theory' && mode === 'practical' ? (
+        {definition.practicalSource && mode === 'practical' ? (
+          <Task2RubricPreview definition={sanitized} />
+        ) : definition.format !== 'theory' && mode === 'practical' ? (
           <Workspace
             lab={lab}
             definition={sanitized}

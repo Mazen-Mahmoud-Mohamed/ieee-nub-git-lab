@@ -174,7 +174,7 @@ it('uses combined 400/500 without per-task thresholds, filters students and leav
     const pending = (await h.asUser(STUDENT, 'select * from public.course_gradebook()')).rows[0];
     expect(Number(pending.completed_components)).toBeLessThan(3);
     expect(pending.eligible).toBe(false);
-    const d = taskOneDefinition();
+    const d = slot === 'task2' ? await h.rpc(TEACHER, 'task2_template') : taskOneDefinition();
     d.courseSlot = slot;
     if (slot === 'final') {
       d.sections[0].tasks[0].points += 50;

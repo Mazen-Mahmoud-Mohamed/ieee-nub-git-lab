@@ -1,4 +1,5 @@
 import { taskOneDefinition } from '../assessments/taskOne';
+import { Task2RubricPreview } from '../task2/Task2Workspace';
 import { importTaskOneTheory } from './taskOneTheoryImport';
 import { requirementCatalog } from '../assessments/requirements';
 import { RecordActions } from './RecordManagement';
@@ -748,6 +749,7 @@ export function AssessmentEditor() {
           .filter(
             (tab) =>
               !(definition.format === 'theory' && ['tasks', 'starter'].includes(tab)) &&
+              !(definition.practicalSource && tab === 'starter') &&
               !(definition.format === 'practical' && tab === 'questions'),
           )
           .map((tab) => (
@@ -903,6 +905,34 @@ export function AssessmentEditor() {
         >
           Prepare redesigned Task 1 · 150 points
         </button>
+        {(creating || definition.courseSlot === 'task2' || !definition.courseSlot) && (
+          <button
+            type="button"
+            className="outline-button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError('');
+              try {
+                const { data, error } = await requireBackend().rpc('task2_template');
+                if (error) throw error;
+                setDefinition(data);
+                setEditorTab('tasks');
+                setNotice(
+                  'Prepared real GitHub Task 2: 100 practical + 50 theory. Review all questions before saving or publishing.',
+                );
+              } catch (e) {
+                setError(
+                  e instanceof Error ? e.message : String((e as { message?: string }).message || e),
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Prepare real GitHub Task 2 · 150 points
+          </button>
+        )}
         <div className="field-grid">
           {(
             [
@@ -927,7 +957,10 @@ export function AssessmentEditor() {
       </section>
       {definition.format !== 'theory' && (
         <>
-          <section hidden={editorTab !== 'starter'} className="form-card editor-fields">
+          <section
+            hidden={editorTab !== 'starter' || !!definition.practicalSource}
+            className="form-card editor-fields"
+          >
             <h3>Starting files (optional)</h3>
             <label className="checkbox-label">
               <input
@@ -1067,7 +1100,13 @@ export function AssessmentEditor() {
               </button>
             )}
           </section>
-          <section hidden={editorTab !== 'tasks'} className="form-card editor-fields">
+          {definition.practicalSource && editorTab === 'tasks' && (
+            <Task2RubricPreview definition={definition} />
+          )}
+          <section
+            hidden={editorTab !== 'tasks' || !!definition.practicalSource}
+            className="form-card editor-fields"
+          >
             <div className="page-heading">
               <h3>Practical tasks</h3>
               <button
@@ -1561,6 +1600,8 @@ function RuleEditor({
             isolation: 'Checks that the file was introduced by a new commit on the source branch.',
             criterion:
               'Checks independent, recoverable evidence in the current repository and reachable commit graph.',
+            github:
+              'Checks real GitHub evidence on the server. This criterion is fixed by the Task 2 policy.',
           }[r.type]
         }
       </p>

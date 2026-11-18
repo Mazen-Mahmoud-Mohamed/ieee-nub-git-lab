@@ -15,7 +15,11 @@ export async function managementDatabase({ beforeCutover = false } = {}) {
     create function auth.role() returns text language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claim.role',true),''),'authenticated')$$;
     grant usage on schema auth to authenticated,service_role;grant execute on function auth.uid(),auth.role() to authenticated,service_role;`);
   for (const migration of readdirSync('supabase/migrations')
-    .filter((f) => f.endsWith('.sql') && (!beforeCutover || !f.startsWith('20261110000000')))
+    .filter(
+      (f) =>
+        f.endsWith('.sql') &&
+        (!beforeCutover || (!f.startsWith('20261110000000') && !f.startsWith('20261118000000'))),
+    )
     .sort()) {
     const source = readFileSync('supabase/migrations/' + migration, 'utf8');
     try {
@@ -34,6 +38,12 @@ export async function managementDatabase({ beforeCutover = false } = {}) {
     if (migration.includes('initial_git_lab'))
       await db.exec(readFileSync('tests/helpers/pre-task1-assessment-seed.sql', 'utf8'));
   }
+  // Synthetic objective keys for isolated tests. The real keys are never included in the public migration.
+  if (!beforeCutover)
+    await db.exec(`update private.task2_template set answer_keys=(
+    select jsonb_object_agg(q->>'id',jsonb_build_object('correctAnswers',jsonb_build_array(case when q->>'kind'='fill-blank' then 'git fixture' else q->'options'->>0 end)))
+    from jsonb_array_elements(document->'questions') q
+  )`);
   await db.exec(`insert into auth.users(id,email,email_confirmed_at) values
     ('${ADMIN}','admin@example.test',now()),('${TEACHER}','teacher@example.test',now()),('${STUDENT}','student@example.test',now());
     insert into private.instructors(user_id) values('${ADMIN}'),('${TEACHER}');
@@ -56,7 +66,7 @@ export async function managementDatabase({ beforeCutover = false } = {}) {
       'engineering',
     ]);
   async function rpc(id: string | null, name: string, args: Record<string, any> = {}) {
-    if (!/^[a-z_]+$/.test(name) || Object.keys(args).some((k) => !/^p_[a-z_]+$/.test(k)))
+    if (!/^[a-z_][a-z0-9_]*$/.test(name) || Object.keys(args).some((k) => !/^p_[a-z_]+$/.test(k)))
       throw Error('Invalid test RPC');
     const params = Object.keys(args)
       .map((key, i) => `${key} => $${i + 1}`)

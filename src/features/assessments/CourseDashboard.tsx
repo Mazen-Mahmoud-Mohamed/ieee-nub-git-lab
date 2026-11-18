@@ -391,7 +391,9 @@ export function AssessmentDetails({
           <p>
             {d.type === 'exam'
               ? 'Your timer starts when you begin. At the deadline, your latest online save is submitted automatically.'
-              : 'You get your own workspace. Your current attempt keeps its original instructions.'}
+              : d.practicalSource
+                ? 'Work in your personal GitHub fork. Your attempt keeps its original instructions and scoring policy.'
+                : 'You get your own workspace. Your current attempt keeps its original instructions.'}
           </p>
           {authenticated && (
             <label className="checkbox-label">
@@ -400,7 +402,9 @@ export function AssessmentDetails({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />
-              Save my files, answers and command activity online every 15 seconds.
+              {d.practicalSource
+                ? 'Save my theory answers and GitHub verification evidence online when I choose Save, Check My Work or Submit.'
+                : 'Save my files, answers and command activity online every 15 seconds.'}
             </label>
           )}
           <details>

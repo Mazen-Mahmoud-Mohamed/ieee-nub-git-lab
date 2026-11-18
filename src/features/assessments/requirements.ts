@@ -1,9 +1,6 @@
 import { evaluateCriterion } from './independentCriteria.ts';
 import type { RepoView } from '../git-engine/engine.ts';
-import {
-  type RequirementCheck,
-  type StudentIdentity,
-} from '../assignments/assignment.ts';
+import { type RequirementCheck, type StudentIdentity } from '../assignments/assignment.ts';
 import type { Definition, Task } from './model.ts';
 import { ruleEvidence } from './ruleEvidence.ts';
 export type RequirementState = 'completed' | 'incomplete' | 'checking' | 'unverifiable';
@@ -46,6 +43,9 @@ export function requirementProgress(
         const prefix = 'rule-' + i + '-';
         let rows: RequirementCheck[];
         switch (r.type) {
+          case 'github':
+            rows = [check('github', task.title, null, task.instructions)];
+            break;
           case 'criterion': {
             const result = evaluateCriterion(r.outcomeId || '', view, identity, working);
             rows = [
@@ -229,10 +229,7 @@ export function requirementProgress(
                 ? task.requirementWeights?.[task.id + ':' + c.id] || 0
                 : undefined,
             earned:
-              task.points > 0 &&
-              !c.preparation &&
-              !unavailable &&
-              c.passed === true
+              task.points > 0 && !c.preparation && !unavailable && c.passed === true
                 ? task.requirementWeights?.[task.id + ':' + c.id] || 0
                 : 0,
             id: task.id + ':' + c.id,
@@ -247,8 +244,11 @@ export function requirementProgress(
                     : 'incomplete',
           }) as Requirement,
       );
-      const passed = !unavailable &&
-        requirements.filter((c) => task.points === 0 || !c.preparation).every((c) => c.passed === true);
+      const passed =
+        !unavailable &&
+        requirements
+          .filter((c) => task.points === 0 || !c.preparation)
+          .every((c) => c.passed === true);
       return {
         task,
         earned: Math.round(requirements.reduce((sum, c) => sum + (c.earned || 0), 0) * 100) / 100,

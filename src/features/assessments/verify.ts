@@ -23,6 +23,8 @@ export async function verifyAssessment(
   keys: Record<string, { correctAnswers: string[] }>,
 ) {
   assertDefinition(d);
+  if (d.practicalSource)
+    throw new Error('Real GitHub assessments require server-side GitHub verification');
   const answers = sanitizeAnswers(d, payload.answers);
   const { engine, view } = await inspectVerifiedSnapshot(payload.snapshot, d.projectName);
   if (!Array.isArray(payload.events) || payload.events.length > 1000)

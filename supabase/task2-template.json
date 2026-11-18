@@ -1,0 +1,457 @@
+{
+  "schemaVersion": 1,
+  "practicalSource": "github-task2-v1",
+  "gradingPolicy": "independent-v2",
+  "courseSlot": "task2",
+  "title": "Task 2 · GitHub Collaboration & Advanced Git",
+  "description": "Smart Plant Monitor: real GitHub collaboration. 100 practical + 50 theory points.",
+  "instructions": "Study Session 2 slides 28–61. Fork https://github.com/Mazen-Mahmoud-Mohamed/ieee-nub-git-task2-starter with ALL branches (uncheck Copy the default branch only). Work in your personal fork. Merge the LCD history, resolve dryThreshold to 38 and retain simulated LCD output. Use your own fork for issues and pull requests. Follow each rubric item, including the explicit buzzer improvement and README sections. Check My Work captures server-verified evidence; repeat after corrections. Submission freezes the latest accepted check and your theory answers. Partial work and unanswered theory are allowed. Stash, clone, pull and local-copy retention have no automatic command-execution marks. Merge topology does not prove a local conflict actually occurred.",
+  "type": "assignment",
+  "format": "mixed",
+  "projectName": "Task2-GitHub",
+  "durationMinutes": 0,
+  "attemptLimit": 1,
+  "startsAt": null,
+  "endsAt": null,
+  "deadline": null,
+  "releaseImmediately": false,
+  "reviewAnswers": true,
+  "gateTheory": false,
+  "requireComplete": false,
+  "starter": {
+    "files": {},
+    "initialize": false,
+    "commit": false
+  },
+  "sections": [
+    {
+      "id": "task2-practical",
+      "title": "GitHub practical · 100 points",
+      "description": "Independent checks using real GitHub evidence.",
+      "steps": [
+        "Connect your personal GitHub account.",
+        "Install the read-only App on your selected fork.",
+        "Register owner/repository, push your work and choose Check My Work.",
+        "Correct failed checks, then review and submit your latest verified snapshot."
+      ],
+      "tasks": [
+        {
+          "id": "t2-fork",
+          "title": "Personal starter fork",
+          "instructions": "Register your own personal fork of the supplied starter, including main and feature/lcd-display.\nVerification: Numeric repository identity, owner and fork parent/source network from GitHub.\nCorrection: Fork the starter under your connected personal account. Uncheck Copy the default branch only.",
+          "points": 8,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-fork"
+            }
+          ],
+          "requirementWeights": {
+            "t2-fork:rule-0-github": 8
+          }
+        },
+        {
+          "id": "t2-merge",
+          "title": "Integrate the divergent histories",
+          "instructions": "Merge feature/lcd-display into main with a merge commit retaining both supplied histories. Keep the branch until grading.\nVerification: Main history and two-parent merge ancestry against pinned starter SHAs. Verifies topology, not that a local conflict prompt appeared.\nCorrection: Merge the original display branch into main, resolve, commit and push. Avoid squash for this merge.",
+          "points": 12,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-merge"
+            }
+          ],
+          "requirementWeights": {
+            "t2-merge:rule-0-github": 12
+          }
+        },
+        {
+          "id": "t2-threshold",
+          "title": "Resolve dryThreshold to 38",
+          "instructions": "On main, retain one active const int dryThreshold = 38; declaration and remove conflict markers.\nVerification: sensor.ino at the captured main SHA, excluding comments. Structural check, not a hardware test.\nCorrection: Set the single dryThreshold declaration to 38, remove conflict markers, commit and push main.",
+          "points": 10,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-threshold"
+            }
+          ],
+          "requirementWeights": {
+            "t2-threshold:rule-0-github": 10
+          }
+        },
+        {
+          "id": "t2-lcd",
+          "title": "Retain simulated LCD output",
+          "instructions": "Keep Serial.print(\"[LCD] \"); followed by the DRY SOIL / SOIL OK Serial.println on main.\nVerification: Active sensor.ino source at the captured main SHA.\nCorrection: Retain the simulated LCD print and conditional soil-status println. Commit and push.",
+          "points": 8,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-lcd"
+            }
+          ],
+          "requirementWeights": {
+            "t2-lcd:rule-0-github": 8
+          }
+        },
+        {
+          "id": "t2-ignore-env",
+          "title": "Ignore .env",
+          "instructions": "Add an effective root .env rule to .gitignore without later negating it.\nVerification: Ordered supported root ignore rules at the captured main SHA.\nCorrection: Add .env on its own line to the root .gitignore. Remove later exceptions.",
+          "points": 4,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-ignore-env"
+            }
+          ],
+          "requirementWeights": {
+            "t2-ignore-env:rule-0-github": 4
+          }
+        },
+        {
+          "id": "t2-ignore-logs",
+          "title": "Ignore log files",
+          "instructions": "Add *.log to .gitignore without later exceptions.\nVerification: Ordered supported root ignore rules at the captured main SHA.\nCorrection: Add *.log on its own line to the root .gitignore. Remove log exceptions.",
+          "points": 4,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-ignore-logs"
+            }
+          ],
+          "requirementWeights": {
+            "t2-ignore-logs:rule-0-github": 4
+          }
+        },
+        {
+          "id": "t2-ignore-settings",
+          "title": "Ignore local settings",
+          "instructions": "Add an effective local-settings.txt rule to .gitignore.\nVerification: Ordered supported root ignore rules at the captured main SHA.\nCorrection: Add local-settings.txt on its own line to the root .gitignore.",
+          "points": 4,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-ignore-settings"
+            }
+          ],
+          "requirementWeights": {
+            "t2-ignore-settings:rule-0-github": 4
+          }
+        },
+        {
+          "id": "t2-untrack",
+          "title": "Stop tracking local settings",
+          "instructions": "Remove local-settings.txt from main’s committed tree. Use git rm --cached locally to retain your copy.\nVerification: GitHub tree absence. Retaining a local copy cannot be verified remotely and earns no automatic marks.\nCorrection: Run git rm --cached local-settings.txt, commit and push. Historical copies remain.",
+          "points": 10,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-untrack"
+            }
+          ],
+          "requirementWeights": {
+            "t2-untrack:rule-0-github": 10
+          }
+        },
+        {
+          "id": "t2-buzzer",
+          "title": "Implement the buzzer improvement",
+          "instructions": "On main, call tone(buzzerPin, 1000) when isDry and noTone(buzzerPin) otherwise, using an if/else block. Submit through feature/buzzer.\nVerification: Active main source structure plus a sensor.ino change on a same-repository feature/buzzer PR.\nCorrection: Use if (isDry) { tone(buzzerPin, 1000); } else { noTone(buzzerPin); } and merge your feature/buzzer PR.",
+          "points": 10,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-buzzer"
+            }
+          ],
+          "requirementWeights": {
+            "t2-buzzer:rule-0-github": 10
+          }
+        },
+        {
+          "id": "t2-issue",
+          "title": "Describe the buzzer issue",
+          "instructions": "Create your own issue in your fork with buzzer in the title and at least 40 characters explaining the improvement.\nVerification: GitHub issue ID, author, title and body. Excludes pull requests.\nCorrection: Enable Issues on your fork and create or edit your buzzer issue with a clear explanation.",
+          "points": 6,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-issue"
+            }
+          ],
+          "requirementWeights": {
+            "t2-issue:rule-0-github": 6
+          }
+        },
+        {
+          "id": "t2-pr",
+          "title": "Open a documented pull request",
+          "instructions": "Open your own feature/buzzer PR into your fork’s main. Use a title of 10+ characters, explanation of 40+ characters and Closes #N referencing a real issue on your fork.\nVerification: PR repository IDs, author, refs, title, body and existing local issue reference.\nCorrection: Push feature/buzzer. Open the PR into your own main, explain it and add Closes #N with your fork’s issue number.",
+          "points": 8,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-pr"
+            }
+          ],
+          "requirementWeights": {
+            "t2-pr:rule-0-github": 8
+          }
+        },
+        {
+          "id": "t2-pr-merged",
+          "title": "Merge the buzzer pull request",
+          "instructions": "Merge your feature/buzzer PR into main and retain its merge commit in main ancestry.\nVerification: GitHub merged_at, merge_commit_sha and ancestry, independently of PR description quality.\nCorrection: Review and merge your buzzer PR into main, then push later corrections.",
+          "points": 4,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-pr-merged"
+            }
+          ],
+          "requirementWeights": {
+            "t2-pr-merged:rule-0-github": 4
+          }
+        },
+        {
+          "id": "t2-review",
+          "title": "Receive a peer code review",
+          "instructions": "Ask another person to submit a nonempty review on your buzzer PR. Comments, approvals and requests for changes count. Bots and your own reviews do not.\nVerification: GitHub submitted review ID, human reviewer identity and body. Verifies the review artifact, not its quality.\nCorrection: Invite a classmate to use GitHub’s review form and submit specific written feedback.",
+          "points": 6,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-review"
+            }
+          ],
+          "requirementWeights": {
+            "t2-review:rule-0-github": 6
+          }
+        },
+        {
+          "id": "t2-readme",
+          "title": "Document wiring, running and contribution",
+          "instructions": "Update README.md with Wiring, Run and Contributing Markdown headings, pins A0 and 8, and tone/noTone behavior. Include at least 40 characters under each heading.\nVerification: README content at the captured main SHA. Mechanical completeness check.\nCorrection: Add ## Wiring, ## Run and ## Contributing sections. Explain the pins, sketch testing and tone/noTone behavior.",
+          "points": 6,
+          "bonus": false,
+          "rules": [
+            {
+              "type": "github",
+              "outcomeId": "t2-readme"
+            }
+          ],
+          "requirementWeights": {
+            "t2-readme:rule-0-github": 6
+          }
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "t2-q1",
+      "kind": "single",
+      "points": 3,
+      "prompt": "Why does Git stop with a content merge conflict? (Session 2, slide 28)",
+      "options": [
+        "Both branches changed the same lines differently",
+        "A branch name is too long",
+        "GitHub is offline"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q2",
+      "kind": "multiple",
+      "points": 3,
+      "prompt": "Select the steps for resolving a conflict. (Session 2, slide 29)",
+      "options": [
+        "Read both sides and choose the intended code",
+        "Remove all conflict markers",
+        "Test, stage and commit the resolved file",
+        "Always discard the other branch"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q3",
+      "kind": "boolean",
+      "points": 3,
+      "prompt": "Adding a tracked file to .gitignore automatically stops Git tracking it. (Session 2, slide 31)",
+      "options": [
+        "True",
+        "False"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q4",
+      "kind": "fill-blank",
+      "points": 4,
+      "prompt": "Type the command to stop tracking local-settings.txt while retaining the local copy. (Session 2, slide 31)",
+      "options": [],
+      "manual": false,
+      "required": false,
+      "answerMatching": "git-command"
+    },
+    {
+      "id": "t2-q5",
+      "kind": "single",
+      "points": 3,
+      "prompt": "You must switch tasks with unfinished tracked-file edits and no half-done commit. What should you do first? (Session 2, slide 34)",
+      "options": [
+        "git stash push",
+        "git reset --hard",
+        "Delete the branch"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q6",
+      "kind": "choice-complete",
+      "points": 3,
+      "prompt": "Complete: stash apply restores the work and ___ the stash entry. (Session 2, slide 34)",
+      "options": [
+        "keeps",
+        "removes",
+        "publishes"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q7",
+      "kind": "fill-blank",
+      "points": 3,
+      "prompt": "Type the command that lists remote names and their fetch/push URLs. (Session 2, slide 35)",
+      "options": [],
+      "manual": false,
+      "required": false,
+      "answerMatching": "git-command"
+    },
+    {
+      "id": "t2-q8",
+      "kind": "single",
+      "points": 3,
+      "prompt": "What does -u do in git push -u origin main? (Session 2, slide 38)",
+      "options": [
+        "Remembers the upstream branch for later push/pull",
+        "Deletes remote history",
+        "Makes the repository public"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q9",
+      "kind": "single",
+      "points": 3,
+      "prompt": "A teammate pushed first. Your push was rejected with fetch first. What is the safe next step? (Session 2, slide 39–41)",
+      "options": [
+        "Pull, review and resolve if necessary, then push",
+        "Force push immediately",
+        "Delete the remote"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q10",
+      "kind": "multiple",
+      "points": 3,
+      "prompt": "Which statements about git clone are correct? (Session 2, slide 42)",
+      "options": [
+        "Copies repository history to your computer",
+        "Sets origin automatically",
+        "Use pull for later updates",
+        "Creates a GitHub fork"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q11",
+      "kind": "boolean",
+      "points": 3,
+      "prompt": "A fork is a copy under your GitHub account; cloning then copies it to your computer. (Session 2, slide 43)",
+      "options": [
+        "True",
+        "False"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q12",
+      "kind": "single",
+      "points": 4,
+      "prompt": "How do you propose a change where you have no write access? (Session 2, slide 44–46)",
+      "options": [
+        "Fork, clone your fork, branch, push and open a pull request",
+        "Clone and push directly to its main",
+        "Star the repository"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q13",
+      "kind": "single",
+      "points": 4,
+      "prompt": "A reviewer requests changes. How do you update the existing pull request? (Session 2, slide 47–49)",
+      "options": [
+        "Push more commits to its existing branch and request review",
+        "Always open a new pull request",
+        "Force push the base main branch"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q14",
+      "kind": "choice-complete",
+      "points": 4,
+      "prompt": "Complete: a PR containing Closes #12 closes that issue when merged into ___. (Session 2, slide 50–53)",
+      "options": [
+        "the default branch",
+        "any local branch",
+        "the stash"
+      ],
+      "manual": false,
+      "required": false
+    },
+    {
+      "id": "t2-q15",
+      "kind": "multiple",
+      "points": 4,
+      "prompt": "Select the correct GitHub collaboration statements. (Session 2, slide 51–58)",
+      "options": [
+        "README explains wiring, running and contributing",
+        "Starring bookmarks a repository",
+        "Organizations own repositories and group members into teams",
+        "Every contributor automatically has direct write access"
+      ],
+      "manual": false,
+      "required": false
+    }
+  ]
+}

@@ -35,6 +35,7 @@ import { SessionBar } from '../features/assessments/SessionBar';
 import { AssessmentResult } from '../features/assessments/AssessmentResult';
 import { Assessment } from '../features/questions/Assessment';
 import { Review } from '../features/submissions/Review';
+import { Task2Workspace } from '../features/task2/Task2Workspace';
 const Instructor = lazy(() =>
   import('../features/instructor/Instructor').then((m) => ({
     default: m.Instructor,
@@ -81,7 +82,10 @@ export function App() {
     !course.loading && (!course.active || !!course.state),
     course.active && user ? { userId: user.id, attemptId: course.attemptId! } : undefined,
   );
-  const session = useAssessmentSession(lab, course.state);
+  const session = useAssessmentSession(
+    lab,
+    course.definition.practicalSource ? null : course.state,
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const adminArea = location.pathname.startsWith('/instructor') && !!user && isInstructor;
@@ -378,8 +382,17 @@ export function App() {
                     </p>
                     <Link to="/dashboard">Return to your dashboard</Link>
                   </div>
-                ) : course.loading || !course.state || !lab.ready || !session.ready ? (
+                ) : course.loading ||
+                  !course.state ||
+                  (!course.definition.practicalSource && (!lab.ready || !session.ready)) ? (
                   <div className="page">Restoring assessment session…{course.error}</div>
+                ) : course.definition.practicalSource ? (
+                  <Task2Workspace
+                    key={course.state.id}
+                    state={course.state}
+                    basePath={course.basePath}
+                    userId={user.id}
+                  />
                 ) : (
                   <>
                     <SessionBar session={session} state={course.state} />

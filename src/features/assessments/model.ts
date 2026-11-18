@@ -1,4 +1,5 @@
 import { criterionIds } from './independentCriteria.ts';
+import { TASK2_POLICY, task2Rubric } from '../task2/policy.ts';
 import { requirementProgress, requirementCatalog } from './requirements.ts';
 import type { RepoView } from '../git-engine/engine.ts';
 import { VirtualFS, type Snapshot } from '../filesystem/VirtualFS.ts';
@@ -12,7 +13,8 @@ export type Rule = {
     | 'message'
     | 'merged'
     | 'isolation'
-    | 'criterion';
+    | 'criterion'
+    | 'github';
   branch?: string;
   clean?: boolean;
   path?: string;
@@ -57,6 +59,7 @@ export type AssessmentQuestion = {
 };
 export type Definition = {
   schemaVersion: 1;
+  practicalSource?: 'github-task2-v1';
   courseSlot?: 'task1' | 'task2' | 'final';
   gradingPolicy: 'independent-v2';
   title: string;
@@ -122,9 +125,7 @@ export type AttemptState = {
   };
   released?: boolean;
 };
-export function blankDefinition(
-  type: 'assignment' | 'exam' = 'assignment',
-): Definition {
+export function blankDefinition(type: 'assignment' | 'exam' = 'assignment'): Definition {
   return {
     schemaVersion: 1,
     gradingPolicy: 'independent-v2',
@@ -289,6 +290,7 @@ export function assertDefinition(value: unknown, draft = false): asserts value i
             'merged',
             'isolation',
             'criterion',
+            'github',
           ].includes(r.type)
         )
           throw new Error('Unsupported validation rule');
@@ -297,6 +299,11 @@ export function assertDefinition(value: unknown, draft = false): asserts value i
           !criterionIds.includes(r.outcomeId as (typeof criterionIds)[number])
         )
           throw new Error('Unknown independent criterion');
+        if (
+          r.type === 'github' &&
+          (d.practicalSource !== TASK2_POLICY || !task2Rubric.some((c) => c.id === r.outcomeId))
+        )
+          throw new Error('Unknown GitHub criterion');
         if (r.path !== undefined && !validFile(r.path))
           throw new Error('Rules require safe .txt paths');
         if (['file', 'isolation'].includes(r.type) && !validFile(r.path))
@@ -410,18 +417,56 @@ export function assertDefinition(value: unknown, draft = false): asserts value i
   if (!draft && d.courseSlot === 'task1') {
     const tasks = taskList(d);
     const criteria = tasks.map((task) => task.rules[0]?.outcomeId);
-    if (tasks.length !== criterionIds.length || new Set(criteria).size !== criterionIds.length ||
-        tasks.some((task) => task.points <= 0 || task.rules.length !== 1 || task.rules[0].type !== 'criterion')) {
+    if (
+      tasks.length !== criterionIds.length ||
+      new Set(criteria).size !== criterionIds.length ||
+      tasks.some(
+        (task) => task.points <= 0 || task.rules.length !== 1 || task.rules[0].type !== 'criterion',
+      )
+    ) {
       throw new Error('Task 1 requires one weighted task for each of its 25 independent criteria');
     }
   }
   const sum = totals(d);
+  if (d.practicalSource !== undefined && d.practicalSource !== TASK2_POLICY)
+    throw new Error('Unsupported practical source');
+  if (!draft && d.practicalSource === TASK2_POLICY) {
+    const tasks = taskList(d);
+    if (
+      d.courseSlot !== 'task2' ||
+      d.type !== 'assignment' ||
+      sum.practical !== 100 ||
+      sum.theory !== 50 ||
+      d.questions.length !== 15 ||
+      d.questions.some(
+        (q) =>
+          q.manual ||
+          !['single', 'multiple', 'boolean', 'choice-complete', 'fill-blank'].includes(q.kind),
+      ) ||
+      tasks.length !== task2Rubric.length ||
+      task2Rubric.some(
+        (c) =>
+          !tasks.some(
+            (t) =>
+              t.id === c.id &&
+              t.points === c.points &&
+              t.rules.length === 1 &&
+              t.rules[0].type === 'github' &&
+              t.rules[0].outcomeId === c.id,
+          ),
+      )
+    )
+      throw new Error(
+        'Task 2 requires the GitHub rubric, 100 practical points and 15 objective questions totaling 50',
+      );
+  }
   if (
     d.courseSlot !== undefined &&
     (!['task1', 'task2', 'final'].includes(d.courseSlot) ||
-      (!draft && (sum.bonus !== 0 ||
-        sumPoints([sum.practical, sum.theory]) !== (d.courseSlot === 'final' ? 200 : 150) ||
-        (d.courseSlot === 'task1' && (sum.practical !== 100 || sum.theory !== 50)))))
+      (!draft &&
+        (sum.bonus !== 0 ||
+          sumPoints([sum.practical, sum.theory]) !== (d.courseSlot === 'final' ? 200 : 150) ||
+          (d.courseSlot === 'task1' && (sum.practical !== 100 || sum.theory !== 50)))))
   )
     throw new Error(
       'Course assessments require their exact maximum, no bonus, and partial submission',
@@ -524,14 +569,16 @@ export function outcomesFor(
     bonus: progress.task.bonus,
     passed: progress.passed,
     earned: progress.earned,
-    requirements: progress.requirements.filter((check) => !check.preparation).map((check) => ({
-      id: check.id,
-      passed: check.passed === true,
-      points: check.points,
-      earned: check.earned,
-      reason: check.passed ? 'Requirement satisfied.' : check.hint,
-      evidence: check.detected,
-      recovery: check.hint,
-    })),
+    requirements: progress.requirements
+      .filter((check) => !check.preparation)
+      .map((check) => ({
+        id: check.id,
+        passed: check.passed === true,
+        points: check.points,
+        earned: check.earned,
+        reason: check.passed ? 'Requirement satisfied.' : check.hint,
+        evidence: check.detected,
+        recovery: check.hint,
+      })),
   }));
 }

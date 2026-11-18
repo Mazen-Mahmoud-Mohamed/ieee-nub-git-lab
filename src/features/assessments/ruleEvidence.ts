@@ -4,7 +4,11 @@ import { gitHistory } from './gitHistory.ts';
 import { evaluateCriterion } from './independentCriteria.ts';
 import type { Rule } from './model.ts';
 
-export function ruleEvidence(view: RepoView, identity: StudentIdentity, working: Record<string, string>) {
+export function ruleEvidence(
+  view: RepoView,
+  identity: StudentIdentity,
+  working: Record<string, string>,
+) {
   const commits = new Map(view.commits.map((c) => [c.oid, c]));
   const history = gitHistory(view.commits);
   const ancestors = (ref: string) => history.ancestors(view.branches[ref] || '');
@@ -14,6 +18,8 @@ export function ruleEvidence(view: RepoView, identity: StudentIdentity, working:
   const reaches = history.reaches;
   const passes = (r: Rule): boolean => {
     switch (r.type) {
+      case 'github':
+        return false; // Only the privileged GitHub verifier can award this evidence.
       case 'criterion':
         return evaluateCriterion(r.outcomeId || '', view, identity, working).passed;
       case 'repository':

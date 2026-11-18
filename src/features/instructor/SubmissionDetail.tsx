@@ -1,4 +1,5 @@
 import { taskOneDefinition } from '../assessments/taskOne';
+import { Task2Evidence } from '../task2/Task2Evidence';
 import { sumPoints } from '../assessments/model';
 import { RecordActions } from './RecordManagement';
 import { useEffect, useState } from 'react';
@@ -312,8 +313,14 @@ export function AttemptDetail({ attempt, back }: { attempt: Attempt; back: () =>
               : 'Finalized server-verified snapshot.'}
             {accepted ? ' Accepted ' + new Date(accepted).toLocaleString() : ''}
           </p>
-          {view ? <GitGraph view={view} /> : <p>No finalized repository snapshot.</p>}
-          {view && (
+          {definition.practicalSource ? (
+            <Task2Evidence key={refresh} attemptId={attempt.id} />
+          ) : view ? (
+            <GitGraph view={view} />
+          ) : (
+            <p>No finalized repository snapshot.</p>
+          )}
+          {view && !definition.practicalSource && (
             <>
               <p>
                 Repository: {view.initialized ? 'Initialized' : 'Not initialized'} · Current branch:{' '}
