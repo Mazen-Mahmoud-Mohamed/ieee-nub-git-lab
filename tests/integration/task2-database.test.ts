@@ -9,6 +9,10 @@ import { emptyTask2Outcomes } from '../../src/features/task2/policy';
 import { verifyAssessment } from '../../src/features/assessments/verify';
 import { createTask2Handler } from '../../supabase/functions/github-task2/handler';
 import { randomSecret, sha256 } from '../../supabase/functions/_shared/task2/security';
+import {
+  decryptGitHubToken,
+  encryptGitHubToken,
+} from '../../supabase/functions/_shared/task2/oauthTokens';
 let h: Awaited<ReturnType<typeof managementDatabase>>;
 let d: Definition;
 let assessment: string;
@@ -403,7 +407,7 @@ it('completes OAuth with the initiating browser proof and PKCE without returning
       frontendUrl: 'https://lab.example/',
       appId: '123',
       clientId: 'public-client',
-      clientSecret: 'server-client-secret',
+      clientSecret: 'server-client-secret-long-enough-for-test',
       privateKey: 'configured-private-key',
       appSlug: 'task2-isolated',
       webhookSecret: 'test',
@@ -449,7 +453,121 @@ it('completes OAuth with the initiating browser proof and PKCE without returning
   expect(returned).not.toContain('correctAnswers');
   expect(new URLSearchParams(network[0].init.body).get('code_verifier')).toBe(verifier);
   expect((await service('task2_connection', { p_student: STUDENT })).github_id).toBe(100);
+  const saved = await service('task2_token_read', { p_student: STUDENT });
+  expect(saved.access_ciphertext).not.toContain('ephemeral-user-token');
+  expect(saved.access_ciphertext).toContain('.');
+  expect(
+    (await service('task2_connection', { p_student: STUDENT })).access_ciphertext,
+  ).toBeUndefined();
+  await expect(h.rpc(STUDENT, 'task2_token_read', { p_student: STUDENT })).rejects.toThrow();
   expect((await request(body)).status).toBe(403);
+});
+it('registers a public personal fork from the connected user without a per-student GitHub App installation', async () => {
+  const key = 'server-client-secret-long-enough-for-test';
+  await service('task2_connect', {
+    p_student: STUDENT,
+    p_github: 100,
+    p_login: 'isolated-student',
+  });
+  await service('task2_token_store', {
+    p_student: STUDENT,
+    p_access: await encryptGitHubToken('temporary-user-access-token', key),
+    p_refresh: null,
+    p_access_expires: null,
+    p_refresh_expires: null,
+  });
+  const chain: any = {
+    select: () => chain,
+    eq: () => chain,
+    order: () => chain,
+    limit: () => chain,
+    maybeSingle: async () => ({ data: null, error: null }),
+  };
+  const admin: any = {
+    auth: { getUser: async () => ({ data: { user: { id: STUDENT, email_confirmed_at: 'now' } } }) },
+    from: () => chain,
+    rpc: async (name: string, params: any) => {
+      try {
+        return { data: await service(name, params), error: null };
+      } catch (e) {
+        return { data: null, error: e };
+      }
+    },
+  };
+  const requests: string[] = [];
+  const handler = createTask2Handler(
+    admin,
+    {
+      supabaseUrl: 'https://project.example',
+      allowedOrigin: 'https://lab.example',
+      frontendUrl: 'https://lab.example/',
+      appId: '123',
+      clientId: 'test-client',
+      clientSecret: key,
+      privateKey: '',
+      appSlug: '',
+      webhookSecret: '',
+    },
+    async (url) => {
+      requests.push(String(url));
+      if (String(url) === 'https://github.com/login/oauth/access_token')
+        return new Response(
+          JSON.stringify({
+            access_token: 'rotated-user-access-token',
+            refresh_token: 'rotated-refresh-token',
+            expires_in: 28_800,
+            refresh_token_expires_in: 15_552_000,
+          }),
+        );
+      if (String(url) === 'https://api.github.com/user')
+        return new Response(JSON.stringify({ id: 100, login: 'isolated-student', type: 'User' }));
+      return new Response(
+        JSON.stringify({
+          id: 200,
+          full_name: 'isolated-student/ieee-nub-git-task2-starter',
+          private: false,
+          fork: true,
+          source: { id: 1462101408 },
+          owner: { id: 100, type: 'User' },
+          default_branch: 'main',
+        }),
+      );
+    },
+  );
+  const send = (action: string) =>
+    handler(
+      new Request('https://project.example/functions/v1/github-task2', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, attemptId: attempt.id }),
+      }),
+    );
+  const initial = await send('status');
+  expect(initial.status).toBe(200);
+  expect((await initial.json()).connection.authorized).toBe(true);
+  const registered = await send('register');
+  expect(registered.status).toBe(200);
+  expect((await registered.json()).registered).toBe(true);
+  expect(requests).toEqual([
+    'https://api.github.com/repos/isolated-student/ieee-nub-git-task2-starter',
+  ]);
+  const record = (await h.db.query<any>('select * from public.task2_repositories')).rows[0];
+  expect(record.repository_id).toBe(200);
+  expect(record.installation_id).toBeNull();
+  await h.db.query(
+    `update private.task2_oauth_tokens
+     set access_expires_at = now() - interval '1 minute',
+         refresh_expires_at = now() + interval '1 day',
+         refresh_ciphertext = $1 where student_id = $2`,
+    [await encryptGitHubToken('original-refresh-token', key), STUDENT],
+  );
+  expect((await send('register')).status).toBe(200);
+  expect(requests).toContain('https://github.com/login/oauth/access_token');
+  expect(requests).toContain('https://api.github.com/user');
+  const newRecord = await service('task2_token_read', { p_student: STUDENT });
+  expect(await decryptGitHubToken(newRecord.access_ciphertext, key)).toBe(
+    'rotated-user-access-token',
+  );
 });
 it('freezes the last accepted checkpoint at expiry and excludes later answers and checks', async () => {
   await service('task2_accept', acceptance());

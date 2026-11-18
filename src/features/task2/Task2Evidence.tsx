@@ -42,8 +42,9 @@ export function Task2Evidence({ attemptId }: { attemptId: string }) {
           <a href={'https://github.com/' + repo.full_name} target="_blank" rel="noreferrer">
             {repo.full_name}
           </a>{' '}
-          · repository ID {repo.repository_id} · GitHub owner ID {repo.github_id} · installation{' '}
-          {repo.installation_id} · {repo.status}
+          · repository ID {repo.repository_id} · GitHub owner ID {repo.github_id} ·{' '}
+          {repo.installation_id ? `GitHub App installation ${repo.installation_id}` : 'Public fork'}{' '}
+          · {repo.status}
         </p>
       ) : (
         <p>No repository registered. Partial submission is allowed.</p>

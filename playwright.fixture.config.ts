@@ -29,6 +29,9 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         ...(process.platform === 'win32' ? { channel: 'msedge' } : {}),
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+          : {}),
       },
     },
   ],

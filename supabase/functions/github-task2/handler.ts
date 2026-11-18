@@ -16,9 +16,11 @@ import {
 import {
   GitHub,
   GitHubError,
-  installedRepository,
+  defaultStudentFork,
+  publicStudentFork,
   validateInstallation,
 } from '../_shared/task2/github.ts';
+import { decryptGitHubToken, encryptGitHubToken } from '../_shared/task2/oauthTokens.ts';
 import { gradeTask2 } from '../_shared/task2/grader.ts';
 export type Task2Config = {
   supabaseUrl: string;
@@ -50,14 +52,8 @@ export function createTask2Handler(
         frontend.origin === config.allowedOrigin &&
         !frontend.hash &&
         !frontend.search &&
-        !!config.webhookSecret &&
-        !!(
-          config.appId &&
-          config.clientId &&
-          config.clientSecret &&
-          config.privateKey &&
-          /^[\w-]+$/.test(config.appSlug)
-        )
+        !!config.clientId &&
+        config.clientSecret.length >= 24
       );
     } catch {
       return false;
@@ -91,7 +87,94 @@ export function createTask2Handler(
     if (repo.error || check.error) throw repo.error || check.error;
     return { repository: repo.data, check: check.data };
   };
+  type OAuthTokens = {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    refresh_token_expires_in?: number;
+    error?: string;
+  };
+  const exchange = async (values: URLSearchParams): Promise<OAuthTokens> => {
+    const tokenResponse = await fetcher('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(12_000),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: values,
+    });
+    if (!tokenResponse.ok)
+      throw new GitHubError(503, 'GitHub authorization is unavailable. Try again later.');
+    const token = JSON.parse(new TextDecoder().decode(await boundedBody(tokenResponse, 20_000)));
+    if (typeof token.access_token !== 'string' || !token.access_token || token.error)
+      throw new GitHubError(401, 'GitHub authorization expired. Reconnect GitHub.');
+    return token;
+  };
+  const expiry = (seconds: unknown) =>
+    typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+      ? new Date(Date.now() + seconds * 1000).toISOString()
+      : null;
+  const storeTokens = async (studentId: string, tokens: OAuthTokens) =>
+    rpc('task2_token_store', {
+      p_student: studentId,
+      p_access: await encryptGitHubToken(tokens.access_token!, config.clientSecret),
+      p_refresh: tokens.refresh_token
+        ? await encryptGitHubToken(tokens.refresh_token, config.clientSecret)
+        : null,
+      p_access_expires: expiry(tokens.expires_in),
+      p_refresh_expires: expiry(tokens.refresh_token_expires_in),
+    });
+  const studentGitHub = async (studentId: string, expectedGitHubId: number) => {
+    const saved = await rpc('task2_token_read', { p_student: studentId });
+    if (!saved?.access_ciphertext)
+      throw new GitHubError(401, 'Reconnect GitHub once to enable automatic fork verification.');
+    let accessToken: string;
+    try {
+      accessToken = await decryptGitHubToken(saved.access_ciphertext, config.clientSecret);
+    } catch {
+      throw new GitHubError(401, 'GitHub authorization needs renewal. Reconnect GitHub.');
+    }
+    if (saved.access_expires_at && Date.parse(saved.access_expires_at) <= Date.now() + 60_000) {
+      if (
+        !saved.refresh_ciphertext ||
+        (saved.refresh_expires_at && Date.parse(saved.refresh_expires_at) <= Date.now())
+      )
+        throw new GitHubError(401, 'GitHub authorization expired. Reconnect GitHub.');
+      let refreshToken: string;
+      try {
+        refreshToken = await decryptGitHubToken(saved.refresh_ciphertext, config.clientSecret);
+      } catch {
+        throw new GitHubError(401, 'GitHub authorization needs renewal. Reconnect GitHub.');
+      }
+      const refreshed = await exchange(
+        new URLSearchParams({
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+        }),
+      );
+      const identity = await new GitHub(refreshed.access_token!, fetcher).request('/user');
+      if (identity.id !== expectedGitHubId)
+        throw new GitHubError(403, 'GitHub account changed. Ask your instructor for help.');
+      await storeTokens(studentId, {
+        ...refreshed,
+        refresh_token: refreshed.refresh_token || refreshToken,
+        refresh_token_expires_in:
+          refreshed.refresh_token_expires_in ||
+          (saved.refresh_expires_at
+            ? Math.floor((Date.parse(saved.refresh_expires_at) - Date.now()) / 1000)
+            : undefined),
+      });
+      accessToken = refreshed.access_token!;
+    }
+    return new GitHub(accessToken, fetcher);
+  };
   return async (req: Request) => {
+    const requestId = crypto.randomUUID();
+    let requestAction = 'unparsed';
     try {
       const url = new URL(req.url);
       const route = url.pathname.replace(/\/$/, '').split('/').at(-1);
@@ -163,6 +246,7 @@ export function createTask2Handler(
       if (authError || !user?.email_confirmed_at)
         return response(401, { error: 'Verified student account required' });
       const payload = JSON.parse(new TextDecoder().decode(await boundedBody(req)));
+      requestAction = typeof payload?.action === 'string' ? payload.action : 'unknown';
       const actions = [
         'status',
         'oauth',
@@ -207,6 +291,10 @@ export function createTask2Handler(
       assertDefinition(context.definition);
       const connection = await rpc('task2_connection', { p_student: user.id });
       const status = await current(payload.attemptId);
+      const userToken =
+        payload.action === 'status' && connection && !connection.revoked
+          ? await rpc('task2_token_read', { p_student: user.id })
+          : null;
       if (payload.action === 'status')
         return response(200, {
           ...status,
@@ -217,6 +305,7 @@ export function createTask2Handler(
                 login: connection.login,
                 githubId: connection.github_id,
                 revoked: connection.revoked,
+                authorized: !!userToken?.access_ciphertext && !connection.revoked,
               }
             : null,
           configured: configured(),
@@ -241,7 +330,8 @@ export function createTask2Handler(
         !configured()
       )
         return response(503, {
-          error: 'GitHub App setup is pending. You can answer theory and submit partial work.',
+          error:
+            'GitHub sign-in is temporarily unavailable. Theory and partial submission still work.',
         });
       if (payload.action === 'oauth' || payload.action === 'install') {
         if (!secret.test(payload.verifier))
@@ -289,41 +379,30 @@ export function createTask2Handler(
         if (purpose === 'oauth') {
           if (typeof payload.code !== 'string' || payload.code.length > 256)
             throw Error('Invalid authorization code');
-          const tokenResponse = await fetcher('https://github.com/login/oauth/access_token', {
-            method: 'POST',
-            redirect: 'error',
-            signal: AbortSignal.timeout(12_000),
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
+          const token = await exchange(
+            new URLSearchParams({
               client_id: config.clientId,
               client_secret: config.clientSecret,
               code: payload.code,
               redirect_uri: endpoint + '/oauth-callback',
               code_verifier: payload.verifier,
             }),
-          });
-          if (!tokenResponse.ok) throw Error('GitHub authorization unavailable');
-          const token = JSON.parse(
-            new TextDecoder().decode(await boundedBody(tokenResponse, 20_000)),
           );
-          if (typeof token.access_token !== 'string' || token.error)
-            throw new GitHubError(403, 'GitHub authorization expired. Connect again.');
-          const identity = await new GitHub(token.access_token, fetcher).request('/user');
+          const identity = await new GitHub(token.access_token!, fetcher).request('/user');
           if (
             !Number.isSafeInteger(identity.id) ||
             identity.type !== 'User' ||
             !/^[\w-]+$/.test(identity.login)
           )
             throw Error('Personal GitHub identity required');
-          // The user token is discarded here. No OAuth or installation token is stored or sent to the browser.
+          // User and refresh tokens are AES-GCM encrypted and stored in a private
+          // service-role-only table. Tokens are never returned to the browser.
           await rpc('task2_connect', {
             p_student: user.id,
             p_github: identity.id,
             p_login: identity.login,
           });
+          await storeTokens(user.id, token);
         } else {
           if (
             !connection ||
@@ -344,24 +423,42 @@ export function createTask2Handler(
         if (!connection || connection.revoked)
           return response(409, { error: 'Connect or reauthorize your GitHub account first.' });
         const fullName =
-          payload.action === 'register' ? payload.fullName : status.repository?.full_name;
-        if (typeof fullName !== 'string')
-          return response(400, { error: 'Register your own fork first.' });
-        const verified = await installedRepository(config, fullName, connection.github_id, fetcher);
-        if (status.repository && verified.repo.id !== status.repository.repository_id)
+          (payload.action === 'register' && payload.fullName) ||
+          status.repository?.full_name ||
+          defaultStudentFork(connection.login);
+        const github = await studentGitHub(user.id, connection.github_id);
+        let repository;
+        try {
+          repository = await publicStudentFork(github, fullName, connection.github_id);
+        } catch (error) {
+          if (error instanceof GitHubError && error.status === 404)
+            throw new GitHubError(
+              409,
+              'Create your public fork first, including both branches, then choose Check My Work.',
+            );
+          throw error;
+        }
+        if (status.repository && repository.id !== status.repository.repository_id)
           return response(403, { error: 'Registered repository identity mismatch' });
-        if (payload.action === 'register') {
+        // An older attempt can still carry an installation ID. Replace that
+        // dependency only after verifying the same pinned numeric fork ID.
+        if (
+          !status.repository ||
+          status.repository.installation_id != null ||
+          status.repository.status !== 'verified' ||
+          payload.action === 'register'
+        ) {
           await rpc('task2_register', {
             p_student: user.id,
             p_attempt: payload.attemptId,
-            p_repository: verified.repo.id,
-            p_full_name: verified.repo.full_name,
+            p_repository: repository.id,
+            p_full_name: repository.full_name,
             p_github: connection.github_id,
-            p_installation: verified.installation.id,
+            p_installation: null,
           });
-          return response(200, { registered: true });
+          if (payload.action === 'register') return response(200, { registered: true });
         }
-        const checked = await gradeTask2(verified.api, verified.repo, connection.github_id);
+        const checked = await gradeTask2(github, repository, connection.github_id);
         return await accept(checked.outcomes, checked.evidence, true);
       }
       return await accept(
@@ -407,8 +504,19 @@ export function createTask2Handler(
           error: 'Checkpoint conflict: another tab has saved newer work. Reload before continuing.',
         });
       if (message === 'Attempt is finalized') return response(409, { error: message });
-      return response(400, {
-        error: 'Task 2 request could not be verified. Check your connection and try again.',
+      // No credentials, request bodies or raw exception messages are logged.
+      // The reference lets staff correlate a failed request with a backend fault.
+      console.error('task2-internal-error', {
+        reference: requestId,
+        action: requestAction,
+        category: error instanceof Error ? error.name : 'Unknown',
+        code:
+          typeof (error as { code?: unknown })?.code === 'string'
+            ? String((error as { code: string }).code).slice(0, 12)
+            : undefined,
+      });
+      return response(500, {
+        error: `Task 2 verification failed unexpectedly. Ask your instructor to check reference ${requestId}.`,
       });
     }
   };

@@ -42,7 +42,7 @@ export class GitHub {
         response.status === 429 || response.headers.get('x-ratelimit-remaining') === '0'
           ? 'GitHub rate limit reached. Wait and check again.'
           : response.status === 401 || response.status === 403
-            ? 'GitHub access unavailable. Check the App installation and permissions.'
+            ? 'GitHub access unavailable. Reconnect your GitHub account and try again.'
             : response.status === 404
               ? 'GitHub resource is missing or inaccessible.'
               : 'GitHub is temporarily unavailable. Check again later.',
@@ -76,6 +76,23 @@ export function validateRepository(repo: any, githubId: number) {
       403,
       'Choose your personal fork of the Task 2 starter with main as its default branch.',
     );
+}
+
+// The simplified student flow supports public forks only. A GitHub App user
+// token can read public GitHub resources without a per-fork installation.
+export async function publicStudentFork(api: GitHub, fullName: string, githubId: number) {
+  if (!/^[\w-]+\/[\w.-]+$/.test(fullName))
+    throw new GitHubError(400, 'Enter a repository as owner/name.');
+  const repo = await api.request(`/repos/${fullName}`);
+  if (repo.private)
+    throw new GitHubError(403, 'Make your Task 2 fork public before checking your work.');
+  validateRepository(repo, githubId);
+  return repo;
+}
+
+export function defaultStudentFork(login: string) {
+  if (!/^[\w-]+$/.test(login)) throw new GitHubError(400, 'Invalid GitHub account name');
+  return `${login}/${TASK2_STARTER.fullName.split('/')[1]}`;
 }
 export function validateInstallation(installation: any, githubId: number, appId: string) {
   if (

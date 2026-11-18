@@ -18,7 +18,7 @@ export async function managementDatabase({ beforeCutover = false } = {}) {
     .filter(
       (f) =>
         f.endsWith('.sql') &&
-        (!beforeCutover || (!f.startsWith('20261110000000') && !f.startsWith('20261118000000'))),
+        (!beforeCutover || (!f.startsWith('20261110000000') && !f.startsWith('202611180'))),
     )
     .sort()) {
     const source = readFileSync('supabase/migrations/' + migration, 'utf8');

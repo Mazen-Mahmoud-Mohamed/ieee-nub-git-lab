@@ -962,8 +962,55 @@
 }
 .task2-requirements {
   display: grid;
+  gap: 1rem;
+}
+.task2-setup-steps {
+  display: grid;
+  gap: 1rem;
+  padding-inline-start: 1.5rem;
+}
+.task2-setup-steps li {
+  padding-inline-start: 0.35rem;
+}
+.task2-setup-steps li > p {
+  margin-block: 0.35rem 0.65rem;
+}
+.task2-setup-steps .outline-button {
+  display: inline-flex;
+  align-items: center;
+}
+.task2-reconnect {
+  font-size: 0.875rem;
+}
+.task2-stage {
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 1rem;
+  min-width: 0;
+}
+.task2-stage > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+}
+.task2-stage > summary > span {
+  display: grid;
+  gap: 0.35rem;
+}
+.task2-stage > summary small {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.task2-stage > summary > b {
+  white-space: nowrap;
+}
+.task2-stage-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+  margin-top: 1rem;
 }
 .task2 .form-card {
   margin-block: 1rem;
@@ -1013,7 +1060,7 @@
   overflow-wrap: anywhere;
 }
 @media (max-width: 650px) {
-  .task2-requirements {
+  .task2-stage-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .task2-tabs {

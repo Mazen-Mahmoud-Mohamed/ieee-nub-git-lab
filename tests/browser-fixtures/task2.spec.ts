@@ -14,7 +14,12 @@ for (const width of [1440, 390, 320])
           json: {
             revision,
             configured: true,
-            connection: { login: 'isolated-student', githubId: 100, revoked: false },
+            connection: {
+              login: 'isolated-student',
+              githubId: 100,
+              revoked: false,
+              authorized: true,
+            },
             repository: {
               full_name: 'isolated-student/fork',
               repository_id: 200,
@@ -57,6 +62,8 @@ for (const width of [1440, 390, 320])
     await page.getByRole('button', { name: 'Check My Work', exact: true }).click();
     await expect(page.getByText('10 / 100 independently verified points')).toBeVisible();
     await expect(page.getByText('Passed', { exact: true })).toBeVisible();
+    await expect(page.getByText('Install App on selected fork')).toHaveCount(0);
+    await expect(page.getByText('Stage 1: Merge the starter branches')).toBeVisible();
     if (width !== 320)
       await page.screenshot({ path: `test-results/task2-practical-${width}.png`, fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
@@ -85,7 +92,7 @@ for (const width of [1440, 390, 320])
     expect(submits).toBe(1);
     await expect(page.getByText('Your grade is awaiting instructor release.')).toBeVisible();
   });
-test('Task 2 accepts zero practical partial work when GitHub App setup is pending', async ({
+test('Task 2 accepts zero practical partial work when GitHub sign-in is pending', async ({
   page,
 }) => {
   let submitted = false;
@@ -105,7 +112,7 @@ test('Task 2 accepts zero practical partial work when GitHub App setup is pendin
   );
   await page.goto('/ieee-git-lab/tests/browser-fixtures/task2-harness.html');
   await expect(
-    page.getByText('GitHub App setup is pending. Theory and partial submission are available.'),
+    page.getByText('GitHub sign-in is being configured. Theory and partial submission still work.'),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect GitHub', exact: true })).toBeDisabled();
   await page.getByRole('link', { name: 'Review & Submit', exact: true }).click();
@@ -113,6 +120,39 @@ test('Task 2 accepts zero practical partial work when GitHub App setup is pendin
   await page.getByRole('button', { name: 'Submit Task 2', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Submission accepted' })).toBeVisible();
   expect(submitted).toBe(true);
+});
+test('Task 2 detects the connected student fork without installation or manual repository fields', async ({
+  page,
+}) => {
+  let repository: any = null;
+  await page.route('**/functions/v1/github-task2', (route) => {
+    const body = route.request().postDataJSON();
+    if (body.action === 'check') {
+      expect(body).not.toHaveProperty('fullName');
+      expect(body).not.toHaveProperty('installationId');
+      repository = {
+        full_name: 'isolated-student/ieee-nub-git-task2-starter',
+        repository_id: 200,
+        status: 'verified',
+      };
+      return route.fulfill({ json: { revision: 1 } });
+    }
+    return route.fulfill({
+      json: {
+        revision: repository ? 1 : 0,
+        configured: true,
+        connection: { login: 'isolated-student', githubId: 100, revoked: false, authorized: true },
+        repository,
+        check: null,
+      },
+    });
+  });
+  await page.goto('/ieee-git-lab/tests/browser-fixtures/task2-harness.html');
+  await expect(page.getByRole('button', { name: 'Find My Fork & Check' })).toBeEnabled();
+  await expect(page.getByText('Personal fork (owner/repository)')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Find My Fork & Check' }).click();
+  await expect(page.getByText('Found fork:')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check My Work' })).toBeEnabled();
 });
 test('Task 2 refuses to advance a stale tab to a newer revision without reloading its answers', async ({
   page,
