@@ -8,9 +8,15 @@ import {
 } from '../../supabase/functions/_shared/task2/security';
 import {
   GitHub,
+  defaultStudentFork,
+  publicStudentFork,
   validateInstallation,
   validateRepository,
 } from '../../supabase/functions/_shared/task2/github';
+import {
+  decryptGitHubToken,
+  encryptGitHubToken,
+} from '../../supabase/functions/_shared/task2/oauthTokens';
 import { TASK2_STARTER } from '../../src/features/task2/policy';
 it('uses random state and the S256 PKCE standard vector', async () => {
   expect(randomSecret()).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -118,4 +124,37 @@ it('rejects truncated lists and uses fixed-host API requests without redirects',
   expect(calls[0].init.redirect).toBe('error');
   expect(calls[0].url).toBe('https://api.github.com/repos/student/fork/issues');
   await expect(api.request('//evil.example')).rejects.toThrow();
+});
+it('encrypts GitHub user credentials with randomized authenticated encryption', async () => {
+  const key = 'long-enough-server-only-github-client-secret';
+  const original = 'ghu_sensitive-credential-test';
+  const first = await encryptGitHubToken(original, key);
+  const second = await encryptGitHubToken(original, key);
+  expect(first).not.toBe(second);
+  expect(first).not.toContain(original);
+  expect(await decryptGitHubToken(first, key)).toBe(original);
+  await expect(decryptGitHubToken(first, 'different-client-secret-for-testing')).rejects.toThrow();
+  const broken = first.slice(0, -2) + 'AA';
+  await expect(decryptGitHubToken(broken, key)).rejects.toThrow();
+});
+it('verifies public starter forks using the authorized user, without App installation', async () => {
+  const name = defaultStudentFork('maazzen');
+  expect(name).toBe('maazzen/ieee-nub-git-task2-starter');
+  const repo = {
+    id: 234,
+    full_name: name,
+    owner: { id: 100, type: 'User' },
+    fork: true,
+    source: { id: TASK2_STARTER.repositoryId },
+    default_branch: 'main',
+    private: false,
+  };
+  const api = new GitHub('user-token', async () => new Response(JSON.stringify(repo)));
+  expect((await publicStudentFork(api, name, 100)).id).toBe(234);
+  await expect(publicStudentFork(api, name, 101)).rejects.toThrow('personal fork');
+  const privateApi = new GitHub(
+    'user-token',
+    async () => new Response(JSON.stringify({ ...repo, private: true })),
+  );
+  await expect(publicStudentFork(privateApi, name, 100)).rejects.toThrow('public');
 });

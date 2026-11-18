@@ -36,7 +36,6 @@ export function Task2Workspace({
   const location = useLocation();
   const [status, setStatus] = useState<any>();
   const [answers, setAnswers] = useState<Record<string, string>>(state.payload?.answers || {});
-  const [fullName, setFullName] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -64,7 +63,6 @@ export function Task2Workspace({
         'Checkpoint conflict: another tab saved newer work. Reload this page before continuing.',
       );
     setStatus(result);
-    setFullName(result.repository?.full_name || '');
     if (result.receipt) {
       setReceipt(result.receipt);
       if (state.status === 'in_progress') {
@@ -148,13 +146,13 @@ export function Task2Workspace({
         sessionStorage.removeItem(pendingKey);
       }
       await load();
-      setNotice('GitHub authorization verified. Register your personal fork below.');
+      setNotice('GitHub connected! Choose Find My Fork & Check to verify your work.');
     });
   }, [ready, location.search]);
-  const connect = (action: 'oauth' | 'install') =>
+  const connect = () =>
     run('Opening GitHub', async () => {
       const verifier = browserVerifier();
-      const result = await task2Request({ action, attemptId: state.id, verifier });
+      const result = await task2Request({ action: 'oauth', attemptId: state.id, verifier });
       sessionStorage.setItem(
         'task2-oauth:' + result.state,
         JSON.stringify({ attemptId: state.id, verifier }),
@@ -224,6 +222,28 @@ export function Task2Workspace({
     failed: 'Failed',
     unverifiable: 'Unverifiable automatically',
   };
+  const stages = [
+    {
+      title: 'Merge the starter branches',
+      hint: 'Create your fork, merge the LCD branch and resolve the sensor changes.',
+      ids: ['t2-fork', 't2-merge', 't2-threshold', 't2-lcd'],
+    },
+    {
+      title: 'Keep personal files out of Git',
+      hint: 'Set up .gitignore and stop tracking local settings.',
+      ids: ['t2-ignore-env', 't2-ignore-logs', 't2-ignore-settings', 't2-untrack'],
+    },
+    {
+      title: 'Collaborate through GitHub',
+      hint: 'Create the buzzer issue, branch, pull request and peer review.',
+      ids: ['t2-buzzer', 't2-issue', 't2-pr', 't2-pr-merged', 't2-review'],
+    },
+    {
+      title: 'Document your project',
+      hint: 'Explain the wiring, running instructions and how to contribute.',
+      ids: ['t2-readme'],
+    },
+  ];
   return (
     <div className="page task2">
       <header className="lab-page-heading">
@@ -299,81 +319,66 @@ export function Task2Workspace({
         <>
           <section className="form-card">
             <h2>1. Connect your repository</h2>
-            <p>
-              Fork the{' '}
-              <a
-                href={'https://github.com/' + TASK2_STARTER.fullName}
-                target="_blank"
-                rel="noreferrer"
-              >
-                official starter
-              </a>{' '}
-              with all branches. Uncheck “Copy the default branch only”. Work in your personal fork.
-            </p>
-            <p>
-              GitHub:{' '}
-              {status?.connection
-                ? status.connection.revoked
-                  ? 'Authorization revoked · reconnect'
-                  : `Connected as ${status.connection.login}`
-                : 'Not connected'}
-            </p>
-            {status && !status.configured && (
-              <p>GitHub App setup is pending. Theory and partial submission are available.</p>
-            )}
-            <div className="task2-actions">
-              <button
-                className="primary"
-                disabled={unavailable || !status?.configured}
-                onClick={() => void connect('oauth')}
-              >
-                {status?.connection ? 'Reconnect GitHub' : 'Connect GitHub'}
-              </button>
-              <button
-                className="outline-button"
-                disabled={
-                  unavailable ||
-                  !status?.configured ||
-                  !status?.connection ||
-                  status.connection.revoked
-                }
-                onClick={() => void connect('install')}
-              >
-                Install App on selected fork
-              </button>
-            </div>
-            <label>
-              Personal fork (owner/repository)
-              <input
-                value={fullName}
-                maxLength={150}
-                placeholder="your-account/ieee-nub-git-task2-starter"
-                disabled={unavailable}
-                onChange={(e) => setFullName(e.target.value.trim())}
-              />
-            </label>
-            <button
-              className="outline-button"
-              disabled={
-                unavailable ||
-                !fullName ||
-                !status?.connection ||
-                status.connection.revoked ||
-                !status.configured
-              }
-              onClick={() =>
-                void run('Verifying repository', async () => {
-                  await task2Request({ action: 'register', attemptId: state.id, fullName });
-                  await load();
-                  setNotice('Personal fork and read-only installation verified.');
-                })
-              }
-            >
-              {status?.repository ? 'Revalidate repository' : 'Register fork'}
-            </button>
+            <ol className="task2-setup-steps">
+              <li>
+                <strong>Create your fork</strong>
+                <p>
+                  Fork the starter into your own GitHub account. Uncheck{' '}
+                  <b>Copy the default branch only</b> so both starter branches are included.
+                </p>
+                <a
+                  className="outline-button"
+                  href={'https://github.com/' + TASK2_STARTER.fullName + '/fork'}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open starter on GitHub ↗
+                </a>
+              </li>
+              <li>
+                <strong>Connect GitHub once</strong>
+                <p>
+                  {status?.connection?.authorized && !status.connection.revoked
+                    ? `Connected as ${status.connection.login}. Your public fork can be checked automatically.`
+                    : status?.connection
+                      ? `Signed in as ${status.connection.login}. Reconnect once to enable automatic checking.`
+                      : 'Sign in with the GitHub account that owns your fork.'}
+                </p>
+                {status && !status.configured && (
+                  <p>
+                    GitHub sign-in is being configured. Theory and partial submission still work.
+                  </p>
+                )}
+                {(!status?.connection?.authorized || status?.connection?.revoked) && (
+                  <button
+                    className="primary"
+                    disabled={unavailable || !status?.configured}
+                    onClick={() => void connect()}
+                  >
+                    {status?.connection ? 'Reconnect GitHub' : 'Connect GitHub'}
+                  </button>
+                )}
+                {status?.connection?.authorized && !status.connection.revoked && (
+                  <button
+                    className="outline-button task2-reconnect"
+                    disabled={unavailable}
+                    onClick={() => void connect()}
+                  >
+                    Reconnect GitHub if needed
+                  </button>
+                )}
+              </li>
+              <li>
+                <strong>Check your work</strong>
+                <p>
+                  Return here after pushing changes. Your fork is found by GitHub username; no App
+                  installation or repository address is needed.
+                </p>
+              </li>
+            </ol>
             {status?.repository && (
               <p>
-                Selected:{' '}
+                Found fork:{' '}
                 <a
                   href={'https://github.com/' + status.repository.full_name}
                   target="_blank"
@@ -396,13 +401,13 @@ export function Task2Workspace({
                 className="primary"
                 disabled={
                   unavailable ||
-                  !status?.repository ||
                   !status?.configured ||
+                  !status?.connection?.authorized ||
                   status?.connection?.revoked
                 }
                 onClick={() => void send('check')}
               >
-                Check My Work
+                {status?.repository ? 'Check My Work' : 'Find My Fork & Check'}
               </button>
             </div>
             <p>
@@ -417,34 +422,58 @@ export function Task2Workspace({
               </p>
             )}
             <div className="task2-requirements">
-              {task2Rubric.map((c) => {
-                const result = outcomes.find((o) => o.id === c.id)!;
+              {stages.map((stage, index) => {
+                const criteria = task2Rubric.filter((c) => stage.ids.includes(c.id));
+                const points = criteria.reduce((sum, c) => sum + c.points, 0);
+                const score = outcomes
+                  .filter((o) => stage.ids.includes(o.id))
+                  .reduce((sum, o) => sum + o.earned, 0);
                 return (
-                  <article className="form-card" key={c.id}>
-                    <div className="task2-card-title">
-                      <h3>{c.title}</h3>
-                      <strong>
-                        {result.earned} / {c.points}
-                      </strong>
+                  <details className="task2-stage" key={stage.title} open={index === 0}>
+                    <summary>
+                      <span>
+                        <strong>
+                          Stage {index + 1}: {stage.title}
+                        </strong>
+                        <small>{stage.hint}</small>
+                      </span>
+                      <b>
+                        {score} / {points}
+                      </b>
+                    </summary>
+                    <div className="task2-stage-grid">
+                      {criteria.map((c) => {
+                        const result = outcomes.find((o) => o.id === c.id)!;
+                        return (
+                          <article className="form-card" key={c.id}>
+                            <div className="task2-card-title">
+                              <h3>{c.title}</h3>
+                              <strong>
+                                {result.earned} / {c.points}
+                              </strong>
+                            </div>
+                            <span className={'task2-status ' + result.status}>
+                              {busy === 'Checking GitHub'
+                                ? 'Pending verification'
+                                : statusLabels[result.status]}
+                            </span>
+                            <p>{c.description}</p>
+                            <p>{result.requirements[0].reason}</p>
+                            {result.status !== 'passed' && (
+                              <p>
+                                <strong>Correction:</strong> {c.recovery}
+                              </p>
+                            )}
+                            <details>
+                              <summary>Verification and evidence</summary>
+                              <p>{c.method}</p>
+                              <pre>{result.requirements[0].evidence}</pre>
+                            </details>
+                          </article>
+                        );
+                      })}
                     </div>
-                    <span className={'task2-status ' + result.status}>
-                      {busy === 'Checking GitHub'
-                        ? 'Pending verification'
-                        : statusLabels[result.status]}
-                    </span>
-                    <p>{c.description}</p>
-                    <p>{result.requirements[0].reason}</p>
-                    {result.status !== 'passed' && (
-                      <p>
-                        <strong>Correction:</strong> {c.recovery}
-                      </p>
-                    )}
-                    <details>
-                      <summary>Verification and evidence</summary>
-                      <p>{c.method}</p>
-                      <pre>{result.requirements[0].evidence}</pre>
-                    </details>
-                  </article>
+                  </details>
                 );
               })}
             </div>
